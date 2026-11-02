@@ -13,6 +13,7 @@ suite itself is stopped.
 import base64
 import hashlib
 import json
+import os
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -40,18 +41,56 @@ class UpdateError(Exception):
     pass
 
 
+def safe_write(path, data, mode="w", encoding="utf-8"):
+    """Write a file without following a link planted where it goes (the Linux updater runs as root in a folder
+    the suite's own account can write to). "w" writes a new file and swaps it in; "a" appends."""
+    path = str(path)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    raw = data.encode(encoding) if isinstance(data, str) else data
+    if mode == "a":
+        new = not os.path.exists(path)
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | nofollow, 0o640)
+        with os.fdopen(fd, "ab") as f:
+            f.write(raw)
+        if new:
+            _same_owner_as_folder(path)
+        return
+    tmp = path + ".tmp"
+    try:
+        os.unlink(tmp)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o640)
+    with os.fdopen(fd, "wb") as f:
+        f.write(raw)
+    _same_owner_as_folder(tmp)
+    os.replace(tmp, path)
+
+
+def _same_owner_as_folder(path):
+    """Linux, as root: give a new file to whoever owns its folder (the suite's account), so the suite can read it."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        try:
+            st = os.stat(os.path.dirname(os.path.abspath(path)))
+            os.chown(path, st.st_uid, st.st_gid, follow_symlinks=False)
+        except OSError:
+            pass
+
+
 def preserved(name):
     return name in PRESERVE or any(PurePosixPath(name).match(g) for g in PRESERVE_GLOBS)
 
 
 def app_files(root):
-    """The program files under an install (or source) folder, as relative posix paths."""
+    """The program files under an install (or source) folder, as relative posix paths. Links are left out."""
     root = Path(root)
     out = []
     for p in sorted(root.rglob("*")):
         rel = p.relative_to(root)
+        rel_parents = [root / q for q in rel.parents if str(q) != "."]
         parts = rel.parts
-        if preserved(parts[0]) or parts[0] in SOURCE_ONLY or any(x in SKIP_DIRS for x in parts) or not p.is_file():
+        if preserved(parts[0]) or parts[0] in SOURCE_ONLY or any(x in SKIP_DIRS for x in parts) or p.is_symlink() \
+                or any(q.is_symlink() for q in rel_parents) or not p.is_file():
             continue
         if any(PurePosixPath(parts[-1]).match(g) for g in SKIP_FILES):
             continue
@@ -148,6 +187,8 @@ def verify(path, public_keys):
 def extract(path, dest, prefix):
     """Extract the files under prefix/ ("app" or "wheels") into dest. The file must have been verified."""
     dest = Path(dest)
+    top = os.path.realpath(dest)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
     with zipfile.ZipFile(path) as z:
         for info in z.infolist():
             if info.filename.endswith("/") or not info.filename.startswith(prefix + "/"):
@@ -155,7 +196,12 @@ def extract(path, dest, prefix):
             rel = PurePosixPath(info.filename).relative_to(prefix)
             target = dest.joinpath(*rel.parts)
             target.parent.mkdir(parents=True, exist_ok=True)
-            with z.open(info) as src, open(target, "wb") as out:
+            if not os.path.realpath(target.parent).startswith(top + os.sep) and os.path.realpath(target.parent) != top:
+                raise UpdateError(f"{info.filename} would be written outside the install folder (a link is in the way).")
+            if target.is_symlink():
+                target.unlink()
+            fd = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow | getattr(os, "O_BINARY", 0), 0o644)
+            with z.open(info) as src, os.fdopen(fd, "wb") as out:
                 while True:
                     chunk = src.read(1 << 20)
                     if not chunk:

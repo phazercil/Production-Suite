@@ -109,7 +109,7 @@ class Suite:
                 if pid != mine:
                     self._cmd(["taskkill", "/F", "/PID", str(pid)], 30)
         elif shutil.which("systemctl"):
-            self._cmd(["systemctl", "stop", "production-suite", "production-suite-ticker"])
+            self._cmd(["systemctl", "stop", "production-suite-web", "production-suite-ticker"])
         for _ in range(20):
             if not self.answering(1):
                 break
@@ -132,7 +132,7 @@ class Suite:
                 if code != 0:
                     return {"ok": False, "error": f"Couldn't start '{t}' ({out.strip()[:200]}). Run Setup.exe to repair the install."}
         elif shutil.which("systemctl"):
-            self._cmd(["systemctl", "start", "production-suite", "production-suite-ticker"])
+            self._cmd(["systemctl", "start", "production-suite-web", "production-suite-ticker"])
         for _ in range(90):
             v = self.answering(2)
             if v:

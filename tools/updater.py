@@ -41,6 +41,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import updatefile  # noqa: E402
 
+LINUX_ROOT_DIR = Path("/usr/libexec/production-suite")
 TASK_WEB, TASK_TICKER, TASK_CONTROL = "Production Suite Web", "Production Suite Ticker", "Production Suite Control"
 KEEP_BACKUPS = 3
 WIN = os.name == "nt"
@@ -75,26 +76,46 @@ class Run:
         cur.update(kw)
         cur["log"] = self.lines[-60:]
         cur["at"] = datetime.now().astimezone().isoformat(timespec="seconds")
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cur, indent=1), encoding="utf-8")
-        os.replace(tmp, path)
+        updatefile.safe_write(path, json.dumps(cur, indent=1))
 
     def say(self, msg):
         line = f"{datetime.now():%H:%M:%S} {msg}"
         self.lines.append(line)
         try:
-            with open(self.dir / "logs" / "update.log", "a", encoding="utf-8") as f:
-                f.write(f"{datetime.now():%Y-%m-%d} {line}\n")
+            updatefile.safe_write(self.dir / "logs" / "update.log", f"{datetime.now():%Y-%m-%d} {line}\n", mode="a")
         except OSError:
             pass
         print(line, flush=True)
         self.state()
 
     # -------------------------------------------------------------- helpers
+    def owner(self):
+        """Linux, run as root: the account that owns the install (psuite). The suite's own commands run as it,
+        and files the update puts in place are given to it."""
+        if WIN or not hasattr(os, "geteuid") or os.geteuid() != 0:
+            return None
+        st = self.dir.stat()
+        return (st.st_uid, st.st_gid) if st.st_uid != 0 else None
+
+    def fix_owner(self):
+        o = self.owner()
+        if not o:
+            return
+        for root, dirs, files in os.walk(self.dir):
+            for n in dirs + files:
+                try:
+                    os.chown(os.path.join(root, n), *o, follow_symlinks=False)
+                except OSError:
+                    pass
+
     def manage(self, *args, check=True, timeout=1800):
         env = dict(os.environ, PYTHONUTF8="1", DJANGO_SETTINGS_MODULE="suite.settings", TICKER_IN_PROCESS="0")
+        o = self.owner()
+        extra = {"user": o[0], "group": o[1]} if o else {}
+        if o:
+            self.fix_owner()  # files just put in place must be readable by the account that runs the command
         r = subprocess.run([self.python, "manage.py", *args], cwd=self.dir, env=env, capture_output=True, text=True,
-                           timeout=timeout, encoding="utf-8", errors="replace")
+                           timeout=timeout, encoding="utf-8", errors="replace", **extra)
         out = (r.stdout or "") + (r.stderr or "")
         if check and r.returncode != 0:
             tail = " | ".join(x.strip() for x in out.strip().splitlines()[-4:])
@@ -157,35 +178,61 @@ class Run:
         for rel in updatefile.app_files(self.dir):
             dst = b / "app" / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(self.dir / rel, dst)
+            shutil.copy2(self.dir / rel, dst, follow_symlinks=False)
         if (self.dir / "wheels").is_dir():
             shutil.copytree(self.dir / "wheels", b / "wheels")
         info = self.info()
         meta = {"version": version, "revision": revision, "at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "packagesHash": info.get("packagesHash", ""), "requirements": self.requirements()}
-        (b / "meta.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+        updatefile.safe_write(b / "meta.json", json.dumps(meta, indent=1))
         return b
 
     def clear_program_files(self):
         for p in list(self.dir.iterdir()):
             if updatefile.preserved(p.name):
                 continue
-            if p.is_dir():
+            if p.is_symlink():
+                p.unlink()
+            elif p.is_dir():
                 shutil.rmtree(p)
             else:
                 p.unlink()
 
     def restore(self, b):
         self.clear_program_files()
-        shutil.copytree(b / "app", self.dir, dirs_exist_ok=True)
+        shutil.copytree(b / "app", self.dir, dirs_exist_ok=True,
+                        ignore=lambda d, names: [n for n in names if os.path.islink(os.path.join(d, n))])
         self.grant_desktop()
 
     def grant_desktop(self):
         """Ordinary users may read the desktop folder (Production Suite Admin and the tray icon run as them);
-        new files would otherwise only get the install folder's administrators-only rule."""
+        new files would otherwise only get the install folder's administrators-only rule. On Linux, files the
+        update put in place go to the suite's own account."""
+        self.fix_owner()
         d = self.dir / "desktop"
         if WIN and d.is_dir():
             subprocess.run(["icacls", str(d), "/grant", "*S-1-5-32-545:(OI)(CI)RX", "/T", "/C", "/Q"], capture_output=True, timeout=120)
+
+    def refresh_root_copy(self, zip_path):
+        """Linux: the updater and network helper root runs live in a root-owned folder (/usr/libexec/production-suite),
+        with the trusted update keys. Bring them up to date from the update file just checked and installed."""
+        if WIN or HERE != LINUX_ROOT_DIR or not os.access(str(HERE), os.W_OK):
+            return
+        import zipfile
+        try:
+            with zipfile.ZipFile(zip_path) as z:
+                for member, name in (("app/tools/updater.py", "updater.py"), ("app/plant/updatefile.py", "updatefile.py"),
+                                     ("app/plant/ed25519.py", "ed25519.py"), ("app/tools/linux_apply.py", "linux_apply.py")):
+                    if member in z.namelist():
+                        updatefile.safe_write(HERE / name, z.read(member))
+                        os.chmod(HERE / name, 0o644)
+                if "app/plant/update_key.py" in z.namelist():
+                    keys = re.findall(r'"([A-Za-z0-9+/=]{40,60})"', z.read("app/plant/update_key.py").decode("utf-8"))
+                    if keys:
+                        updatefile.safe_write(HERE / "keys.json", json.dumps(keys))
+                        os.chmod(HERE / "keys.json", 0o644)
+        except (OSError, KeyError, zipfile.BadZipFile) as e:
+            self.say(f"Couldn't refresh the updater in {HERE}: {e}")
 
     def ensure_shortcuts(self):
         """The Production Suite Admin shortcut on the desktop and in the Start menu, made again after every
@@ -232,7 +279,7 @@ class Run:
     def save_info(self, **kw):
         info = self.info()
         info.update(kw)
-        (self.dir / "install-info.json").write_text(json.dumps(info, indent=1), encoding="ascii")
+        updatefile.safe_write(self.dir / "install-info.json", json.dumps(info, indent=1), encoding="ascii")
 
     def requirements(self):
         p = self.dir / "requirements-windows.txt"
@@ -240,9 +287,12 @@ class Run:
 
     def pip(self, wheels):
         self.say("Installing the packages that came with the update (no internet needed)")
+        o = self.owner()
+        if o:
+            self.fix_owner()
         r = subprocess.run([self.python, "-m", "pip", "install", "--no-index", "--find-links", str(wheels), "--no-warn-script-location",
                             "--force-reinstall", "--no-deps", "-r", str(self.dir / "requirements-windows.txt")],
-                           cwd=self.dir, capture_output=True, text=True, timeout=1800)
+                           cwd=self.dir, capture_output=True, text=True, timeout=1800, **({"user": o[0], "group": o[1]} if o else {}))
         if r.returncode != 0:
             raise Failed("Installing the packages failed: " + " | ".join((r.stdout + r.stderr).strip().splitlines()[-3:])[:400])
 
@@ -279,7 +329,7 @@ class Run:
         try:
             self.say("Backing up the current program files")
             b = self.backup(old_v, old_r)
-            (b / "migrations.json").write_text(json.dumps(before, indent=1), encoding="utf-8")
+            updatefile.safe_write(b / "migrations.json", json.dumps(before, indent=1))
             self.say("Putting the new program files in place")
             stage = "files"
             self.clear_program_files()
@@ -323,6 +373,8 @@ class Run:
         except OSError:
             pass
         self.ensure_shortcuts()
+        self.refresh_root_copy(zip_path)
+        self.fix_owner()
         self.prune_backups()
         self.state(status="done", message=f"Updated to v{new_v} rev {new_r}.", finished=datetime.now().astimezone().isoformat(timespec="seconds"))
         return True
@@ -425,7 +477,7 @@ class Services:
             self._run(["taskkill", "/F", "/IM", "SuiteAdmin.exe"])
             time.sleep(3)
         elif shutil.which("systemctl"):
-            self._run(["systemctl", "stop", "production-suite", "production-suite-ticker"])
+            self._run(["systemctl", "stop", "production-suite-web", "production-suite-ticker"])
 
     def start(self):
         if WIN:
@@ -435,7 +487,7 @@ class Services:
             self._run(["schtasks", "/End", "/TN", TASK_CONTROL])
             self._run(["schtasks", "/Run", "/TN", TASK_CONTROL])
         elif shutil.which("systemctl"):
-            self._run(["systemctl", "start", "production-suite", "production-suite-ticker"])
+            self._run(["systemctl", "start", "production-suite-web", "production-suite-ticker"])
 
 
 def main(argv=None):

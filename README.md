@@ -89,29 +89,47 @@ Full steps are in its `README-INSTALL.txt`. Running Setup.exe again installs an 
 For unattended installs: `powershell -ExecutionPolicy Bypass -File installer\install.ps1 -AnswersFile answers.json`.
 Both run `python manage.py install_plant`, which works the same way on a Linux server.
 
-## Going live on a Linux server (by hand)
+## Installing on a Linux server (Rocky / AlmaLinux / CentOS Stream / RHEL 9)
+
+Use `ProductionSuite-Linux.tar.gz` (made by `packaging/build.py`, or the Release workflow):
+
+```bash
+tar xzf ProductionSuite-Linux.tar.gz && cd ProductionSuite-Linux
+sudo ./install.sh                     # add --with-mariadb to put MariaDB on this server too
+```
+
+It asks the same questions as the Windows setup window and sets up:
+
+- `/opt/production-suite`, run by the `psuite` account (no login); settings in `.env` (mode 600).
+- **systemd**: `production-suite-web` (Waitress on **127.0.0.1:8008 only**) and `production-suite-ticker`.
+- **Apache (httpd)** in front, on port 80: it serves the screens' files from `/var/www/production-suite/static` and
+  passes everything else to the suite. Only the plant network may open it (`Require ip`, from
+  `production-suite-allow.inc`). Apache drops any `X-Forwarded-For` a client sends and adds the real address; the
+  suite trusts that header only from 127.0.0.1 and only with `BEHIND_PROXY=1`.
+- **firewalld** (when running): Apache's port open to the plant network only.
+- **SELinux stays enforcing**: the suite uses port 8008, which Apache may connect to, and Apache's files are under
+  `/var/www`.
+- Two root jobs started by systemd path units, so the suite itself never needs root:
+  `production-suite-network` keeps Apache and firewalld in step with Admin › Network, and `production-suite-updater`
+  installs updates from Admin › Updates. Root runs only its own copies in `/usr/libexec/production-suite` (with the
+  system Python and the trusted update keys), never files the suite's account can change.
+
+HTTPS: `sudo ./install.sh --enable-https server.crt server.key [chain.crt]` (adds the 443 site; http keeps working
+for machines that push readings). Running `install.sh` again updates in place and keeps settings and records.
+`uninstall.sh` removes it (records in MariaDB are kept). Full steps: `packaging/linux/README-LINUX.txt`.
+Production Suite Admin and the tray icon are Windows-only; on Linux use Operator Kiosk › Admin and `systemctl`.
+
+### By hand, on any Linux
 
 1. **MariaDB** (10.5 or newer): create a database and user, then copy `.env.example` to `.env` and fill in `DB_*`,
    `DJANGO_SECRET_KEY`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, and set `DJANGO_DEBUG=0` and
    `TICKER_IN_PROCESS=0`. With `DJANGO_DEBUG=0` the server refuses to start until a real secret key is set.
-2. `pip install -r requirements.txt`, then:
-   ```bash
-   python manage.py migrate
-   python manage.py setup_plant --lead-pin 4821     # cost sheet + first shift lead login
-   python manage.py collectstatic --noinput
-   python manage.py createsuperuser                  # optional: /admin/ for raw table edits
-   ```
-3. Run two services (examples in `deploy/`):
-   - the web app: `gunicorn suite.wsgi:application --bind 0.0.0.0:8000` (Windows: `waitress-serve`)
-   - the ticker: `python manage.py runplant`
-
-   Only one ticker counts at a time. If a second one starts (another `runplant`, or `runserver` with
-   `TICKER_IN_PROCESS=1`), it logs that it is standing by and takes over only if the first stops.
-4. In **Scheduler › Lines & Shifts**, add your machines and shifts. Stage 1 machines get an Operator Kiosk.
-   Changing the schedule needs a shift lead PIN (the same people and PINs as the kiosks). Anyone can
-   view the board. Set `SCHEDULER_REQUIRE_LEAD=0` in `.env` to let anyone edit.
-5. In **Operator Kiosk › Admin** (shift lead PIN): set each pleater's machine data feed, colors and
-   training, and the connections below.
+2. `pip install -r requirements.txt`, then `python manage.py install_plant` (or `migrate`, `setup_plant --lead-pin …`
+   and `collectstatic`).
+3. Run `python serve.py web` and `python serve.py ticker` as services (see `packaging/linux/templates`).
+   Only one ticker counts at a time; a second one stands by and takes over only if the first stops.
+4. In **Scheduler › Lines & Shifts**, add your machines and shifts. In **Operator Kiosk › Admin** (shift lead PIN),
+   set each pleater's machine data feed, colors and training, and the connections below.
 
 To start from the demo instead, use Admin › Backup › *Clear demo data and go live*: machines, people,
 shifts and settings stay; MOs and records are removed.
@@ -315,5 +333,5 @@ datakiosk/   wall screen
 reports/     Reports page: summaries with drill up/down, Grafana reader
 labor/       Labor Budget (built from labor/source with tools/build_labor.py)
 templates/, static/   the screens and the shared shell
-deploy/      systemd units and a Windows start script
+packaging/   Windows installer, Linux installer (packaging/linux), code signing, build, CI checks
 ```

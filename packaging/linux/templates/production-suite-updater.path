@@ -1,0 +1,10 @@
+# Runs the updater (as root) when the suite asks for an update (Operator Kiosk > Admin > Updates).
+[Unit]
+Description=Production Suite: watch for update requests
+
+[Path]
+PathExists=@DIR@/updates/run/request.json
+Unit=production-suite-updater.service
+
+[Install]
+WantedBy=multi-user.target

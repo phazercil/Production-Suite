@@ -82,3 +82,26 @@ jobs:
       - name: Sign a build with a test certificate, and register the scheduled tasks
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\ci\windows-check.ps1
+
+  linux:
+    name: Linux (Rocky 9 install with Apache)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the Linux package
+        run: python packaging/build.py
+      - name: Start Rocky Linux 9 with systemd
+        run: |
+          for img in docker.io/rockylinux/rockylinux:9-ubi-init docker.io/almalinux/9-init; do
+            if docker pull -q "$img"; then IMG="$img"; break; fi
+          done
+          echo "Using $IMG"
+          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/src:ro" "$IMG" /sbin/init
+          for i in $(seq 1 30); do docker exec el9 systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break; sleep 2; done
+          docker exec el9 cat /etc/os-release | head -3
+      - name: Install with install.sh and check it through Apache
+        run: docker exec el9 bash /src/packaging/ci/linux-check.sh

@@ -55,6 +55,11 @@ if not DEBUG and SECRET_KEY.startswith("dev-only"):
     raise ImproperlyConfigured("Set DJANGO_SECRET_KEY in .env before running with DJANGO_DEBUG=0.")
 ALLOWED_HOSTS = [h.strip() for h in env("ALLOWED_HOSTS", "*").split(",") if h.strip()]
 CSRF_TRUSTED_ORIGINS = [h.strip() for h in env("CSRF_TRUSTED_ORIGINS", "").split(",") if h.strip()]
+# Linux install: the suite sits behind Apache on this server. Apache tells it the visitor's address
+# (X-Forwarded-For, see plant.middleware.forwarded_client) and whether the page was opened with HTTPS.
+BEHIND_PROXY = env("BEHIND_PROXY", "0") == "1"
+if BEHIND_PROXY:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -164,7 +169,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = Path(env("STATIC_ROOT", str(BASE_DIR / "staticfiles")))  # Linux: /var/www/production-suite/static, served by Apache
 
 # Kiosk sessions: an operator stays logged in on a screen until they log out;
 # shift lead (admin) mode times out after the idle minutes set in Admin › Rules.
@@ -194,6 +199,7 @@ SUITE = {
     "SCHEDULER_REQUIRE_LEAD": env_bool("SCHEDULER_REQUIRE_LEAD", True),
     "VERSION": _version.VERSION,
     "REVISION": _version.REVISION,
+    "BEHIND_PROXY": BEHIND_PROXY,
 }
 
 # Logs go to the console; an installed server (LOG_DIR set by serve.py) also keeps rotating files:

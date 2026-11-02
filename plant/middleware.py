@@ -29,16 +29,43 @@ class StationKeyMiddleware:
         return resp
 
 
+def forwarded_client(meta):
+    """Behind the suite's own Apache (BEHIND_PROXY=1, Linux install), the address of the device that made the
+    request. Trusted only when the connection itself comes from this server (Apache proxies from 127.0.0.1;
+    the suite listens on 127.0.0.1 only), and only Apache's own value: Apache drops any X-Forwarded-For a
+    client sends and adds the real address, so the last entry is the one Apache wrote. Returns None when
+    the request didn't come through the proxy."""
+    import ipaddress
+    if not settings.SUITE.get("BEHIND_PROXY"):
+        return None
+    peer = meta.get("REMOTE_ADDR", "")
+    try:
+        if not ipaddress.ip_address(peer).is_loopback:
+            return None
+    except ValueError:
+        return None
+    fwd = (meta.get("HTTP_X_FORWARDED_FOR") or "").split(",")[-1].strip()
+    try:
+        return str(ipaddress.ip_address(fwd)) if fwd else None
+    except ValueError:
+        return "invalid"
+
+
 class PrivateNetworkOnlyMiddleware:
     """Refuse every request that doesn't come from the plant network (Admin > Network), before anything else runs.
-    Uses the socket's own address (REMOTE_ADDR); forwarded-for headers are ignored because a
-    client can write anything in them."""
+    Uses the socket's own address (REMOTE_ADDR). Forwarded-for headers are ignored because a client can write
+    anything in them, except behind the suite's own Apache on Linux (see forwarded_client), where the address
+    Apache saw replaces REMOTE_ADDR for everything after this point (PIN limits, the audit log, Admin > Network)."""
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
         from .netsafety import is_allowed_ip
+        fwd = forwarded_client(request.META)
+        if fwd:
+            request.META["SUITE_PROXY_PEER"] = request.META.get("REMOTE_ADDR", "")
+            request.META["REMOTE_ADDR"] = fwd
         addr = request.META.get("REMOTE_ADDR", "")
         if not is_allowed_ip(addr):
             import logging
