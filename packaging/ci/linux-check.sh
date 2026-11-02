@@ -5,7 +5,7 @@ set -euo pipefail
 pass() { echo "PASS: $*"; }
 die()  { echo "FAIL: $*"; tail -60 /var/log/production-suite-install.log 2>/dev/null || true; journalctl -u production-suite-web -u httpd --no-pager -n 60 2>/dev/null || true; exit 1; }
 
-dnf -y -q install mariadb-server tar curl procps-ng iproute >/dev/null
+dnf -y -q install mariadb-server tar procps-ng iproute >/dev/null   # curl-minimal is already there
 systemctl enable --now mariadb
 mysql -e "CREATE DATABASE production_suite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
           CREATE USER 'suite'@'localhost' IDENTIFIED BY 'Ci-Pass-12345'; CREATE USER 'suite'@'127.0.0.1' IDENTIFIED BY 'Ci-Pass-12345';
