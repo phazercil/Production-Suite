@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Reports{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'reports/reports.css' %}">{% endblock %}
+{% block content %}<div class="rp">
+  <div class="rp-top">
+    <nav class="crumbs" id="scopeCrumbs" aria-label="Where"></nav>
+    <div class="rp-when">
+      <div class="seg" role="group" aria-label="Period">
+        <button data-q="day">Today</button><button data-q="week">This week</button><button data-q="month">This month</button><button data-q="year">This year</button>
+      </div>
+      <button class="btn" id="prev" aria-label="Earlier">‹</button>
+      <nav class="crumbs" id="periodCrumbs" aria-label="When"></nav>
+      <button class="btn" id="next" aria-label="Later">›</button>
+      <button class="btn ghost" id="csv">Download CSV</button>
+    </div>
+  </div>
+  <div id="rp-body"><p class="muted">Loading…</p></div>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'reports/reports.js' %}"></script>{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Data Kiosk{% endblock %}
+{% block body_class %}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'datakiosk/datakiosk.css' %}">{% endblock %}
+{% block content %}
+<div class="dk">
+  <header class="dk-head">
+    <div><h1>Pleating lines</h1><p id="dkSub">Live from the plant floor</p></div>
+    <div class="dk-status" id="dkStatus"></div>
+    <div class="dk-clock" id="dkClock"></div>
+  </header>
+  <section id="dkSetup" hidden></section>
+  <section class="dk-dash" id="dkDash" hidden></section>
+  <section class="dk-lines" id="dkLines" aria-live="polite"></section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'datakiosk/datakiosk.js' %}"></script>{% endblock %}

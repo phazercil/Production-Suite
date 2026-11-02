@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Machine not found{% endblock %}
+{% block content %}<div style="padding:40px;max-width:640px">
+<h1 style="font-weight:600">There is no pleater named "{{ name }}"</h1>
+<p style="color:var(--s-ink-2)">Check the address. This screen's machine address is /station/ followed by the machine name{% if names %}: {{ names }}{% endif %}.
+A shift lead can copy each machine's address from Operator Kiosk &rsaquo; Admin &rsaquo; Machines.</p></div>{% endblock %}

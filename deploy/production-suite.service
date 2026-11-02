@@ -1,0 +1,13 @@
+# /etc/systemd/system/production-suite.service — the web app
+[Unit]
+Description=Production Suite (Django)
+After=network.target mariadb.service
+
+[Service]
+WorkingDirectory=/opt/production_suite
+ExecStart=/opt/production_suite/.venv/bin/gunicorn suite.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 60
+Restart=always
+User=suite
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>{% block title %}Production Suite{% endblock %}</title>
+<link rel="stylesheet" href="{% static 'suite/fonts/plex.css' %}">
+<link rel="stylesheet" href="{% static 'suite/shell.css' %}">
+{% block head %}{% endblock %}
+</head>
+<body class="suite {% block body_class %}{% endblock %}">
+{% if not kiosk_lock %}
+<header class="suitebar">
+  <a class="suitebrand" href="/" aria-label="Production Suite home">
+    <svg viewBox="0 0 34 20" aria-hidden="true"><polyline points="1,17 5,3 9,17 13,3 17,17 21,3 25,17 29,3 33,17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>
+    <span>Production Suite</span>
+  </a>
+  <nav class="suitetabs" aria-label="Modes">
+    <a href="/operator/" {% if mode == "operator" %}aria-current="page"{% endif %}>Operator Kiosk</a>
+    <a href="/scheduler/" {% if mode == "scheduler" %}aria-current="page"{% endif %}>Scheduler</a>
+    <a href="/data/" {% if mode == "data" %}aria-current="page"{% endif %}>Data Kiosk</a>
+    <a href="/reports/" {% if mode == "reports" %}aria-current="page"{% endif %}>Reports</a>
+    <a href="/labor/" {% if mode == "labor" %}aria-current="page"{% endif %}>Labor Budget</a>
+  </nav>
+</header>
+{% endif %}
+<div class="mode">{% block content %}{% endblock %}</div>
+<div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>
+<script src="{% static 'suite/rev.js' %}" data-rev="{{ suite_revision }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

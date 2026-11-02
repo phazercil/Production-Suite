@@ -1,0 +1,9 @@
+Django>=5.2.18,<5.3
+openpyxl>=3.1
+whitenoise>=6.6
+# MariaDB driver: PyMySQL is pure Python and needs nothing else. mysqlclient (faster, needs the
+# MariaDB client libraries) is used instead when it is installed.
+PyMySQL>=1.1.1
+# Pick one web server for production:
+gunicorn>=22.0 ; sys_platform != "win32"
+waitress>=3.0 ; sys_platform == "win32"

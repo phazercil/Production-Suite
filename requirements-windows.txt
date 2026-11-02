@@ -1,0 +1,11 @@
+# Installed by the Windows installer into the .venv folder, from the "wheels" folder that ships with it
+# (no internet needed). All of these are pure Python, so they work on any 64-bit Python 3.10 to 3.13.
+Django==5.2.18
+asgiref==3.11.1
+sqlparse==0.5.5
+tzdata==2026.6
+PyMySQL==1.1.2
+waitress==3.0.2
+whitenoise==6.9.0
+openpyxl==3.1.5
+et_xmlfile==2.0.0

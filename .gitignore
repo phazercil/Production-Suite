@@ -1,0 +1,17 @@
+# settings and records: never commit
+.env
+.env.backup-*
+*.sqlite3
+*.sqlite3-journal
+# the update signing key: keep it private, never in the repository
+*signing-key*
+# made by running the suite
+__pycache__/
+*.pyc
+staticfiles/
+logs/
+updates/
+backups/
+.venv/
+# build output
+dist/

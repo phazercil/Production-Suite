@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Labor Budget{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'labor/login.css' %}">{% endblock %}
+{% block content %}<div class="lgate">
+  <form class="lcard" id="lform" autocomplete="off">
+    <h1>Labor Budget</h1>
+    <p>The labor and production budget shows wages, so only shift leads can open it.</p>
+    {% if note %}<p class="lnote">{{ note }}</p>{% endif %}
+    <label for="lpin">Shift lead PIN</label>
+    <input id="lpin" type="password" inputmode="numeric" autofocus>
+    <p class="lerr" id="lerr" aria-live="polite"></p>
+    <button type="submit">Open Labor Budget</button>
+  </form>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'labor/login.js' %}"></script>{% endblock %}

@@ -1,0 +1,48 @@
+/* Data Kiosk: wall-screen board, one band per pleating line — live numbers on the left, Grafana panels across the rest. Dark only, readable from across the floor. */
+:root{
+  --ground:#14181c; --band:#1B1F24; --card:#232930; --rule:#343C45; --ink:#E6E8EB; --ink-2:#A7AFB8; --ink-3:#8A939C; --accent:#5B9BD5;
+  --ok:#4CAF7A; --ok-bg:#1E3B2C; --ok-ink:#8FE0B2; --warn:#F2B66D; --warn-bg:#3A2E1C; --warn-ink:#F7CC94; --bad:#E06C5B; --bad-bg:#4A231E; --bad-ink:#FFD3CC;
+  --f-disp:'IBM Plex Sans Condensed','Arial Narrow',sans-serif; --f-body:'IBM Plex Sans',system-ui,sans-serif; --f-mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
+}
+.dk{height:100%;overflow:auto;background:var(--ground);color:var(--ink);font-family:var(--f-body);display:flex;flex-direction:column;gap:14px;
+  padding-block:14px 20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.dk-head{display:flex;align-items:center;gap:16px 28px;flex-wrap:wrap}
+.dk-head h1{margin:0;font:700 30px var(--f-disp);letter-spacing:.04em;text-transform:uppercase;text-wrap:balance}
+.dk-head p{margin:2px 0 0;color:var(--ink-2);font-size:14px}
+.dk-status{flex:1;display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--ink-2)}
+.dk-status span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.dot{width:10px;height:10px;border-radius:5px;background:var(--ink-3)} .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.bad{background:var(--bad)}
+.dk-clock{font:600 40px var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dk-clock small{font-size:18px;color:var(--ink-2)}
+.dk-lines{display:flex;flex-direction:column;gap:14px}
+.band{display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);gap:14px;background:var(--band);border:1px solid var(--rule);border-radius:14px;padding:14px}
+.live{display:flex;flex-direction:column;gap:12px;min-width:0}
+.live .nm{display:flex;align-items:center;gap:10px;font:700 26px var(--f-disp);letter-spacing:.05em;text-transform:uppercase}
+.live .nm i{width:14px;height:28px;border-radius:4px;flex:none}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font:700 13px var(--f-body);letter-spacing:.07em}
+.pill::before{content:"";width:9px;height:9px;border-radius:5px;background:currentColor}
+.pill.ok{background:var(--ok-bg);color:var(--ok-ink)} .pill.warn{background:var(--warn-bg);color:var(--warn-ink)} .pill.bad{background:var(--bad-bg);color:var(--bad-ink)} .pill.idle{background:var(--card);color:var(--ink-2)}
+.speed{display:flex;align-items:baseline;gap:8px}
+.speed b{font:600 64px/1 var(--f-mono);font-variant-numeric:tabular-nums}
+.speed span{color:var(--ink-2);font-size:16px}
+.mo{font-size:15px;color:var(--ink-2);min-width:0}
+.mo b{color:var(--ink);font-family:var(--f-mono);font-weight:600}
+.track{height:14px;border-radius:7px;background:var(--ground);border:1px solid var(--rule);overflow:hidden}
+.track i{display:block;height:100%;background:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stats div{background:var(--card);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.stats span{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+.stats b{font:600 22px var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stats .bad b{color:var(--bad)}
+.who{font-size:13px;color:var(--ink-2)}
+.panels{display:grid;gap:12px;min-width:0}
+.panel{background:var(--card);border:1px solid var(--rule);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-height:220px;min-width:0}
+.panel h3{margin:0;padding:8px 12px;font:600 13px var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2);border-bottom:1px solid var(--rule)}
+.panel iframe{flex:1;width:100%;border:0;background:#111217}
+.panel canvas{flex:none;height:clamp(180px,28vh,280px);width:100%;display:block}
+.dk-dash{background:var(--band);border:1px solid var(--rule);border-radius:14px;overflow:hidden;min-height:70vh;display:flex}
+.dk-dash iframe{flex:1;border:0;min-height:70vh}
+.setup{background:var(--warn-bg);border:1px solid var(--warn);color:var(--warn-ink);border-radius:12px;padding:12px 16px;font-size:14px}
+.setup a{color:var(--ink);font-weight:600}
+.empty{color:var(--ink-2);padding:24px;text-align:center}
+@media (max-width:900px){.band{grid-template-columns:minmax(0,1fr)}.speed b{font-size:48px}.dk-clock{font-size:28px}}
