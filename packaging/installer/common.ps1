@@ -6,8 +6,8 @@
   Windows PowerShell 5.1 compatible.
 #>
 
-$script:SuiteVersion = "1.3.3"
-$script:SuiteRevision = 4
+$script:SuiteVersion = "1.3.4"
+$script:SuiteRevision = 5
 $script:PyVersion = "3.12.7"
 $script:TaskWeb = "Production Suite Web"
 $script:TaskTicker = "Production Suite Ticker"
@@ -53,7 +53,7 @@ function ConvertTo-ArgString([string[]]$list) {
 
 # Run a program without a console window, hand every output line to $OnLine, keep the window responsive.
 # Returns the exit code.
-function Invoke-Program([string]$exe, [string[]]$arguments, [string]$workDir = "", [scriptblock]$OnLine = $null, [int]$timeoutSec = 3600) {
+function Invoke-Program([string]$exe, [string[]]$arguments, [string]$workDir = "", [scriptblock]$OnLine = $null, [int]$timeoutSec = 3600, [switch]$NoLog) {
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $exe
     $psi.Arguments = ConvertTo-ArgString $arguments
@@ -80,7 +80,7 @@ function Invoke-Program([string]$exe, [string[]]$arguments, [string]$workDir = "
         if ($out -and $out.IsCompleted) {
             $line = $out.Result
             if ($null -eq $line) { $out = $null } else {
-                Write-SuiteLog $line
+                if (-not $NoLog) { Write-SuiteLog $line }
                 if ($OnLine) { & $OnLine $line }
                 $out = $p.StandardOutput.ReadLineAsync(); $busy = $false
             }
@@ -88,7 +88,7 @@ function Invoke-Program([string]$exe, [string[]]$arguments, [string]$workDir = "
         if ($err -and $err.IsCompleted) {
             $line = $err.Result
             if ($null -eq $line) { $err = $null } else {
-                Write-SuiteLog $line
+                if (-not $NoLog) { Write-SuiteLog $line }
                 if ($OnLine) { & $OnLine $line }
                 $err = $p.StandardError.ReadLineAsync(); $busy = $false
             }
@@ -111,10 +111,60 @@ function Invoke-Program([string]$exe, [string[]]$arguments, [string]$workDir = "
 
 # ---------------------------------------------------------------- what is already here
 function Get-ExistingInstall {
-    $t = Get-ScheduledTask -TaskName $script:TaskWeb -ErrorAction SilentlyContinue
-    if ($t) { return $t.Actions[0].WorkingDirectory }
+    try {
+        $r = Invoke-Schtasks @("/Query", "/TN", $script:TaskWeb, "/XML") 30 -Quiet
+        if ($r.code -eq 0 -and (($r.out -join "`n") -match '<WorkingDirectory>([^<]+)</WorkingDirectory>')) { return $Matches[1].Trim() }
+    } catch { Write-SuiteLog "Couldn't ask Task Scheduler about an existing install: $($_.Exception.Message)" }
     if (Test-Path (Join-Path $script:DefaultDir ".env")) { return $script:DefaultDir }
     return $null
+}
+
+# ---------------------------------------------------------------- scheduled tasks
+# Everything goes through schtasks.exe with a time limit. The ScheduledTasks and CIM cmdlets go through
+# Windows Management (WMI), which can hang on some servers and freeze setup with no error at all.
+function Invoke-Schtasks([string[]]$arguments, [int]$timeoutSec = 60, [switch]$Quiet) {
+    $out = New-Object Collections.ArrayList
+    $sink = { param($l) [void]$out.Add($l) }.GetNewClosure()
+    $code = Invoke-Program "schtasks.exe" $arguments "" $sink -timeoutSec $timeoutSec -NoLog:$Quiet
+    return @{ code = $code; out = $out }
+}
+
+# A task definition for schtasks /Create /XML: runs as the system account, at start-up (or only on request),
+# restarts if it stops, never stops on batteries, and never overlaps itself.
+function New-SuiteTaskXml([string]$description, [string]$cmdFile, [string]$workDir, [bool]$atStartup, [string]$timeLimit) {
+    $e = { param($v) [Security.SecurityElement]::Escape("$v") }
+    $trigger = ""
+    $restart = ""
+    if ($atStartup) {
+        $trigger = "<Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>"
+        $restart = "<RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>"
+    }
+    return @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>$(& $e $description)</Description></RegistrationInfo>
+  $trigger
+  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <ExecutionTimeLimit>$timeLimit</ExecutionTimeLimit>
+    $restart
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>cmd.exe</Command><Arguments>/c "$(& $e $cmdFile)"</Arguments><WorkingDirectory>$(& $e $workDir)</WorkingDirectory></Exec></Actions>
+</Task>
+"@
+}
+
+function Register-SuiteTask([string]$name, [string]$xml) {
+    $file = Join-Path $env:TEMP ("ProductionSuite-task-" + [guid]::NewGuid().ToString("N") + ".xml")
+    [IO.File]::WriteAllText($file, $xml, [Text.Encoding]::Unicode)
+    try { $r = Invoke-Schtasks @("/Create", "/F", "/TN", $name, "/XML", $file) 60 }
+    finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    if ($r.code -ne 0) { throw "Couldn't register the scheduled task '$name': $(($r.out | Where-Object { $_ }) -join ' ')" }
 }
 
 function Read-EnvFile([string]$path) {
@@ -228,18 +278,19 @@ function Install-Python([scriptblock]$OnPercent) {
 # ---------------------------------------------------------------- the running copy
 function Stop-Suite([string]$dir) {
     foreach ($t in @($script:TaskWeb, $script:TaskTicker, $script:TaskControl)) {
-        if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
+        try { [void](Invoke-Schtasks @("/End", "/TN", $t) 60 -Quiet) } catch { Write-SuiteLog "Couldn't stop '$t': $($_.Exception.Message)" }
     }
     if ($dir) {
-        # The task stops cmd.exe; also stop the Python processes it started (their command line names the folder).
-        $pattern = "*" + $dir.TrimEnd("\") + "*"
-        Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*" -or $_.CommandLine -like "*run-control.cmd*") } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        # the tray icon and Production Suite Admin windows (any user) would keep their files locked; they come back at the next login
-        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like $pattern -and ($_.Name -eq "SuiteAdmin.exe" -or $_.CommandLine -like "*SuiteAdmin.ps1*") } |
-            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        # Ending a task stops its cmd.exe; also stop the suite's Python processes and the tray icon / Admin windows
+        # (any user), which would keep their files locked. Matched by program path, without Windows Management.
+        $root = $dir.TrimEnd("\") + "\"
+        foreach ($pf in @("web.pid", "ticker.pid")) {
+            $f = Join-Path $dir "logs\$pf"
+            if (Test-Path $f) { try { Stop-Process -Id ([int](Get-Content $f -Raw).Trim()) -Force -ErrorAction SilentlyContinue } catch { } }
+        }
+        Get-Process -Name python, pythonw, SuiteAdmin -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
         Wait-Pumped 2000
     }
 }
@@ -409,21 +460,14 @@ function Register-SuiteTasks([string]$installDir, [string]$port) {
                      @($script:TaskControl, "run-control.cmd", "Production Suite control service: lets Production Suite Admin and the tray icon start, stop and set up the suite without Windows admin rights (this server only)."))) {
         if (-not (Test-Path (Join-Path $installDir $t[1]))) { continue }
         Write-SuiteLog "Registering the scheduled task '$($t[0])'"
-        if (Get-ScheduledTask -TaskName $t[0] -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $t[0] -Confirm:$false }
-        $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$(Join-Path $installDir $t[1])`"" -WorkingDirectory $installDir
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-            -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
-        try {
-            Register-ScheduledTask -TaskName $t[0] -Description $t[2] -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -ErrorAction Stop | Out-Null
-        } catch { throw "Couldn't register the scheduled task '$($t[0])': $($_.Exception.Message)" }
+        Register-SuiteTask $t[0] (New-SuiteTaskXml $t[2] (Join-Path $installDir $t[1]) $installDir $true "PT0S")
         & $script:Pump
     }
-    Write-SuiteLog "Starting the scheduled tasks"
-    Start-ScheduledTask -TaskName $script:TaskWeb
-    Start-ScheduledTask -TaskName $script:TaskTicker
-    if (Get-ScheduledTask -TaskName $script:TaskControl -ErrorAction SilentlyContinue) { Start-ScheduledTask -TaskName $script:TaskControl }
+    foreach ($t in @($script:TaskWeb, $script:TaskTicker, $script:TaskControl)) {
+        Write-SuiteLog "Starting '$t'"
+        $r = Invoke-Schtasks @("/Run", "/TN", $t) 60
+        if ($r.code -ne 0 -and $t -ne $script:TaskControl) { throw "Couldn't start the scheduled task '$t': $(($r.out | Where-Object { $_ }) -join ' ')" }
+    }
     & $script:Pump
     Register-UpdaterTask $installDir
 }
@@ -434,15 +478,28 @@ function Register-SuiteTasks([string]$installDir, [string]$port) {
 # hold up or stop the install: at worst, updates from Admin > Updates need setup to be run again.
 function Register-UpdaterTask([string]$installDir) {
     Write-SuiteLog "Registering the scheduled task '$($script:TaskUpdater)'"
-    $cmd = "cmd.exe /c `"`"$(Join-Path $installDir "run-update.cmd")`"`""
     try {
-        $code = Invoke-Program "schtasks.exe" @("/Create", "/F", "/TN", $script:TaskUpdater, "/TR", $cmd, "/SC", "ONCE", "/ST", "00:00",
-                                                 "/RU", "SYSTEM", "/RL", "HIGHEST") -timeoutSec 60
-        if ($code -ne 0) { Write-SuiteLog "Couldn't register the updater task (schtasks code $code); updates from Admin > Updates won't start until setup runs again." }
-        else { Write-SuiteLog "Registered the updater task." }
+        Register-SuiteTask $script:TaskUpdater (New-SuiteTaskXml "Production Suite updates: installs an update file when the suite asks for it (Operator Kiosk > Admin > Updates)." `
+            (Join-Path $installDir "run-update.cmd") $installDir $false "PT2H")
+        Write-SuiteLog "Registered the updater task."
     } catch {
         Write-SuiteLog "Couldn't register the updater task ($($_.Exception.Message)); updates from Admin > Updates won't start until setup runs again."
     }
+}
+
+# Runs a script block in a separate PowerShell process and waits at most $timeoutSec, keeping the window
+# responsive. Returns what the script block output; throws if it didn't finish in time.
+function Invoke-Bounded([scriptblock]$block, [object[]]$argList, [int]$timeoutSec = 90) {
+    $j = Start-Job -ScriptBlock $block -ArgumentList $argList
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        while ($j.State -eq "Running" -or $j.State -eq "NotStarted") {
+            & $script:Pump
+            Start-Sleep -Milliseconds 100
+            if ($sw.Elapsed.TotalSeconds -gt $timeoutSec) { throw "Windows didn't answer within $timeoutSec seconds" }
+        }
+        return (Receive-Job $j -ErrorAction SilentlyContinue)
+    } finally { Stop-Job $j -ErrorAction SilentlyContinue; Remove-Job $j -Force -ErrorAction SilentlyContinue }
 }
 
 # Opens the port to the plant network only. Returns a list of warnings (empty when all is well).
@@ -457,19 +514,32 @@ function Set-SuiteFirewall([string]$installDir, [string]$venvPy, [string]$port) 
         $ranges = @("192.168.100.0/24")
         [void]$warn.Add("Couldn't read the plant network setting; the firewall allows 192.168.100.0/24. Check Operator Kiosk > Admin > Network.")
     }
-    try {
-        Get-NetFirewallRule -DisplayName $script:FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
-        New-NetFirewallRule -DisplayName $script:FirewallRule -Description "Plant screens reach the Production Suite on this port from the plant network only (Operator Kiosk > Admin > Network). Public networks and internet addresses are not allowed." `
-            -Direction Inbound -Protocol TCP -LocalPort $port -RemoteAddress $ranges -Action Allow -Profile Domain, Private -ErrorAction Stop | Out-Null
-        Write-SuiteLog "Port $port is open to the plant network only: $($ranges -join ', ')"
-        [void](Invoke-Program $venvPy @("manage.py", "network", "--sync-firewall") $installDir)   # records the result for Admin > Network
-    } catch {
-        [void]$warn.Add("Couldn't add the firewall rule ($($_.Exception.Message)). Allow TCP port $port inbound from $($ranges -join ', ') only, by hand.")
+    # The firewall cmdlets also go through Windows Management, so they run in a separate process with a time limit.
+    $job = {
+        param($rule, $port, $ranges)
+        $out = @{ ok = $true; msg = ""; public = @() }
+        try {
+            Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+            New-NetFirewallRule -DisplayName $rule -Description "Plant screens reach the Production Suite on this port from the plant network only (Operator Kiosk > Admin > Network). Public networks and internet addresses are not allowed." `
+                -Direction Inbound -Protocol TCP -LocalPort $port -RemoteAddress $ranges -Action Allow -Profile Domain, Private -ErrorAction Stop | Out-Null
+        } catch { $out.ok = $false; $out.msg = $_.Exception.Message }
+        try { $out.public = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq "Public" } | ForEach-Object { "" + $_.Name }) } catch { }
+        $out
     }
-    $public = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq "Public" })
-    if ($public.Count -gt 0) {
-        [void]$warn.Add("Windows treats this network as Public ($(($public | ForEach-Object { $_.Name }) -join ', ')), so plant screens can't connect yet. " +
-                        "If this is the plant network, set it to Private: Settings > Network & Internet > (your connection) > Network profile type: Private.")
+    try {
+        $r = Invoke-Bounded $job @($script:FirewallRule, $port, $ranges) 120
+        if ($r.ok) {
+            Write-SuiteLog "Port $port is open to the plant network only: $($ranges -join ', ')"
+            try { [void](Invoke-Program $venvPy @("manage.py", "network", "--sync-firewall") $installDir -timeoutSec 120) } catch { }   # records the result for Admin > Network
+        } else {
+            [void]$warn.Add("Couldn't add the firewall rule ($($r.msg)). Allow TCP port $port inbound from $($ranges -join ', ') only, by hand.")
+        }
+        if (@($r.public).Count -gt 0) {
+            [void]$warn.Add("Windows treats this network as Public ($(@($r.public) -join ', ')), so plant screens can't connect yet. " +
+                            "If this is the plant network, set it to Private: Settings > Network & Internet > (your connection) > Network profile type: Private.")
+        }
+    } catch {
+        [void]$warn.Add("Couldn't set up Windows Firewall ($($_.Exception.Message)). Allow TCP port $port inbound from $($ranges -join ', ') only, by hand.")
     }
     return ,$warn
 }

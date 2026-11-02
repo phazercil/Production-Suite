@@ -414,15 +414,15 @@ class Services:
         if WIN:
             for t in (TASK_WEB, TASK_TICKER):
                 self._run(["schtasks", "/End", "/TN", t])
-            # the task stops cmd.exe; also stop the Python processes it started (their command line names the folder).
-            # Not the control service. Open tray icons / Admin windows are closed too, or their files would be locked.
-            folder = str(self.dir).rstrip("\\").replace("'", "''")
-            ps = ("Get-CimInstance Win32_Process -Filter \"Name = 'python.exe' OR Name = 'cmd.exe' OR Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'\" | "
-                  "Where-Object { $_.CommandLine -like '*" + folder + "*' -and ($_.CommandLine -like '*serve.py*web*' -or "
-                  "$_.CommandLine -like '*serve.py*ticker*' -or $_.CommandLine -like '*run-web.cmd*' -or $_.CommandLine -like '*run-ticker.cmd*' -or "
-                  "$_.Name -eq 'SuiteAdmin.exe' -or $_.CommandLine -like '*SuiteAdmin.ps1*') }"
-                  " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
-            self._run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps])
+            # Ending the tasks stops their cmd.exe. Also stop any of the suite's Python processes still running (by the
+            # pid files serve.py writes) and SuiteAdmin.exe (tray icon / Admin windows, any user), whose files would be
+            # locked. Not the control service. No Windows Management (WMI) queries: they can hang.
+            for name in ("web.pid", "ticker.pid"):
+                try:
+                    self._run(["taskkill", "/F", "/PID", str(int((self.dir / "logs" / name).read_text().strip()))])
+                except (OSError, ValueError):
+                    pass
+            self._run(["taskkill", "/F", "/IM", "SuiteAdmin.exe"])
             time.sleep(3)
         elif shutil.which("systemctl"):
             self._run(["systemctl", "stop", "production-suite", "production-suite-ticker"])
