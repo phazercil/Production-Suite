@@ -250,6 +250,8 @@ def launch(st):
                       f"({(r.stderr or r.stdout).strip()[:200]}). Run Setup.exe once to add it; nothing was changed.")
             return False
         return True
+    if Path("/etc/systemd/system/production-suite-updater.path").exists():
+        return True  # Linux install: systemd sees request.json and runs the updater as root
     py = base() / ".venv" / "bin" / "python"
     subprocess.Popen([str(py) if py.exists() else sys.executable, str(run / "updater.py"), "--dir", str(base()), "request"],
                      cwd=str(base()), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

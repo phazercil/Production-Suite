@@ -1,0 +1,22 @@
+# Production Suite minute ticker: machine readings, timed S2K / Paycom pulls, alerts, InfluxDB copy, updates.
+[Unit]
+Description=Production Suite minute ticker
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+User=psuite
+Group=psuite
+WorkingDirectory=@DIR@
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@DIR@/.venv/bin/python @DIR@/serve.py ticker
+Restart=always
+RestartSec=10
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

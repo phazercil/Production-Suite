@@ -1,0 +1,10 @@
+# Installs an update file, or goes back to the previous version, then starts the suite again.
+[Unit]
+Description=Production Suite updater
+
+[Service]
+Type=oneshot
+WorkingDirectory=@DIR@
+# Root runs only its own copy (root-owned) with the system Python, never files the suite's account can change.
+ExecStart=/usr/bin/python3 /usr/libexec/production-suite/updater.py --dir @DIR@ request
+TimeoutStartSec=2h

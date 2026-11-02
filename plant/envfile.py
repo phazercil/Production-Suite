@@ -4,7 +4,7 @@ import os
 ENV_KEYS_ORDER = [
     ("# --- Written by the Production Suite installer", None),
     ("DJANGO_SECRET_KEY", None), ("DJANGO_DEBUG", None), ("ALLOWED_HOSTS", None), ("PLANT_TZ", None),
-    ("WEB_PORT", None), ("PLANT_NETWORKS", None), ("TICKER_IN_PROCESS", None), ("SCHEDULER_REQUIRE_LEAD", None), ("STATION_KEY", None),
+    ("WEB_PORT", None), ("WEB_HOST", None), ("BEHIND_PROXY", None), ("PUBLIC_PORT", None), ("STATIC_ROOT", None), ("PLANT_NETWORKS", None), ("TICKER_IN_PROCESS", None), ("SCHEDULER_REQUIRE_LEAD", None), ("STATION_KEY", None),
     ("# --- Records database (MariaDB)", None),
     ("DB_ENGINE", None), ("DB_HOST", None), ("DB_PORT", None), ("DB_NAME", None), ("DB_USER", None), ("DB_PASSWORD", None),
     ("# --- Asset database with changeover instructions (read-only account, optional)", None),

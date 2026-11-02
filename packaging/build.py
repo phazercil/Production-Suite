@@ -1,6 +1,7 @@
 """Build the installer zip (and, with --key, the signed update file) from this repository.
 
-    python packaging/build.py                       -> dist/ProductionSuite-Setup.zip
+    python packaging/build.py                       -> dist/ProductionSuite-Setup.zip (Windows) and
+                                                       dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9)
     python packaging/build.py --key KEYFILE         -> also dist/ProductionSuite-Update-<version>-r<revision>.zip
     python packaging/build.py --sign ...            -> code-signs every .exe and PowerShell script first (Windows only):
         --sign                                         the one code-signing certificate in your certificate store
@@ -74,6 +75,29 @@ def main():
             if p.is_file():
                 z.write(p, Path("ProductionSuite-Setup") / p.relative_to(stage))
     print(f"{out}  v{version} rev {revision}, {out.stat().st_size / 1e6:.1f} MB")
+    # Linux (EL9): the same program files and packages, with install.sh, systemd units and the Apache site
+    import tarfile
+    lin = dist / "ProductionSuite-Linux.tar.gz"
+    lin.unlink(missing_ok=True)
+
+    def mode(ti):
+        ti.uid = ti.gid = 0
+        ti.uname = ti.gname = "root"
+        if ti.isdir():
+            ti.mode = 0o755
+        elif ti.name.endswith(".sh"):
+            ti.mode = 0o755
+        else:
+            ti.mode = 0o644
+        return ti
+    with tarfile.open(lin, "w:gz") as t:
+        top = "ProductionSuite-Linux"
+        t.add(stage / "app", f"{top}/app", filter=mode)
+        t.add(PKG / "wheels", f"{top}/wheels", filter=mode)
+        for f in ("install.sh", "uninstall.sh", "README-LINUX.txt"):
+            t.add(PKG / "linux" / f, f"{top}/{f}", filter=mode)
+        t.add(PKG / "linux" / "templates", f"{top}/templates", filter=mode)
+    print(f"{lin}  v{version} rev {revision}, {lin.stat().st_size / 1e6:.1f} MB")
     if a.key:
         import base64
         from plant import ed25519

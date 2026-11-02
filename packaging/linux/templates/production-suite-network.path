@@ -1,0 +1,10 @@
+# Applies the plant network (Admin > Network) to Apache and firewalld, as root.
+[Unit]
+Description=Production Suite: watch for plant network changes
+
+[Path]
+PathExists=@DIR@/updates/network-request.json
+Unit=production-suite-network.service
+
+[Install]
+WantedBy=multi-user.target

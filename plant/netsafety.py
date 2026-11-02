@@ -16,6 +16,7 @@ open the suite to the internet. Windows Firewall is kept in step with the same l
 import ipaddress
 import logging
 import os
+from pathlib import Path
 import socket
 import subprocess
 import time
@@ -201,7 +202,7 @@ def sync_firewall(nets=None):
     Only on Windows; the installer creates the rule and the suite runs as the system account there."""
     nets = nets if nets is not None else current()
     if os.name != "nt":
-        return None, "Windows Firewall is not used on this server; the suite's own address check still applies."
+        return _linux_sync(nets)
     ranges = ",".join(f"'{n}'" for n in nets)  # every entry was validated by ipaddress, so this is safe to quote
     script = (f"$r = Get-NetFirewallRule -DisplayName '{FIREWALL_RULE}' -ErrorAction Stop; "
               f"$r | Set-NetFirewallRule -RemoteAddress @({ranges}) -ErrorAction Stop")
@@ -217,6 +218,36 @@ def sync_firewall(nets=None):
             return False, f"There is no firewall rule named '{FIREWALL_RULE}'. Re-run the installer to create it."
         return False, f"Couldn't update Windows Firewall ({detail}). The suite's own address check still applies."
     return True, f"Windows Firewall allows {', '.join(map(str, nets))} on the suite's port."
+
+
+LINUX_NETWORK_UNIT = Path("/etc/systemd/system/production-suite-network.path")
+
+
+def _linux_sync(nets):
+    """Linux install: ask the root helper (tools/linux_apply.py, started by production-suite-network.path) to put
+    the plant network into Apache and firewalld, and wait a few seconds for its answer."""
+    import json
+    import time
+
+    from django.conf import settings
+    if not LINUX_NETWORK_UNIT.exists():
+        return None, "No firewall is managed on this server; the suite's own address check still applies."
+    folder = Path(settings.BASE_DIR) / "updates"
+    folder.mkdir(exist_ok=True)
+    res = folder / "network-result.json"
+    before = res.stat().st_mtime if res.exists() else 0
+    tmp = folder / "network-request.tmp"
+    tmp.write_text(json.dumps({"networks": [str(n) for n in nets]}), encoding="utf-8")
+    os.replace(tmp, folder / "network-request.json")
+    for _ in range(40):
+        time.sleep(0.25)
+        if res.exists() and res.stat().st_mtime > before:
+            try:
+                r = json.loads(res.read_text(encoding="utf-8"))
+                return bool(r.get("ok")), str(r.get("msg") or "")[:300]
+            except ValueError:
+                break
+    return None, "Sent to Apache and firewalld; they're updated within a few seconds."
 
 
 def save(nets, by="system", sync=True):

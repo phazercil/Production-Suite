@@ -1,0 +1,9 @@
+# Puts the plant network into Apache (who may open the screens) and firewalld.
+[Unit]
+Description=Production Suite: apply the plant network to Apache and firewalld
+
+[Service]
+Type=oneshot
+# Root runs only its own copy (root-owned) with the system Python, never files the suite's account can change.
+ExecStart=/usr/bin/python3 /usr/libexec/production-suite/linux_apply.py --dir @DIR@ network
+TimeoutStartSec=5min

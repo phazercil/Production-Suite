@@ -318,3 +318,22 @@ class UpdaterEndToEndTests(SimpleTestCase):
         self.assertIn("previous version (rev 1) was put back", st["message"])
         self.assertEqual(svc.calls, ["stop", "start", "stop", "start"])
         self.assertFalse([p for p in (self.install / "backups").iterdir() if p.name.startswith("1.0.0-r1-")][1:], "the used backup is removed")
+
+
+class UpdaterRequestTests(SimpleTestCase):
+    def test_a_refused_request_says_why(self):
+        """"Go back" with no earlier version fails before anything is installed; Admin > Updates still hears why."""
+        spec = importlib.util.spec_from_file_location("suite_updater_req", SRC / "tools" / "updater.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "updates" / "run").mkdir(parents=True)
+        (d / "updates" / "run" / "request.json").write_text('{"args": ["goback"]}')
+        with mock.patch.object(mod, "Services", lambda folder: Services()):
+            self.assertEqual(mod.main(["--dir", str(d), "request"]), 1)
+        st = json.loads((d / "updates" / "state.json").read_text())
+        self.assertEqual(st["status"], "failed")
+        self.assertIn("no earlier version", st["message"])
+        self.assertFalse((d / "updates" / "run" / "request.json").exists())
+        self.assertFalse((d / "updates" / "run" / "lock").exists())

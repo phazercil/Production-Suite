@@ -96,6 +96,8 @@ class Command(BaseCommand):
         parser.add_argument("--skip-port-check", action="store_true", help="internal: the web app is already running on the port")
         parser.add_argument("--apply-network", action="store_true", help="internal: store the plant network typed in stage 1")
         parser.add_argument("--progress", action="store_true", help="internal: print @@PROGRESS lines for the setup window")
+        parser.add_argument("--behind-apache", action="store_true",
+                            help="Linux install: the suite listens on 127.0.0.1:8008 and Apache serves the screens (packaging/linux/install.sh)")
         parser.add_argument("--check", choices=["env", "network", "db", "dbadmin", "asset", "s2k", "server", "pin"],
                             help="internal: check one page of answers for the setup window and print @@RESULT {json}")
 
@@ -332,6 +334,10 @@ class Command(BaseCommand):
                     self.say("  Setup only signs in and reads the table list. It never creates or changes anything in S2K.")
                     self.ask_read_only_db(cfg, "S2K_DB", "s2k", "The S2K database", False)
                     changed = changed or bool(cfg.get("S2K_DB_HOST"))
+                if opts.get("behind_apache"):
+                    before = dict(cfg)
+                    self.apache_settings(cfg, cfg.get("PUBLIC_PORT", "80"))
+                    changed = changed or cfg != before
                 if changed:
                     write_env(env_path, cfg)
                 return self.run_finish(opts, apply_network=apply_network)
@@ -412,7 +418,13 @@ class Command(BaseCommand):
             if not running_here and not port_free(int(v)):
                 return f"Something else on this server already uses port {v}. Pick another (for example 8080)."
             return None
-        cfg["WEB_PORT"] = self.ask("web_port", "Port the screens connect to", cfg.get("WEB_PORT", "8000"), check=port_check)
+        if opts.get("behind_apache"):
+            # Apache listens for the screens; the suite itself only on this server (127.0.0.1:8008)
+            pub = self.ask("web_port", "Port the screens connect to (Apache: 80, or 443 once HTTPS is set up)", cfg.get("PUBLIC_PORT", "80"),
+                           check=lambda v: None if v.isdigit() and 0 < int(v) < 65536 else "Use a port number like 80.")
+            self.apache_settings(cfg, pub)
+        else:
+            cfg["WEB_PORT"] = self.ask("web_port", "Port the screens connect to", cfg.get("WEB_PORT", "8000"), check=port_check)
 
         def tz_check(v):
             try:
@@ -528,6 +540,11 @@ class Command(BaseCommand):
             b.write_bytes(env_path.read_bytes())
             self.say(f"  Previous settings copied to {b.name}")
 
+    @staticmethod
+    def apache_settings(cfg, public_port):
+        cfg.update({"WEB_HOST": "127.0.0.1", "WEB_PORT": "8008", "BEHIND_PROXY": "1", "PUBLIC_PORT": str(public_port),
+                    "STATIC_ROOT": "/var/www/production-suite/static"})
+
     def run_finish(self, opts, apply_network=False):
         """Run stage 2 in a fresh process so it uses the settings just written."""
         cmd = [sys.executable, str(Path(settings.BASE_DIR) / "manage.py"), "install_plant", "--finish"]
@@ -608,7 +625,7 @@ class Command(BaseCommand):
                 p.trained.set(Machine.objects.filter(stage="s1"))
                 self.say(f"  {name} can now log in with that PIN.", self.style.SUCCESS)
 
-        port = os.environ.get("WEB_PORT", "8000")
+        port = os.environ.get("PUBLIC_PORT") or os.environ.get("WEB_PORT", "8000")
         self.progress(100, "Setup complete")
         self.say("\nSetup complete.", self.style.SUCCESS)
         self.say(f"  Records: {connection.vendor} database {connection.settings_dict['NAME']}")
