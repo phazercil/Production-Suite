@@ -267,9 +267,9 @@ $pf = New-Page "done"
 $fHead = Add-Text $pf "" 0 30 $C.ok $F.title
 $fText = Add-Text $pf "" 36 40
 $fLinks = New-Object Windows.Forms.FlowLayoutPanel
-$fLinks.SetBounds(0, 78, 570, 124); $fLinks.FlowDirection = "TopDown"; $fLinks.WrapContents = $false
+$fLinks.SetBounds(0, 78, 570, 150); $fLinks.FlowDirection = "TopDown"; $fLinks.WrapContents = $false
 $pf.Controls.Add($fLinks)
-$fWarn = Add-Text $pf "" 206 140 $C.warn
+$fWarn = Add-Text $pf "" 232 118 $C.warn
 $fOpen = Add-Check $pf "Open the Operator Kiosk when I click Finish" 356 $true
 $fLog = New-Object Windows.Forms.LinkLabel
 $fLog.Text = "Open the setup log"; $fLog.SetBounds(0, 386, 200, 22); $pf.Controls.Add($fLog)
@@ -569,7 +569,8 @@ function Start-Install {
             throw "The suite did not answer on port $($Setup.port) within 90 seconds. The last lines of its log:`r`n$tail"
         }
         Set-Progress 99 "Adding desktop shortcuts"
-        Add-SuiteShortcuts $Setup.installDir $Setup.port $Setup.stationKey $Setup.python
+        $w = Add-SuiteShortcuts $Setup.installDir $Setup.port $Setup.stationKey $Setup.python
+        foreach ($x in @($w)) { if ($x) { [void]$Setup.warnings.Add($x) } }
         Set-Progress 100 "Done"
         Write-SuiteLog "Production Suite is installed and running."
         Set-Busy $false
@@ -595,6 +596,15 @@ function Show-Done {
         $ll = New-Object Windows.Forms.LinkLabel
         $ll.Text = "$($item[0]):  $u"; $ll.AutoSize = $true; $ll.Tag = $u
         $ll.LinkArea = New-Object Windows.Forms.LinkArea(($item[0].Length + 3), $u.Length)
+        $ll.add_LinkClicked({ param($src) Start-Process $src.Tag })
+        $fLinks.Controls.Add($ll)
+    }
+    $adminExe = Join-Path $Setup.installDir "desktop\SuiteAdmin.exe"
+    if (Test-Path $adminExe) {
+        $t = "Server settings, start / stop / restart:  Production Suite Admin (on this server's desktop and Start menu)"
+        $ll = New-Object Windows.Forms.LinkLabel
+        $ll.Text = $t; $ll.AutoSize = $true; $ll.Tag = $adminExe
+        $ll.LinkArea = New-Object Windows.Forms.LinkArea($t.IndexOf("Production Suite Admin"), "Production Suite Admin".Length)
         $ll.add_LinkClicked({ param($src) Start-Process $src.Tag })
         $fLinks.Controls.Add($ll)
     }

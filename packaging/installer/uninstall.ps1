@@ -52,7 +52,10 @@ if ($InstallDir) {
 Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
 Say "Removed the firewall rule." Green
 Get-ChildItem -Path (Join-Path $env:PUBLIC "Desktop") -Filter "Production Suite - *.url" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path ([Environment]::GetFolderPath("CommonDesktopDirectory")) "Production Suite Admin.lnk") -Force -ErrorAction SilentlyContinue
 Remove-Item -Path (Join-Path $env:PUBLIC "Desktop\Production Suite Admin.lnk") -Force -ErrorAction SilentlyContinue
+$menu = [Environment]::GetFolderPath("CommonPrograms")
+if ($menu) { Remove-Item -Path (Join-Path $menu "Production Suite") -Recurse -Force -ErrorAction SilentlyContinue }
 Say "Removed the desktop shortcuts." Green
 
 if ($InstallDir -and (Test-Path $InstallDir)) {

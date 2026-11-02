@@ -153,7 +153,8 @@ try {
     }
     Write-Progress -Activity "Waiting for the suite to start" -Completed
     Say "The suite is running." Green
-    Add-SuiteShortcuts $InstallDir $Port $StationKey $Python
+    $w = Add-SuiteShortcuts $InstallDir $Port $StationKey $Python
+    foreach ($x in @($w)) { if ($x) { Say "  $x" Yellow } }
 } catch {
     Fail $_.Exception.Message
 }
@@ -163,6 +164,7 @@ Say ""
 Say "Production Suite is installed and running." Green
 Say ""
 Say "  On this server:      http://localhost:$Port/operator/   (shortcuts are on the desktop)"
+Say "  Server settings:     Production Suite Admin (desktop and Start menu): connections, start, stop, restart"
 Say "  From plant screens:  http://${hostName}:$Port/operator/    Operator Kiosk"
 Say "                       http://${hostName}:$Port/scheduler/   Scheduler"
 Say "                       http://${hostName}:$Port/data/        Data Kiosk"
