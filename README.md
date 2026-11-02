@@ -249,22 +249,33 @@ You can also import Excel/CSV exports on Scheduler › Orders. New MOs wait unsc
 and the like are refused), and its tables and migrations go only to its own records database. Give these
 connections SELECT-only accounts as well; the installer warns if the account could change data.
 
-## Production Suite Admin (on the server)
+## Production Suite Admin and the tray icon (on the server)
 
-Setup puts a **Production Suite Admin** shortcut on the server's desktop (`desktop\SuiteAdmin.exe`, which asks
-for administrator rights). It is for whoever looks after the server:
+Setup puts **Production Suite Admin** on the server's desktop and in the Start menu (`desktop\SuiteAdmin.exe`),
+and a **Production Suite tray icon** (next to the clock) that starts at every login for every user.
 
+- **No Windows administrator login is needed.** Both run as whoever is signed in and talk to the suite's
+  **control service** ("Production Suite Control" scheduled task, system account, `serve.py control`). It listens
+  on 127.0.0.1 only, so only programs on the server itself can use it, and it refuses requests a web browser could
+  send. Its port is 8765 (`SUITE_CONTROL_PORT` in `.env`).
+- **Status, Start, Restart and the logs** are open to anyone signed in to the server. **Stop and every check or
+  change of a setting** ask for a **shift lead PIN** (the same PINs as the kiosks; 5 wrong PINs pause it for a
+  minute; a login lasts 20 minutes idle). Changes are in the audit log as "<shift lead> (server desktop)", and
+  `logs\admin.log` notes which Windows user made each one.
 - **Status**: whether the web app and the minute ticker are running and answering, the version and revision,
-  **Start**, **Stop** and **Restart**, and the last lines of each log.
+  Start, Stop and Restart, and the last lines of each log.
 - **Connections**: the records database (MariaDB; it can create the database and user with an administrator
   login used once, builds the tables, and puts the old settings back if that fails), the read-only S2K and asset
   databases, InfluxDB, Paycom, the Grafana token, the machine feed key, the alert mail server and Twilio.
 - **Network and server**: the plant network (and its firewall rule), the port (it moves the firewall rule and
   the desktop shortcuts too), the plant time zone and the station key.
+- **Tray icon**: green while the suite runs, amber while it starts, red when stopped (with a balloon when that
+  changes), grey if the control service can't be reached. Right-click for Production Suite Admin, the Operator
+  Kiosk, Start and Restart; double-click opens Admin.
 
-Every change goes through the same checks as Operator Kiosk › Admin, nothing is saved if a check fails, blank
-passwords keep the saved ones, and changes are recorded in the audit log as "Server desktop (<Windows user>)".
-Its own log is `logs\admin.log`. It is part of the program files, so updates keep it current.
+Every change goes through the same checks as Operator Kiosk › Admin, nothing is saved if a check fails, and blank
+passwords keep the saved ones. The window's own log is in `%LOCALAPPDATA%\ProductionSuite`. Both are part of the
+program files, so updates keep them current (an update closes open tray icons; they come back at the next login).
 
 ## Updates without reinstalling
 

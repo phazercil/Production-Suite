@@ -1,164 +1,116 @@
 <#
-  Production Suite Admin: the server-side settings window (desktop shortcut "Production Suite Admin").
+  Production Suite Admin: the server-side settings window (desktop and Start menu shortcut), and the
+  Production Suite tray icon (SuiteAdmin.exe --tray, started at every login).
 
-  - Status: is the suite running and answering; Start, Stop, Restart; open the kiosk, the logs.
+  - Status: is the suite running and answering; Start, Stop, Restart; open the kiosk; the logs.
   - Connections: records database (MariaDB), S2K and asset databases (read-only), InfluxDB, Paycom,
     Grafana, machine feed key, downtime alerts (mail server, Twilio), plant network, port, time zone.
 
+  No Windows administrator login is needed. The window talks to the suite's control service
+  ("Production Suite Control", system account, this server only), which does the work. Stop and every
+  check or change of a setting need a shift lead PIN; status, Start, Restart and the logs don't.
   Every change is checked first (the same checks as Operator Kiosk > Admin) and nothing is saved if the
-  check fails. Passwords left blank keep the saved ones. Runs as administrator (SuiteAdmin.exe asks).
-  It lives with the program files, so updates from Admin > Updates update it too.
-  Windows PowerShell 5.1 compatible.
+  check fails. Passwords left blank keep the saved ones. Windows PowerShell 5.1 compatible.
 #>
-param([string]$InstallDir = "")
+param([string]$InstallDir = "", [switch]$Tray)
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $InstallDir) { $InstallDir = Split-Path -Parent $Here }
+
+# This window's own log, in the user's profile (the suite's folder is for administrators only).
+$UiLogDir = Join-Path $env:LOCALAPPDATA "ProductionSuite"
+try { if (-not (Test-Path $UiLogDir)) { New-Item -ItemType Directory -Path $UiLogDir -Force | Out-Null } } catch { }
+$UiLog = Join-Path $UiLogDir $(if ($Tray) { "tray.log" } else { "admin-window.log" })
+function Write-UiLog([string]$msg) {
+    try { Add-Content -Path $UiLog -Value ("{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $msg) -Encoding UTF8 } catch { }
+}
+Write-UiLog "---- starting as $([Environment]::UserName) (tray: $([bool]$Tray))"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-
-$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    try {
-        Start-Process powershell.exe -Verb RunAs -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", "`"$($MyInvocation.MyCommand.Path)`"")
-    } catch {
-        [Windows.Forms.MessageBox]::Show("Production Suite Admin needs administrator rights, and Windows did not give them.", "Production Suite Admin") | Out-Null
-    }
-    exit
-}
+Add-Type -AssemblyName System.Net.Http
 [Windows.Forms.Application]::EnableVisualStyles()
+try {
+    [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::CatchException)
+    [Windows.Forms.Application]::add_ThreadException({
+        param($sender, $e)
+        Write-UiLog "ERROR (unexpected): $($e.Exception.ToString())"
+        [Windows.Forms.MessageBox]::Show("Something went wrong: $($e.Exception.Message)`n`nDetails: $UiLog", "Production Suite Admin", "OK", "Error") | Out-Null
+    })
+} catch { }
 
-$TaskWeb = "Production Suite Web"; $TaskTicker = "Production Suite Ticker"; $TaskUpdater = "Production Suite Updater"
-$FirewallRule = "Production Suite"
-$Py = Join-Path $InstallDir ".venv\Scripts\python.exe"
-$LogDir = Join-Path $InstallDir "logs"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
-$AdminLog = Join-Path $LogDir "admin.log"
-$State = @{ busy = $false; info = $null; page = "" }
+$State = @{ busy = $false; info = $null; page = ""; token = ""; lead = "" }
+$CtlPort = 8765
+try { $pf = Join-Path $Here "control.port"; if (Test-Path $pf) { $CtlPort = [int]((Get-Content $pf -Raw).Trim()) } } catch { }
+$Http = New-Object System.Net.Http.HttpClient
+$Http.Timeout = [TimeSpan]::FromMinutes(20)
 
-function Write-AdminLog([string]$msg) {
-    try { Add-Content -Path $AdminLog -Value ("{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}" -f (Get-Date), [Environment]::UserName, $msg) -Encoding UTF8 } catch { }
-}
-
-# ---------------------------------------------------------------- running the suite's own commands
-function ConvertTo-ArgString([string[]]$list) {
-    $parts = foreach ($a in $list) {
-        if ($a -eq "") { '""'; continue }
-        if ($a -notmatch '[\s"]') { $a; continue }
-        $sb = New-Object Text.StringBuilder
-        [void]$sb.Append('"')
-        $slashes = 0
-        foreach ($ch in $a.ToCharArray()) {
-            if ($ch -eq '\') { $slashes++; continue }
-            if ($ch -eq '"') { [void]$sb.Append('\' * ($slashes * 2 + 1)); [void]$sb.Append('"'); $slashes = 0; continue }
-            if ($slashes) { [void]$sb.Append('\' * $slashes); $slashes = 0 }
-            [void]$sb.Append($ch)
-        }
-        if ($slashes) { [void]$sb.Append('\' * ($slashes * 2)) }
-        [void]$sb.Append('"')
-        $sb.ToString()
-    }
-    return ($parts -join " ")
-}
-
-# Runs python manage.py <arguments> without a console window, keeping this window responsive.
-# Returns @{ code; lines } with every output line.
-function Invoke-Manage([string[]]$arguments, [int]$timeoutSec = 600) {
-    $psi = New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName = $Py
-    $psi.Arguments = ConvertTo-ArgString (@("manage.py") + $arguments)
-    $psi.WorkingDirectory = $InstallDir
-    $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
-    $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
-    $psi.EnvironmentVariables["PYTHONUTF8"] = "1"; $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
-    $psi.EnvironmentVariables["TICKER_IN_PROCESS"] = "0"
-    $p = New-Object Diagnostics.Process
-    $p.StartInfo = $psi
-    try { [void]$p.Start() } catch { throw "Couldn't start the suite's Python ($Py): $($_.Exception.Message). Run Setup.exe to repair the install." }
-    $lines = New-Object Collections.ArrayList
-    $out = $p.StandardOutput.ReadLineAsync(); $err = $p.StandardError.ReadLineAsync()
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($out -or $err) {
-        $idle = $true
-        if ($out -and $out.IsCompleted) { $l = $out.Result; if ($null -eq $l) { $out = $null } else { [void]$lines.Add($l); $out = $p.StandardOutput.ReadLineAsync(); $idle = $false } }
-        if ($err -and $err.IsCompleted) { $l = $err.Result; if ($null -eq $l) { $err = $null } else { [void]$lines.Add($l); $err = $p.StandardError.ReadLineAsync(); $idle = $false } }
-        [Windows.Forms.Application]::DoEvents()
-        if ($idle) { Start-Sleep -Milliseconds 30 }
-        if ($sw.Elapsed.TotalSeconds -gt $timeoutSec) { try { $p.Kill() } catch { }; throw "That took longer than $timeoutSec seconds and was stopped." }
-    }
-    $p.WaitForExit()
-    return @{ code = $p.ExitCode; lines = $lines }
-}
-
-# Writes params to a file only administrators can read (the logs folder), runs the command, and returns
-# the @@RESULT object it printed. The file is removed afterwards: it can hold passwords.
-function Invoke-Suite([string[]]$arguments, $params = $null, [string]$paramFlag = "--params") {
-    $file = $null
-    try {
-        if ($null -ne $params) {
-            $file = Join-Path $LogDir ("admin-" + [guid]::NewGuid().ToString("N") + ".json")
-            [IO.File]::WriteAllText($file, ($params | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
-            $arguments = $arguments + @($paramFlag, $file)
-        }
-        $r = Invoke-Manage $arguments
-        $line = @($r.lines | Where-Object { "$_".StartsWith("@@RESULT ") }) | Select-Object -Last 1
-        if (-not $line) {
-            $tail = (@($r.lines) | Select-Object -Last 4) -join " | "
-            return [pscustomobject]@{ ok = $false; error = "The suite didn't answer ($tail)"; msg = "The suite didn't answer ($tail)" }
-        }
-        return ($line.Substring(9) | ConvertFrom-Json)
-    } catch {
-        return [pscustomobject]@{ ok = $false; error = $_.Exception.Message; msg = $_.Exception.Message }
-    } finally {
-        if ($file -and (Test-Path $file)) { Remove-Item $file -Force -ErrorAction SilentlyContinue }
-    }
-}
-function Invoke-SuiteCmd([string]$name, $params) { return Invoke-Suite @("suiteadmin", "cmd", $name) $params }
-function Get-Msg($r) { if ($r.ok) { return "" + $(if ($r.msg) { $r.msg } else { "Done." }) } else { return "" + $(if ($r.error) { $r.error } else { $r.msg }) } }
-
-# ---------------------------------------------------------------- the suite's processes
-function Get-Port {
-    $port = "8000"
-    $envFile = Join-Path $InstallDir ".env"
-    if (Test-Path $envFile) {
-        foreach ($l in (Get-Content $envFile)) { if ($l -match '^\s*WEB_PORT\s*=\s*"?(\d+)') { $port = $Matches[1] } }
-    }
-    return $port
-}
-function Get-TaskState([string]$name) {
-    $t = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-    if (-not $t) { return "Missing" }
-    return "" + $t.State
-}
-function Get-Answering {
-    try {
-        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$(Get-Port)/api/version" -UseBasicParsing -TimeoutSec 3
-        return ($r.Content | ConvertFrom-Json)
-    } catch { return $null }
-}
-function Stop-SuiteNow {
-    foreach ($t in @($TaskWeb, $TaskTicker)) { if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue } }
-    # the task stops cmd.exe; also stop the Python processes it started (their command line names the folder)
-    $pattern = "*" + $InstallDir.TrimEnd("\") + "*"
-    Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*") } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    for ($i = 0; $i -lt 20; $i++) { if (-not (Get-Answering)) { break }; Wait-Pumped 1000 }
-    Write-AdminLog "Stopped the suite"
-}
-function Start-SuiteNow {
-    foreach ($t in @($TaskWeb, $TaskTicker)) {
-        if (-not (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue)) { throw "The scheduled task '$t' is missing. Run Setup.exe to repair the install." }
-        Start-ScheduledTask -TaskName $t
-    }
-    Write-AdminLog "Started the suite"
-    for ($i = 0; $i -lt 90; $i++) { $v = Get-Answering; if ($v) { return $v }; Wait-Pumped 1000 }
-    return $null
-}
+# ---------------------------------------------------------------- talking to the control service
 function Wait-Pumped([int]$ms) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     while ($sw.ElapsedMilliseconds -lt $ms) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 50 }
+}
+# POST to the control service, keeping the window responsive. Returns the answer as an object.
+function Invoke-ControlRaw([string]$path, $body) {
+    $json = ConvertTo-Json $body -Depth 8 -Compress
+    $content = New-Object System.Net.Http.StringContent($json, [Text.Encoding]::UTF8, "application/json")
+    $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, "http://127.0.0.1:$CtlPort$path")
+    $req.Content = $content
+    [void]$req.Headers.Add("X-Suite-Control", "1")
+    try {
+        $task = $Http.SendAsync($req)
+        while (-not $task.IsCompleted) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 30 }
+        if ($task.IsFaulted -or $task.IsCanceled) { throw "no answer" }
+        $read = $task.Result.Content.ReadAsStringAsync()
+        while (-not $read.IsCompleted) { [Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 20 }
+        return ($read.Result | ConvertFrom-Json)
+    } catch {
+        return [pscustomobject]@{ ok = $false; offline = $true; error = "Production Suite's control service isn't answering on this server. It starts with Windows; if it stays down, restart the server or run Setup.exe." }
+    }
+}
+function Invoke-Control([string]$path, $body = @{}) {
+    $b = @{}; foreach ($k in $body.Keys) { $b[$k] = $body[$k] }
+    $b.who = [Environment]::UserName; $b.token = $State.token
+    $r = Invoke-ControlRaw $path $b
+    if ($r.pin) {
+        if (-not (Show-PinLogin)) { return [pscustomobject]@{ ok = $false; error = "Not done: a shift lead PIN is needed for this." } }
+        $b.token = $State.token
+        $r = Invoke-ControlRaw $path $b
+    }
+    return $r
+}
+function Invoke-Suite([string[]]$arguments, $params = $null, [string]$paramFlag = "--params") {
+    $b = @{ args = $arguments; paramFlag = $paramFlag }
+    if ($null -ne $params) { $b.params = $params }
+    return Invoke-Control "/run" $b
+}
+function Invoke-SuiteCmd([string]$name, $params) { return Invoke-Suite @("suiteadmin", "cmd", $name) $params }
+function Invoke-Manage([string[]]$arguments) { return Invoke-Control "/run" @{ args = $arguments } }
+function Get-Msg($r) { if ($r.ok) { return "" + $(if ($r.msg) { $r.msg } else { "Done." }) } else { return "" + $(if ($r.error) { $r.error } else { $r.msg }) } }
+function Get-SuiteStatus { return Invoke-ControlRaw "/status" @{ who = [Environment]::UserName } }
+
+# Asks for a shift lead PIN; the control service checks it. Returns $true when logged in.
+function Show-PinLogin {
+    $dlg = New-Object Windows.Forms.Form
+    $dlg.Text = "Shift lead PIN"; $dlg.FormBorderStyle = "FixedDialog"; $dlg.StartPosition = "CenterScreen"; $dlg.TopMost = $true
+    $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false; $dlg.ClientSize = New-Object Drawing.Size(380, 170); $dlg.Font = $F.base
+    $dlg.AutoScaleDimensions = New-Object Drawing.SizeF(96, 96); $dlg.AutoScaleMode = "Dpi"
+    $l0 = New-Object Windows.Forms.Label; $l0.Text = "Stopping the suite and changing its settings need a shift lead PIN (the same PIN as the kiosks)."; $l0.SetBounds(16, 12, 350, 40); $dlg.Controls.Add($l0)
+    $pin = New-Object Windows.Forms.TextBox; $pin.UseSystemPasswordChar = $true; $pin.SetBounds(16, 60, 200, 24); $dlg.Controls.Add($pin)
+    $msg = New-Object Windows.Forms.Label; $msg.ForeColor = $C.bad; $msg.SetBounds(16, 90, 350, 36); $dlg.Controls.Add($msg)
+    $ok = New-Object Windows.Forms.Button; $ok.Text = "Log in"; $ok.SetBounds(160, 128, 100, 30); $dlg.Controls.Add($ok)
+    $no = New-Object Windows.Forms.Button; $no.Text = "Cancel"; $no.SetBounds(268, 128, 100, 30); $no.DialogResult = "Cancel"; $dlg.Controls.Add($no)
+    $dlg.AcceptButton = $ok; $dlg.CancelButton = $no
+    $ok.add_Click({
+        $msg.ForeColor = $C.dim; $msg.Text = "Checking..."
+        $r = Invoke-ControlRaw "/login" @{ pin = $pin.Text; who = [Environment]::UserName }
+        $pin.Text = ""
+        if ($r.ok) { $State.token = "" + $r.token; $State.lead = "" + $r.name; $dlg.DialogResult = "OK"; $dlg.Close() }
+        else { $msg.ForeColor = $C.bad; $msg.Text = Get-Msg $r }
+    })
+    [void]$dlg.ShowDialog()
+    $dlg.Dispose()
+    if ($State.lead -and $whoLabel) { $whoLabel.Text = "Shift lead: $($State.lead)"; $btnLogout.Visible = $true }
+    return [bool]$State.token
 }
 
 # ---------------------------------------------------------------- look
@@ -215,9 +167,13 @@ foreach ($n in $NAV) {
     $side.Controls.Add($l); $navLabels[$n[0]] = $l
     $y += 34
 }
-$folderLabel = New-Object Windows.Forms.Label
-$folderLabel.Text = $InstallDir; $folderLabel.ForeColor = $C.sideDim
-$folderLabel.SetBounds(20, 590, 185, 40); $side.Controls.Add($folderLabel)
+$whoLabel = New-Object Windows.Forms.Label
+$whoLabel.Text = "Not logged in"; $whoLabel.ForeColor = $C.sideDim
+$whoLabel.SetBounds(20, 556, 185, 22); $side.Controls.Add($whoLabel)
+$btnLogout = New-Object Windows.Forms.Button
+$btnLogout.Text = "Log out"; $btnLogout.SetBounds(20, 584, 90, 28); $btnLogout.FlatStyle = "System"; $btnLogout.Visible = $false
+$btnLogout.add_Click({ [void](Invoke-ControlRaw "/logout" @{ token = $State.token }); $State.token = ""; $State.lead = ""; $whoLabel.Text = "Not logged in"; $btnLogout.Visible = $false })
+$side.Controls.Add($btnLogout)
 
 $title = New-Object Windows.Forms.Label
 $title.Font = $F.title; $title.ForeColor = $C.ink; $title.SetBounds(232, 18, 690, 32)
@@ -311,12 +267,11 @@ $sRestart = Add-Button $pS "Restart" 216 128 100
 $sRefresh = Add-Button $pS "Refresh" 324 128 100
 $sStatus = Add-Status $pS 166 40
 $sOpen = Add-Button $pS "Open Operator Kiosk" 0 212 170
-$sLogs = Add-Button $pS "Open logs folder" 178 212 150
-$sBackups = Add-Button $pS "Open updates folder" 336 212 160
+Add-Text $pS "Stop and changing settings ask for a shift lead PIN. Start and Restart don't." 218 22 | ForEach-Object { $_.SetBounds(186, 218, 480, 22) }
 Add-Head $pS "Logs" 258 | Out-Null
 $sLogPick = New-Object Windows.Forms.ComboBox
 $sLogPick.DropDownStyle = "DropDownList"; $sLogPick.SetBounds(0, 286, 240, 24)
-foreach ($n in @("web.log", "ticker.log", "update.log", "admin.log", "web-console.log", "ticker-console.log")) { [void]$sLogPick.Items.Add($n) }
+foreach ($n in @("web.log", "ticker.log", "update.log", "admin.log", "control.log", "web-console.log", "ticker-console.log")) { [void]$sLogPick.Items.Add($n) }
 $pS.Controls.Add($sLogPick)
 $sLogShow = Add-Button $pS "Show last lines" 248 283 130
 $sLog = New-Object Windows.Forms.TextBox
@@ -325,9 +280,17 @@ $sLog.SetBounds(0, 318, 670, 206); $sLog.BackColor = [Drawing.Color]::FromArgb(2
 $pS.Controls.Add($sLog)
 
 function Update-StatusPage {
-    $web = Get-TaskState $TaskWeb; $tick = Get-TaskState $TaskTicker
-    $v = Get-Answering
-    $port = Get-Port
+    $st = Get-SuiteStatus
+    if ($st.offline) {
+        $sVersion.Text = "Can't reach the control service"; $sVersion.ForeColor = $C.bad
+        $sWeb.Text = ""; $sTicker.Text = ""; $sAnswer.Text = "" + $st.error; $sAnswer.ForeColor = $C.dim
+        $sStart.Enabled = $false; $sStop.Enabled = $false; $sRestart.Enabled = $false
+        return
+    }
+    $State.port = "" + $st.port; $State.host = "" + $st.host
+    $web = "" + $st.tasks.web; $tick = "" + $st.tasks.ticker
+    $v = $st.answering
+    $port = "" + $st.port
     $word = @{ Running = "running"; Ready = "stopped"; Disabled = "turned off in Task Scheduler"; Missing = "not set up (run Setup.exe)"; Queued = "starting" }
     $sWeb.Text = "Web app (screens):  " + $(if ($word[$web]) { $word[$web] } else { $web })
     $sTicker.Text = "Minute ticker (machine data, pulls, alerts):  " + $(if ($word[$tick]) { $word[$tick] } else { $tick })
@@ -340,25 +303,23 @@ function Update-StatusPage {
         $sAnswer.Text = "Not answering on port $port. If it was just started, give it a minute; otherwise see web-console.log below."; $sAnswer.ForeColor = $C.dim
     }
     $sStart.Enabled = -not $State.busy -and -not $v -and $web -ne "Running"
-    $sStop.Enabled = -not $State.busy -and ($web -eq "Running" -or $tick -eq "Running" -or $v)
+    $sStop.Enabled = -not $State.busy -and ($web -eq "Running" -or $tick -eq "Running" -or [bool]$v)
+    $sRestart.Enabled = -not $State.busy
 }
-$sStart.add_Click({ [void](Run-Step $sStatus "Starting the suite..." { $v = Start-SuiteNow; if ($v) { @{ ok = $true; msg = "Started: v$($v.version) rev $($v.revision) is answering." } } else { @{ ok = $false; error = "Started, but it isn't answering yet. See web-console.log." } } }); Update-StatusPage })
+$sStart.add_Click({ [void](Run-Step $sStatus "Starting the suite..." { Invoke-Control "/start" }); Update-StatusPage })
 $sStop.add_Click({
     if (-not (Confirm-Box "Stop the suite? Every screen goes offline and machine readings aren't recorded until it is started again.")) { return }
-    [void](Run-Step $sStatus "Stopping the suite..." { Stop-SuiteNow; @{ ok = $true; msg = "Stopped. It starts again by itself when the server restarts, or with Start." } }); Update-StatusPage })
+    [void](Run-Step $sStatus "Stopping the suite..." { Invoke-Control "/stop" }); Update-StatusPage })
 $sRestart.add_Click({
     if (-not (Confirm-Box "Restart the suite? Screens go offline for about a minute and reconnect by themselves.")) { return }
-    [void](Run-Step $sStatus "Restarting the suite..." { Stop-SuiteNow; $v = Start-SuiteNow; if ($v) { @{ ok = $true; msg = "Restarted: v$($v.version) rev $($v.revision) is answering." } } else { @{ ok = $false; error = "Restarted, but it isn't answering yet. See web-console.log." } } })
+    [void](Run-Step $sStatus "Restarting the suite..." { Invoke-Control "/restart" })
     Update-StatusPage })
 $sRefresh.add_Click({ Update-StatusPage })
-$sOpen.add_Click({ Start-Process "http://localhost:$(Get-Port)/operator/" })
-$sLogs.add_Click({ Start-Process explorer.exe $LogDir })
-$sBackups.add_Click({ $u = Join-Path $InstallDir "updates"; if (-not (Test-Path $u)) { New-Item -ItemType Directory $u -Force | Out-Null }; Start-Process explorer.exe $u })
+$sOpen.add_Click({ $p = $(if ($State.port) { $State.port } else { "8000" }); Start-Process "http://localhost:$p/operator/" })
 $sLogShow.add_Click({
     $name = "" + $sLogPick.SelectedItem; if (-not $name) { $name = "web.log" }
-    $f = Join-Path $LogDir $name
-    if (Test-Path $f) { $sLog.Text = ((Get-Content $f -Tail 200 -ErrorAction SilentlyContinue) -join "`r`n"); $sLog.SelectionStart = $sLog.Text.Length; $sLog.ScrollToCaret() }
-    else { $sLog.Text = "$name hasn't been written yet." }
+    $r = Invoke-ControlRaw "/log" @{ name = $name }
+    if ($r.ok) { $sLog.Text = "" + $r.text; $sLog.SelectionStart = $sLog.Text.Length; $sLog.ScrollToCaret() } else { $sLog.Text = Get-Msg $r }
 })
 
 # ================================================================ Records database
@@ -426,19 +387,18 @@ $rSave.add_Click({
         $p = @{ host = $rHost.Text.Trim(); port = $rPort.Text.Trim(); name = $rName.Text.Trim(); user = $rUser.Text.Trim(); password = $rPass.Text }
         $s = Invoke-Suite @("suiteadmin", "records-save") $p
         if (-not $s.ok) { return $s }
-        Stop-SuiteNow
+        [void](Invoke-Control "/stop")
         $m = Invoke-Manage @("migrate", "--noinput", "--database", "default")
-        if ($m.code -ne 0) {
-            [void](Invoke-Suite @("suiteadmin", "records-undo"))
+        if (-not $m.ok) {
+            [void](Invoke-Suite @("suiteadmin", "records-undo") @{})
             $tail = (@($m.lines) | Select-Object -Last 3) -join " | "
-            [void](Start-SuiteNow)
-            return @{ ok = $false; error = "Building the tables in the new database failed, so the previous settings were put back and the suite restarted. ($tail)" }
+            [void](Invoke-Control "/start")
+            return @{ ok = $false; error = "Building the tables in the new database failed, so the previous settings were put back and the suite restarted. ($tail$($m.error))" }
         }
         [void](Invoke-Manage @("collectstatic", "--noinput"))
-        Write-AdminLog "Records database changed to $($p.name) on $($p.host):$($p.port) as $($p.user)"
-        $v = Start-SuiteNow
+        $v = Invoke-Control "/start"
         $rPass.Text = ""
-        if ($v) { return @{ ok = $true; msg = "Saved. The suite now uses $($p.name) on $($p.host) and is answering." } }
+        if ($v.ok) { return @{ ok = $true; msg = "Saved. The suite now uses $($p.name) on $($p.host) and is answering." } }
         return @{ ok = $false; error = "Saved, but the suite isn't answering yet. Check web-console.log on the Status page." }
     })
     Load-Info
@@ -573,20 +533,9 @@ $nSrvSave.add_Click({
     $r = Run-Step $nSrvStatus "Saving..." { Invoke-Suite @("suiteadmin", "server-save") @{ port = $nPort.Text.Trim(); tz = $nTz.Text.Trim(); stationKey = $nKey.Text.Trim() } }
     if (-not $r -or -not $r.ok) { return }
     $notes = @()
-    if ($r.portChanged) {
-        try {
-            Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction Stop | Set-NetFirewallRule -LocalPort $nPort.Text.Trim() -ErrorAction Stop
-            $notes += "Firewall rule moved to port $($nPort.Text.Trim())."
-        } catch { $notes += "Couldn't move the firewall rule to the new port ($($_.Exception.Message)); allow it by hand." }
-        $desk = $(if ($env:PUBLIC) { Join-Path $env:PUBLIC "Desktop" } else { "" })
-        @($(if ($desk) { Get-ChildItem -Path $desk -Filter "Production Suite - *.url" -ErrorAction SilentlyContinue })) | ForEach-Object {
-            $t = Get-Content $_.FullName -Raw
-            Set-Content -Path $_.FullName -Value ($t -replace "localhost:\d+", "localhost:$($nPort.Text.Trim())") -Encoding ASCII
-        }
-    }
-    Write-AdminLog "Server settings saved (port $($nPort.Text.Trim()), time zone $($nTz.Text.Trim()))"
+    if ($r.portChanged) { $x = Invoke-Control "/port-changed" @{ port = $nPort.Text.Trim() }; if ($x.msg) { $notes += "" + $x.msg } }
     if ($r.restart -and (Confirm-Box (("Saved. " + ($notes -join " ") + "`n`nRestart the suite now to use the new settings? Screens go offline for about a minute.").Trim()))) {
-        [void](Run-Step $nSrvStatus "Restarting..." { Stop-SuiteNow; $v = Start-SuiteNow; if ($v) { @{ ok = $true; msg = "Restarted with the new settings." } } else { @{ ok = $false; error = "Restarted, but it isn't answering yet. See the Status page." } } })
+        [void](Run-Step $nSrvStatus "Restarting..." { Invoke-Control "/restart" })
     } elseif ($notes) { Set-Status $nSrvStatus $true ("Saved. " + ($notes -join " ")) }
 })
 
@@ -635,12 +584,19 @@ function Show-Page([string]$key) {
 }
 
 # ---------------------------------------------------------------- start
-if (-not (Test-Path $Py) -or -not (Test-Path (Join-Path $InstallDir "manage.py"))) {
-    [Windows.Forms.MessageBox]::Show("The suite isn't fully installed in $InstallDir (no Python environment). Run Setup.exe first.", "Production Suite Admin", "OK", "Warning") | Out-Null
-    exit 1
+if ($Tray) { . (Join-Path $Here "SuiteTray.ps1"); exit 0 }
+$mutex = New-Object Threading.Mutex($false, "Local\ProductionSuiteAdminWindow")
+if (-not $mutex.WaitOne(0)) {
+    Write-UiLog "already open; not opening a second window"
+    [Windows.Forms.MessageBox]::Show("Production Suite Admin is already open.", "Production Suite Admin") | Out-Null
+    exit 0
 }
-Write-AdminLog "Production Suite Admin opened"
+$form.ShowInTaskbar = $true
+$form.add_Load({ $form.WindowState = "Normal" })
 $form.add_Shown({
+    Write-UiLog "window shown"
+    # make sure the window comes to the front, even when started from the tray or a hidden launcher
+    $form.TopMost = $true; $form.Activate(); $form.TopMost = $false
     Show-Page "status"
     Set-Busy $true; Set-Status $sStatus $null "Reading the settings..."
     Load-Info
@@ -653,5 +609,7 @@ $form.add_Shown({
         $timer.Start()
     } catch { }
 })
+Write-UiLog "opening the window"
 [void]$form.ShowDialog()
-Write-AdminLog "Production Suite Admin closed"
+if ($State.token) { [void](Invoke-ControlRaw "/logout" @{ token = $State.token }) }
+Write-UiLog "window closed"

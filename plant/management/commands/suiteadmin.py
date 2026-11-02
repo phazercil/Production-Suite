@@ -35,7 +35,7 @@ class Command(BaseCommand):
     help = "Back end of the Production Suite Admin desktop program."
 
     def add_arguments(self, parser):
-        parser.add_argument("action", choices=["info", "cmd", "records-save", "records-undo", "server-save"])
+        parser.add_argument("action", choices=["info", "cmd", "records-save", "records-undo", "server-save", "pin-check"])
         parser.add_argument("name", nargs="?", default="")
         parser.add_argument("--params", help="JSON file with the fields")
 
@@ -47,6 +47,7 @@ class Command(BaseCommand):
                 Path(o["params"]).unlink()  # it can hold passwords: don't leave it behind
             except OSError:
                 pass
+        self.as_name = str(p.pop("_as", "") or "")[:80] if isinstance(p, dict) else ""
         try:
             out = getattr(self, "do_" + o["action"].replace("-", "_"))(o.get("name"), p)
         except Exception as e:  # always answer the window with something it can show
@@ -56,11 +57,14 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------ helpers
     def ctx(self):
         from hmi import engine
-        try:
-            who = getpass.getuser()
-        except Exception:
-            who = "administrator"
-        return engine.Ctx(user=SimpleNamespace(name=f"Server desktop ({who})"[:80], role="admin", id=None, pk=None), client_ip="127.0.0.1")
+        if self.as_name:  # a shift lead who entered their PIN in Production Suite Admin
+            who = f"{self.as_name} (server desktop)"
+        else:
+            try:
+                who = f"Server desktop ({getpass.getuser()})"
+            except Exception:
+                who = "Server desktop"
+        return engine.Ctx(user=SimpleNamespace(name=who[:80], role="admin", id=None, pk=None), client_ip="127.0.0.1")
 
     def env(self):
         from plant import liveconfig
@@ -98,6 +102,17 @@ class Command(BaseCommand):
         r = engine.execute(name, p, self.ctx())
         r.pop("state", None)
         return r
+
+    def do_pin_check(self, name, p):
+        """Is this an active shift lead's PIN? Used by the control service before Stop or any change."""
+        from plant.models import Person
+        pin = str(p.get("pin") or "").strip()
+        if not pin:
+            return {"ok": False, "error": "Type a shift lead PIN."}
+        m = [u for u in Person.objects.filter(active=True, role="admin", pin=pin) if u.pin == pin]
+        if not m:
+            return {"ok": False, "error": "That is not a shift lead PIN."}
+        return {"ok": True, "name": m[0].name}
 
     def do_records_save(self, name, p):
         """Write the records database settings (already tested by install_plant --check db). The window then
