@@ -13,7 +13,7 @@ mysql -e "CREATE DATABASE production_suite CHARACTER SET utf8mb4 COLLATE utf8mb4
 
 cd /tmp && tar xzf /src/dist/ProductionSuite-Linux.tar.gz && cd ProductionSuite-Linux
 cat > /tmp/answers.json <<'JSON'
-{"plant_network": "192.168.100.0/24, 172.16.0.0/12", "db_host": "127.0.0.1", "db_port": "3306", "db_name": "production_suite",
+{"plant_network": "192.168.100.0/24", "db_host": "127.0.0.1", "db_port": "3306", "db_name": "production_suite",
  "db_user": "suite", "db_password": "Ci-Pass-12345", "use_asset_db": "n", "use_s2k_db": "n", "web_port": "80",
  "time_zone": "America/New_York", "scheduler_lead": "y", "station_key": "", "lead_name": "CI Lead", "lead_pin": "864213", "demo": "n"}
 JSON
@@ -38,19 +38,9 @@ pass "Operator Kiosk and /api/version answer through Apache; Apache serves the s
 grep -q "Require ip 192.168.100.0/24" /etc/httpd/conf.d/production-suite-allow.inc || die "allow list: $(cat /etc/httpd/conf.d/production-suite-allow.inc)"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 192.168.100.5' --interface 127.0.0.1 http://127.0.0.1/api/version)
 [ "$code" = 200 ] || die "local request with a header: $code"
-# a request from an address outside the plant network (this container's own non-loopback address) is refused by Apache
-ip=$(ip -4 -o addr show scope global | awk '{sub(/\/.*/, "", $4); print $4; exit}')
-if [ -n "$ip" ] && ! printf '%s' "$ip" | grep -Eq '^(192\.168\.100\.|172\.(1[6-9]|2[0-9]|3[01])\.)'; then
-    code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 192.168.100.5' "http://$ip/api/version")
-    [ "$code" = 403 ] || die "a request from $ip (outside the plant network) got $code"
-    pass "a request from $ip (outside the plant network) is refused, even claiming 192.168.100.5"
-else
-    echo "note: this container's address ($ip) is inside the test plant network; skipping the outside-address check"
-fi
-
 # Admin > Network: a change reaches Apache through the root helper within seconds
 cd /opt/production-suite
-runuser -u psuite -- .venv/bin/python manage.py network --set "192.168.100.0/24, 10.42.0.0/16" >/dev/null
+runuser -u psuite -- .venv/bin/python manage.py network --set 192.168.100.0/24 10.42.0.0/16 >/dev/null
 for i in $(seq 1 30); do grep -q "10.42.0.0/16" /etc/httpd/conf.d/production-suite-allow.inc && break; sleep 1; done
 grep -q "Require ip 10.42.0.0/16" /etc/httpd/conf.d/production-suite-allow.inc || die "the new plant network didn't reach Apache"
 pass "a plant network change reached Apache's allow list (via production-suite-network.path, as root)"

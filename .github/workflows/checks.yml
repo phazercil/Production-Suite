@@ -105,3 +105,18 @@ jobs:
           docker exec el9 cat /etc/os-release | head -3
       - name: Install with install.sh and check it through Apache
         run: docker exec el9 bash /src/packaging/ci/linux-check.sh
+      - name: From outside the plant network, Apache refuses (even a faked address)
+        run: |
+          IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' el9)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://$IP/api/version")
+          echo "from the GitHub machine to $IP: $code"; [ "$code" = 403 ]
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 192.168.100.5' "http://$IP/operator/")
+          echo "same, claiming 192.168.100.5: $code"; [ "$code" = 403 ]
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://$IP:8008/api/version" || true)
+          echo "straight to the suite's own port 8008: $code"; [ "$code" = 000 ]
+      - name: Logs if something failed
+        if: failure()
+        run: |
+          docker exec el9 tail -80 /var/log/production-suite-install.log || true
+          docker exec el9 journalctl -u production-suite-web -u production-suite-ticker -u httpd -u production-suite-network -u production-suite-updater --no-pager -n 80 || true
+          docker exec el9 cat /etc/httpd/conf.d/production-suite-allow.inc || true
