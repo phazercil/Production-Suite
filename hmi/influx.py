@@ -254,7 +254,8 @@ def fetch_feed(machine, now=None):
         raise InfluxError(f'"{field}" is not a number ({str(ppm)[:30]})')
     if machine.feed_count_field and sample.get(machine.feed_count_field) is not None:
         out["count"] = sample[machine.feed_count_field]
-    return out
+    from . import machinedata
+    return machinedata.add_extras(machine, out, sample.get)
 
 
 def test(cfg=None):
@@ -328,7 +329,7 @@ def write(lines, cfg=None):
 
 
 def minute_point(r, stop):
-    stopped = r.ppm <= stop
+    stopped = not r.run  # the run signal (High/Low) when the machine has one, otherwise speed at or below the stop speed
     return point("suite_minute", {"line": r.line, "shift": r.shift.shift_name if r.shift_id and r.shift else ""},
                  {"ppm": int(r.ppm), "units": int(r.units or 0), "run": int(not stopped), "planned": int(bool(r.planned)),
                   "down": int(stopped and not r.planned), "counted": int(not stopped or not r.planned)}, r.t)

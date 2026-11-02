@@ -62,6 +62,8 @@ class PpmReading(models.Model):
     ppm = models.IntegerField()
     units = models.IntegerField(default=0, help_text="Filters made in this minute")
     planned = models.BooleanField(default=False, help_text="Minute inside a planned break, lunch or start-up (not downtime)")
+    run = models.BooleanField(default=True, help_text="Running this minute: the machine's run signal if it has one, otherwise speed above the stop speed")
+    recipe = models.CharField(max_length=80, blank=True, default="", help_text="Recipe loaded in the machine this minute")
 
     class Meta:
         db_table = "hmi_ppm"

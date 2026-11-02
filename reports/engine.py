@@ -144,16 +144,18 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
     if sc["level"] != "mo":
         qs = PpmReading.objects.filter(t__gte=a, t__lt=b, **f)
         # a minute stopped during a planned break, lunch or start-up is not counted (same as the kiosk and hmi_downtime)
-        ann = dict(obs=Count("id", filter=Q(ppm__gt=stop_ppm) | Q(planned=False)), run=Count("id", filter=Q(ppm__gt=stop_ppm)), units=Sum("units"),
-                   ppmAvg=Avg("ppm", filter=Q(ppm__gt=stop_ppm)))
+        # "run" is the machine's run signal when it has one, otherwise speed above the stop speed (set each minute)
+        ann = dict(obs=Count("id", filter=Q(run=True) | Q(planned=False)), runMins=Count("id", filter=Q(run=True)), units=Sum("units"),
+                   ppmAvg=Avg("ppm", filter=Q(run=True)))
         tot = qs.aggregate(**ann)
+        tot["run"] = tot.pop("runMins")
         for k in ("obs", "run", "units"):
             total[k] = tot[k] or 0
         total["ppmAvg"] = round(tot["ppmAvg"], 1) if tot["ppmAvg"] is not None else None
         if grp and grp != "mo":
             for r in qs.values(grp).annotate(**ann):
                 x = row(r[grp])
-                x.update(obs=r["obs"] or 0, run=r["run"] or 0, units=r["units"] or 0,
+                x.update(obs=r["obs"] or 0, run=r["runMins"] or 0, units=r["units"] or 0,
                          ppmAvg=round(r["ppmAvg"], 1) if r["ppmAvg"] is not None else None)
     # downtime, cut to the period
     for d in Downtime.objects.filter(start_time__lt=b, end_time__gt=a, **g).values("start_time", "end_time", "reason", *( [grp] if grp else [])):

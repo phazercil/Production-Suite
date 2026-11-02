@@ -101,7 +101,8 @@ def fetch_feed(machine):
         c = pick(data, machine.feed_count_field)
         if c is not None:
             out["count"] = c
-    return out
+    from . import machinedata
+    return machinedata.add_extras(machine, out, lambda f: pick(data, f))
 
 
 def post_webhook(url, events):
@@ -155,7 +156,7 @@ def paycom_fields():
 
 
 # ------------------------------------------------------------------ read-only outside databases (asset database, S2K)
-DB_NAMES = {"assets": "The asset database", "s2k": "The S2K database"}
+DB_NAMES = {"assets": "The asset database", "s2k": "The S2K database", "machines": "The machine data database"}
 
 
 def assets_ready():
@@ -166,6 +167,11 @@ def assets_ready():
 def s2k_db_ready():
     liveconfig.refresh()
     return "s2k" in connections.databases
+
+
+def machines_db_ready():
+    liveconfig.refresh()
+    return "machines" in connections.databases
 
 
 def _db(db):
@@ -279,6 +285,11 @@ def test(key):
                 except influx.InfluxError as e:
                     return set_conn(key, False, str(e))
                 return set_conn(key, True, f"{r['ppm']:g} P/m from InfluxDB")
+            if m.feed_type == "db":
+                from . import machinedata
+                r = machinedata.preview(m)
+                return set_conn(key, True, f"{r['ppm']:g} P/m" + (f" · recipe {r['recipe']}" if r.get("recipe") else "")
+                                + (f" · {'running' if r['run'] else 'stopped'}" if isinstance(r.get("run"), bool) else ""))
             if m.feed_type == "push":
                 live = getattr(m, "live", None)
                 if live and live.pushed_at and (now() - live.pushed_at).total_seconds() < 150:
@@ -306,6 +317,10 @@ def test(key):
             if not assets_ready():
                 return set_conn(key, False, "ASSET_DB_* not set in .env")
             return set_conn(key, True, f"{len(schema()['tables'])} tables")
+        if key == "machines":
+            if not machines_db_ready():
+                return set_conn(key, False, "Not set up (Admin > Connections > Databases and accounts)")
+            return set_conn(key, True, f"{len(schema('machines')['tables'])} tables (read-only)")
         if key == "paycom":
             if not paycom_ready():
                 return set_conn(key, False, "PAYCOM_SID / PAYCOM_TOKEN not set in .env")

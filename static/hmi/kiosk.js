@@ -324,7 +324,7 @@ VIEWS.controls=()=>{
         <div class="metric"><span>Est. finish</span><b class="num">${fin?PLAN_FMT(fin).replace(/^(\S+) (?=\d+:)/,'<small>$1 </small>').replace(/ (am|pm)/,'<small>$1</small>'):'—'}</b></div>
       </div>`
       :`<div class="mo"><b>${sh.state==='changeover'?'Setting up':'No MO'}</b></div><div class="desc">${sh.state==='changeover'?'Finish the changeover steps to start the next MO.':'Scan an MO from Change Over to start counting parts against it.'}</div>`}
-      <div class="shiftline"><span>Shift count <b>${sh.count.toLocaleString()}</b></span><span>Uptime <b>${st.uptime}%</b></span><span>Down <b>${st.down} min</b></span><span>${sh.state==='changeover'?'Changeover':'MO'} timer <b data-live="moTimer">${timer}</b></span></div>
+      <div class="shiftline"><span>Shift count <b>${sh.count.toLocaleString()}</b></span><span>Uptime <b>${st.uptime}%</b></span><span>Down <b>${st.down} min</b></span>${S.feed&&S.feed.recipe?`<span>Recipe <b>${esc(S.feed.recipe)}</b></span>`:''}<span>${sh.state==='changeover'?'Changeover':'MO'} timer <b data-live="moTimer">${timer}</b></span></div>
     </div>`;
   }
   const alert=reasonDue()||(sh&&sh.stopStart);
@@ -472,7 +472,9 @@ VIEWS.status=()=>{
   <div class="grid2" data-r="lines">${S.lines.map(l=>{const R=S.runs[l.id]||{},sh=R.shift,on=!!(sh&&sh.active),st=E.shiftStats(S,l.id),mo=on?E.curMO(S,l.id):null,nxt=S.mos.filter(m=>m.line===l.id&&m.status==='OPEN'&&!(mo&&String(mo.id)===String(m.id))).sort((a,b)=>a.seq-b.seq)[0],f=R.feed||{},h=R.hist||[];
     return `<div class="panel linecard"><div class="swatch" style="background:${l.color}"></div><div style="min-width:0"><div class="row"><h2 class="h2 grow">${esc(l.id)}${l.id===station?' <span class="note">(this screen)</span>':''}</h2>${pill(l,sh,on)}</div>
     <dl class="kv" style="margin-top:8px"><dt>Rated</dt><dd class="num">${l.rated} P/m</dd>
-    <dt>Machine data</dt><dd>${{demo:'Demo replay',http:'Read from URL',push:'Pushed to the server',none:'Not connected'}[(l.feed||{}).type]||'—'}${f.t?(f.ok?' · <span class="pill ok">OK</span>':` · <span class="pill bad" title="${esc(f.err)}">NO DATA</span>`):''}</dd>
+    <dt>Machine data</dt><dd>${{demo:'Demo replay',http:'Read from URL',push:'Pushed to the server',influx:'InfluxDB query',db:'Database table',none:'Not connected'}[(l.feed||{}).type]||'—'}${f.t?(f.ok?' · <span class="pill ok">OK</span>':` · <span class="pill bad" title="${esc(f.err)}">NO DATA</span>`):''}</dd>
+    ${f.recipe?`<dt>Recipe</dt><dd>${esc(f.recipe)}</dd>`:''}
+    ${(l.feed.uptime||{}).type?`<dt>Run signal</dt><dd>${f.runErr?`<span class="pill warn" title="${esc(f.runErr)}">NOT READ</span> <span class="note">uptime uses the speed</span>`:f.run===true?'<span class="pill ok">RUNNING</span>':f.run===false?'<span class="pill bad">STOPPED</span>':'—'}</dd>`:''}
     ${on?`<dt>Operator</dt><dd>${esc(sh.userName||sh.user)}</dd><dt>MO</dt><dd>${mo?`${mo.mo} · ${esc(mo.item)}`:'—'}</dd><dt>Speed now</dt><dd class="num">${h.length?h[h.length-1].ppm:0} P/m</dd><dt>Shift count</dt><dd class="num">${sh.count.toLocaleString()}</dd><dt>Uptime</dt><dd class="num">${st.uptime}% · ${st.down} min down</dd>`:''}
     <dt>Next up</dt><dd>${nxt?`${esc(nxt.item)} · MO ${nxt.mo}`:'Nothing scheduled'}</dd></dl></div></div>`}).join('')}</div>
   <div class="panel"><div class="row"><h2 class="h2 grow">Performance over time · ${esc(station)}</h2><span class="note">${panels?'Live panels from Grafana':'Built-in chart · connect Grafana in Admin › Connections for history across shifts and lines'}</span></div>
@@ -650,8 +652,8 @@ function alertsBody(){
     ${I.log.map(x=>`<tr><td>${fmtD(x.t)} ${fmtT(x.t)}</td><td>${{down:'Line down',back:'Running again',test:'Test'}[x.kind]||x.kind}</td><td>${esc(x.line)}</td><td class="l">${esc(x.contact)} · ${x.channel==='sms'?'text':'email'} ${esc(x.to)}</td><td class="l">${x.ok?'<span class="pill ok">SENT</span>':`<span class="pill bad">FAILED</span> <span class="note">${esc(x.msg)}</span>`}</td></tr>`).join('')}</tbody></table></div></div>`:''}`;
 }
 function grafanaQueriesPanel(){
-  const stop=C().rules.stopPpm, q=[
-    ['Uptime % (leaves out breaks, lunch and start-up, like the suite)',`SELECT $__timeGroupAlias(t, '1h'),\n  100 * SUM(ppm > ${stop}) / NULLIF(SUM(ppm > ${stop} OR planned = 0), 0) AS "Uptime %"\nFROM hmi_ppm\nWHERE line = '$line' AND $__timeFilter(t)\nGROUP BY 1 ORDER BY 1`],
+  const q=[
+    ['Uptime % (leaves out breaks, lunch and start-up, like the suite)',`SELECT $__timeGroupAlias(t, '1h'),\n  100 * SUM(run) / NULLIF(SUM(run OR planned = 0), 0) AS "Uptime %"\nFROM hmi_ppm\nWHERE line = '$line' AND $__timeFilter(t)\nGROUP BY 1 ORDER BY 1`],
     ['Downtime minutes (planned time is never in this table)',`SELECT $__timeGroupAlias(start_time, '1d'), SUM(minutes) AS "Down min"\nFROM hmi_downtime\nWHERE line = '$line' AND $__timeFilter(start_time)\nGROUP BY 1 ORDER BY 1`],
     ['Downtime by reason',`SELECT COALESCE(reason, 'No reason given') AS reason, SUM(minutes) AS "Minutes"\nFROM hmi_downtime\nWHERE line = '$line' AND $__timeFilter(start_time)\nGROUP BY 1 ORDER BY 2 DESC`],
     ['Speed without planned stops',`SELECT t AS time, ppm AS "P/m"\nFROM hmi_ppm\nWHERE line = '$line' AND planned = 0 AND $__timeFilter(t)\nORDER BY t`],
@@ -697,6 +699,7 @@ function connAccountsPanel(adm){
     ${I.writable?'':'<p class="note" style="margin-top:6px;color:var(--bad)">The server can\'t write its settings file, so changes can\'t be saved here. Re-run Setup.exe to repair the folder permissions.</p>'}
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
     ${dbBox('s2k','S2K database (read-only)','Open MOs for the Scheduler. After saving, set up the query under S2K schedule below.')}
+    ${dbBox('machines','Machine data database (read-only)','The database the machines (PLCs, data loggers) write their readings to. Pick each machine\'s table under Machine data below.')}
     ${dbBox('assets','Asset database (read-only)','Changeover steps, machine settings and drawing specs. Queries are set up on the Changeover data tab.')}
     <div class="panel" style="background:var(--well-3)"><div class="row"><h3 class="h2 grow" style="font-size:18px">Paycom</h3>${I.paycom.on?'<span class="pill ok">SET UP</span>':'<span class="pill idle">NOT SET UP</span>'}</div>
       <p class="sub" style="margin-top:4px">Imports the operator list. This is an internet connection (Paycom is a cloud service), used only when set up here.</p>
@@ -733,12 +736,96 @@ function influxBox(I,F){
     <div class="row" style="margin-top:8px"><button class="btn" data-action="connTest" data-g="influx">Test connection</button><button class="btn primary" data-action="connSave" data-g="influx">Save</button>${d.on?'<button class="btn ghost" data-action="connRemove" data-g="influx">Remove</button>':''}</div>
     ${m?`<p style="margin-top:6px;color:${m.ok?'var(--ok)':'var(--bad)'}">${esc(m.text)}</p>`:''}</div>`;
 }
+// ---------------------------------------------------------------- Admin › Connections › Machine data
+const FEED_LABEL={db:'Database table',http:'Read from URL',push:'Pushed to server',influx:'InfluxDB query',demo:'Demo replay',none:'Not connected'};
+const TABLE_DBS={machines:'Machine data database',assets:'Asset database'};
+function mTables(db,adm){
+  const T=ui.mtables=ui.mtables||{};
+  if(!T[db]&&adm&&SRV.server){T[db]={loading:true};API.cmd('machineTables',{db}).then(r=>{T[db]=r.ok?{tables:r.data.tables}:{err:r.error||'Couldn\'t list the tables'};render(true)})}
+  return T[db]||{};
+}
+function mSelect(id,lid,f,val,opts,blank,dis){
+  const has=opts.includes(val), known=opts.length>0;  // "not found" only once the database has listed its tables or columns
+  return `<select id="${id}" data-change="lineF" data-id="${esc(lid)}" data-f="${f}" ${dis}>${blank!==null?`<option value="" ${!val?'selected':''}>${esc(blank)}</option>`:''}${val&&!has?`<option value="${esc(val)}" selected>${esc(val)}${known?' (not found)':''}</option>`:''}${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
+}
+// Where a table's rows come from: database, table, newest row, which rows are this machine's.
+function mTableFields(l,pre,src,adm,dis){
+  const id=l.id, k=pre.replace(/\W/g,''), T=mTables(src.db||'machines',adm), tbls=(T.tables||[]).map(t=>t.name);
+  const cols=((T.tables||[]).find(t=>t.name===src.table)||{columns:[]}).columns.map(c=>c.name);
+  const ready=src.db==='assets'?SRV.assets:SRV.machinesdb;
+  return {cols,html:`<div class="grid3" style="margin-top:8px">
+    <label class="f">Database<select id="md-${k}-db-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}db" ${dis}>${Object.entries({machines:'Machine data',assets:'Asset database'}).map(([v,t])=>`<option value="${v}" ${(src.db||'machines')===v?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label class="f">Table${mSelect(`md-${k}-tb-${id}`,id,pre+'table',src.table||'',tbls,'Pick the table',dis)}</label>
+    <label class="f">Newest row by${mSelect(`md-${k}-ob-${id}`,id,pre+'orderCol',src.orderCol||'',cols,'Pick a time stamp or ID column',dis)}</label>
+    <label class="f">Rows for this machine (if the table has several)${mSelect(`md-${k}-kc-${id}`,id,pre+'keyCol',src.keyCol||'',cols,'Whole table is this machine',dis)}</label>
+    ${src.keyCol?`<label class="f">…where ${esc(src.keyCol)} is<input type="text" id="md-${k}-kv-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}keyVal" value="${esc(src.keyVal||'')}" placeholder="${esc(id)}" ${dis}></label>`:''}
+    <label class="f">No data after (min without a new row, 0 = never)<input type="number" min="0" step="1" id="md-${k}-ma-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}maxAge" value="${src.maxAge!=null?src.maxAge:(pre==='uptime.'?0:3)}" ${dis}></label>
+  </div>${!ready?`<p class="note" style="color:var(--bad);margin-top:4px">Set up the ${esc(TABLE_DBS[src.db||'machines'].toLowerCase())} under Databases and accounts above first.</p>`:T.err?`<p class="note" style="color:var(--bad);margin-top:4px">${esc(T.err)}</p>`:T.loading?'<p class="note" style="margin-top:4px">Loading tables…</p>':''}`};
+}
+function machineDataPanel(adm){
+  const dis=adm?'':'disabled', stop=C().rules.stopPpm, R=ui.feedTest||{};
+  const status=k=>{const c=(S.conn||{})[k];return c?`<span class="pill ${c.ok?'ok':'bad'}" title="${esc(c.msg)}">${c.ok?'OK':'FAILED'}</span>`:''};
+  const card=l=>{
+    const f=l.feed, id=l.id, src=f.src||{}, up=f.uptime||{}, live=(S.runs[id]||{}).feed||{};
+    const db=f.type==='db', tf=db?mTableFields(l,'feed.src.',src,adm,dis):null;
+    const valIn=(key,label,val,ph,help)=>`<label class="f">${label}${db?mSelect(`md-v-${key}-${id}`,id,'feed.'+key,val||'',tf.cols,key==='ppmField'?'Pick the column':'Not given',dis):`<input type="text" id="md-v-${key}-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.${key}" value="${esc(val||'')}" placeholder="${esc(ph)}" ${dis}>`}<span class="note">${help}</span></label>`;
+    let where='';
+    if(db) where=tf.html;
+    else if(f.type==='http') where=`<div class="grid2" style="margin-top:8px"><label class="f">URL to read<input type="url" id="fd-u-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.url" value="${esc(f.url)}" placeholder="http://nodered:1880/${esc(id.toLowerCase())}" ${dis}></label><label class="f">Read every (s)<input type="number" min="2" id="fd-s-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.poll" value="${f.poll}" ${dis}></label></div>`;
+    else if(f.type==='influx') where=`<label class="f" style="margin-top:8px">InfluxDB query<textarea id="fd-q-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.query" spellcheck="false" ${dis} style="min-height:110px;font-family:var(--f-mono);font-size:12px">${esc(f.query||'')}</textarea></label>${SRV.influx&&SRV.influx.url?'':'<div class="note" style="color:var(--bad)">Set up InfluxDB above first.</div>'}`;
+    else if(f.type==='push') where=`<p class="note" style="margin-top:8px"><code>POST http://&lt;server&gt;/api/feed/${esc(encodeURIComponent(id))}</code> with header <code>X-Feed-Key</code>.</p>`;
+    const values=['db','http','push','influx'].includes(f.type)?`<h4 class="h3" style="margin-top:12px">Values from the machine</h4><div class="grid3" style="margin-top:6px">
+      ${f.type==='push'?`<label class="f">Pleats per minute<input type="text" value="ppm" disabled><span class="note">Always sent as ppm.</span></label><label class="f">Filters cut (counter)<input type="text" value="count" disabled><span class="note">Optional, sent as count.</span></label>`
+        :`${valIn('ppmField','Pleats per minute',f.ppmField,'ppm','Required.')}${valIn('countField','Filters cut (counter)',f.countField,'count','Optional. Without it, filters = pleats ÷ pleats per filter.')}`}
+      ${valIn('recipeField','Recipe in the machine',f.recipeField,'recipe','Optional. Shown on the screens and kept with each minute.')}</div>`:'';
+    // second place for uptime: the run signal
+    let upHtml='';
+    if(f.type!=='none'&&f.type!=='demo'){
+      const ut=up.type||'', uf=ut==='db'?mTableFields(l,'uptime.',up,adm,dis):null;
+      const fieldIn=ut==='feed'?(db?mSelect(`md-u-f-${id}`,id,'uptime.field',up.field||'',tf.cols,'Pick the column',dis):`<input type="text" id="md-u-f-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="uptime.field" value="${esc(up.field||'')}" placeholder="run" ${dis}>`)
+        :ut==='db'?mSelect(`md-u-f-${id}`,id,'uptime.field',up.field||'',uf.cols,'Pick the column',dis):'';
+      upHtml=`<h4 class="h3" style="margin-top:12px">Uptime (run signal)</h4><div class="grid3" style="margin-top:6px">
+        <label class="f">Where it comes from<select id="md-u-t-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="uptime.type" ${dis}>
+          <option value="" ${!ut?'selected':''}>Speed: stopped at or below ${stop} P/m</option>
+          <option value="feed" ${ut==='feed'?'selected':''}>${db?'Another column of the same table':'Another field of the same reading'}</option>
+          <option value="db" ${ut==='db'?'selected':''}>A separate database table</option></select></label>
+        ${ut?`<label class="f">Signal ${ut==='feed'&&!db?'field':'column'}${fieldIn}</label>
+        <label class="f">Running when the signal is<select id="md-u-w-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="uptime.runWhen" ${dis}><option value="high" ${up.runWhen!=='low'?'selected':''}>High (1, true, on, run)</option><option value="low" ${up.runWhen==='low'?'selected':''}>Low (0, false, off)</option></select></label>`:''}
+      </div>${ut==='db'?uf.html:''}
+      ${ut?`<p class="note" style="margin-top:4px">Uptime, downtime and stop alarms follow this signal. If it can't be read in a minute, that minute uses the speed instead.</p>`:''}`;
+    }
+    const tr=R[id], tu=R[id+'|uptime'];
+    const live1=live.t?`<span class="note">Now: ${live.ok&&live.ppm!=null?`${live.ppm} P/m`:'no data'}${live.recipe?` · recipe ${esc(live.recipe)}`:''}${live.run===true?' · running':live.run===false?' · stopped':''}</span>`:'';
+    return `<div class="panel" style="background:var(--well-3)">
+      <div class="row"><h3 class="h2 grow" style="font-size:18px">${esc(id)}</h3>${live1}${status('feed:'+id)}</div>
+      <div class="row" style="margin-top:8px;align-items:flex-end"><label class="f" style="min-width:220px">Source<select id="fd-t-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.type" ${dis}>${Object.entries(FEED_LABEL).map(([k,v])=>`<option value="${k}" ${f.type===k?'selected':''}>${v}</option>`).join('')}</select></label>
+        ${adm&&SRV.server&&f.type!=='none'?`<button class="btn" data-action="${db?'mdTest':'testConn'}" data-id="${esc(id)}" data-k="${esc('feed:'+id)}">Test</button>`:''}
+        ${adm&&SRV.server&&up.type==='db'?`<button class="btn" data-action="mdTest" data-id="${esc(id)}" data-w="uptime">Test run signal</button>`:''}</div>
+      ${where}${values}
+      ${tr?`<p style="margin-top:6px;color:${tr.ok?'var(--ok)':'var(--bad)'}">${esc(tr.text)}</p>`:''}
+      ${upHtml}
+      ${tu?`<p style="margin-top:6px;color:${tu.ok?'var(--ok)':'var(--bad)'}">${esc(tu.text)}</p>`:''}
+    </div>`;
+  };
+  return `<div class="panel"><h2 class="h2">Machine data</h2>
+    <p class="sub" style="margin-top:4px">Once a minute the server reads each machine: pleats per minute, filters cut and the recipe loaded. Pick where each machine's readings are, and optionally a second place for its run signal (High = running) for uptime.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">${S.lines.map(card).join('')||'<p class="note">Add machines first (Admin › Machines).</p>'}</div>
+    <dl class="kv" style="margin-top:10px;font-size:14px">
+      <dt>Database table</dt><dd>The newest row (by the column you pick, usually a time stamp or an auto-number ID) is read each minute, through a read-only login. One table can hold every machine: pick the column that names the machine. If no new row arrives within the minutes you set, it counts as no data.</dd>
+      <dt>Read from URL</dt><dd>The URL returns JSON such as <code>{"ppm":190,"count":48211,"recipe":"MG-24","run":1}</code>. Field names can be paths like <code>data.speed</code>.</dd>
+      <dt>InfluxDB query</dt><dd>The newest values from the query; Flux results by <code>_field</code>, InfluxQL by column. <code>{machine}</code> is replaced with the machine's name. Readings older than 2½ minutes count as no data.</dd>
+      <dt>Pushed to server</dt><dd><code>POST http://&lt;server&gt;/api/feed/&lt;machine&gt;</code> with <code>{"ppm":190,"count":48211,"recipe":"MG-24","run":1}</code> and header <code>X-Feed-Key</code>.</dd>
+      <dt>Filters cut</dt><dd>The machine's counter. The suite counts how much it went up each minute; a reset to zero is handled.</dd>
+      <dt>Run signal</dt><dd>High/Low, 1/0, true/false, on/off or run/stop. Without one, the line counts as stopped at or below the stop speed (Admin › Rules).</dd>
+      <dt>No reading</dt><dd>After 2½ minutes without data, the screen shows an alarm and nothing is recorded, so a dropped feed never looks like downtime.</dd></dl></div>`;
+}
 function connectionsBody(){
   const s=S.settings,g=s.grafana,adm=isAdmin(),dis=adm?'':'disabled',srv=SRV.server;
   const st=k=>{const c=(S.conn||{})[k];return c?`<span class="pill ${c.ok?'ok':'bad'}">${c.ok?'OK':'FAILED'}</span> <span class="note">${esc(c.msg)} · ${fmtT(c.t)}</span>`:'<span class="pill idle">NOT TESTED</span>'};
-  const feedLabel={demo:'Demo replay',http:'Read from URL',push:'Pushed to server',influx:'InfluxDB query',none:'Not connected'};
+  const feedLabel=FEED_LABEL;
   const rows=[['store','Records database',srv?(SRV.store==='mariadb'?'MariaDB (HMI_DB_* in .env)':'Files on the server (data folder)'):''],
-    ...S.lines.map(l=>['feed:'+l.id,'Machine data · '+l.id,l.feed.type==='http'?l.feed.url:feedLabel[l.feed.type]]),
+    ...S.lines.map(l=>['feed:'+l.id,'Machine data · '+l.id,l.feed.type==='http'?l.feed.url:l.feed.type==='db'?(TABLE_DBS[(l.feed.src||{}).db||'machines']+(l.feed.src&&l.feed.src.table?' · '+l.feed.src.table:'')):feedLabel[l.feed.type]]),
+    ...(SRV.machinesdb?[['machines','Machine data database','Set up in .env']]:[]),
     ...(SRV.influx&&SRV.influx.url?[['influx','InfluxDB',SRV.influx.url]]:[]),...(SRV.influx&&SRV.influx.out?[['influxOut','Suite records copied to InfluxDB','bucket '+SRV.influx.out]]:[]),
     ['grafana','Grafana',g.on&&g.url?g.url:''],['assets','Asset database (MariaDB)',SRV.assets?'Set up in .env':''],['paycom','Paycom',SRV.paycom?(s.paycom.auto?`automatic every ${s.paycom.every} min`:'manual'):''],
     ['s2k','S2K schedule',s.s2kSource==='db'?(SRV.s2kdb?'S2K database (read-only)':''):s.s2kUrl],['people','People & training list',s.peopleUrl],['webhook','Copy records to another system',s.webhook]];
@@ -750,20 +837,7 @@ function connectionsBody(){
   ${connAccountsPanel(adm&&srv)}
   ${sourcesPanel(adm&&srv)}
   ${grafanaQueriesPanel()}
-  <div class="panel"><h2 class="h2">Machine data</h2>
-    <p class="sub" style="margin-top:4px">The server records one speed reading per machine per minute. Give it a URL to read (Node-RED, a PLC gateway) or have that system push readings to the server.</p>
-    <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Machine</th><th>Source</th><th>URL or query to read</th><th>Speed field</th><th>Count field (optional)</th><th>Read every (s)</th></tr></thead><tbody>
-    ${S.lines.map(l=>`<tr><td class="l"><b>${esc(l.id)}</b></td>
-      <td><select id="fd-t-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.type" ${dis}>${Object.entries(feedLabel).map(([k,v])=>`<option value="${k}" ${l.feed.type===k?'selected':''}>${v}</option>`).join('')}</select></td>
-      <td>${l.feed.type==='influx'?`<textarea id="fd-q-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.query" spellcheck="false" ${dis} style="min-width:320px;min-height:110px;font-family:var(--f-mono);font-size:12px">${esc(l.feed.query||'')}</textarea>${SRV.influx&&SRV.influx.url?'':'<div class="note" style="color:var(--bad)">Set up InfluxDB above first.</div>'}`:`<input type="url" id="fd-u-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.url" value="${esc(l.feed.url)}" placeholder="http://nodered:1880/${esc(l.id.toLowerCase())}" ${dis||(l.feed.type!=='http'?'disabled':'')} style="min-width:240px">`}</td>
-      <td><input type="text" id="fd-p-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.ppmField" value="${esc(l.feed.ppmField)}" ${dis} style="width:110px"></td>
-      <td><input type="text" id="fd-c-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.countField" value="${esc(l.feed.countField)}" placeholder="count" ${dis} style="width:120px"></td>
-      <td><input type="number" min="2" id="fd-s-${esc(l.id)}" data-change="lineF" data-id="${esc(l.id)}" data-f="feed.poll" value="${l.feed.poll}" ${dis} style="width:80px"></td></tr>`).join('')}
-    </tbody></table></div>
-    <dl class="kv" style="margin-top:10px;font-size:14px"><dt>Read from URL</dt><dd>The URL returns JSON such as <code>{"ppm":190,"count":48211}</code>. Field names can be paths like <code>data.speed</code>. With a count field, units come from the machine's counter; without one, from speed ÷ pleats per unit.</dd>
-      <dt>InfluxDB query</dt><dd>The server runs the query every minute and uses the newest values. Flux results are read by <code>_field</code> (so a speed field of <code>ppm</code> means the row where _field is ppm); InfluxQL results by column name. <code>{machine}</code> in the query is replaced with the machine's name. Readings older than 2½ minutes count as no data.</dd>
-      <dt>Pushed to server</dt><dd><code>POST http://&lt;server&gt;/api/feed/&lt;machine&gt;</code> with <code>{"ppm":190,"count":48211}</code> and header <code>X-Feed-Key</code> (FEED_KEY in .env).</dd>
-      <dt>No reading</dt><dd>After 2½ minutes without data, the screen shows an alarm and nothing is recorded, so a dropped feed never looks like downtime.</dd></dl></div>
+  ${machineDataPanel(adm&&srv)}
   <div class="panel"><h2 class="h2">Grafana (time-based performance graphs)</h2>
     <p class="sub" style="margin-block:6px 12px">When connected, the Controls chart and the Status page show live Grafana panels for this screen's machine and shift instead of the built-in chart.</p>
     <div class="grid2">
@@ -1064,7 +1138,7 @@ const ADM={
     </tbody></table></div></div>`},
   rules:()=>{const adm=isAdmin(),dis=adm?'':'disabled',r=C().rules,num=(k,label,help,min=0)=>`<label class="f">${label}<input type="number" min="${min}" id="r-${k}" value="${r[k]}" data-change="rule" data-k="${k}" ${dis}><span class="note">${help}</span></label>`;
     return `<div class="panel"><h2 class="h2">Rules</h2><div class="grid2" style="margin-top:10px">
-      ${num('stopPpm','Line counts as stopped at or below (P/m)','Speed readings at or below this count as downtime.')}
+      ${num('stopPpm','Line counts as stopped at or below (P/m)','Speed readings at or below this count as downtime, unless the machine has a run signal (Admin › Connections › Machine data).')}
       ${num('minDown','Log a stop as downtime after (min)','Shorter stops still count against uptime but need no reason.',1)}
       ${num('reasonAfter','Ask for a reason once unexplained downtime adds up to (min)','Logged stops without a reason are collected; when they reach this many minutes the operator must pick a reason. 0 asks at every stop.')}
       ${num('startGrace','Start-up time at the start of each shift (min)','Stops in this many minutes after the shift\'s scheduled start are not downtime. Breaks and lunches from the Scheduler\'s shifts never count as downtime.')}
@@ -1351,7 +1425,7 @@ const A={
   updGoBack:async()=>{if(!confirm('Go back to the previous version? The suite stops for a minute or two.'))return;const r=await API.cmd('updGoBack',{});if(r.ok){ui.upd=r.data;toast(r.msg)}else toast(r.error);render(true)},
   connTest:async el=>{const g=el.dataset.g;ui.connMsg=ui.connMsg||{};ui.connMsg[g]={ok:true,text:'Testing…'};render(true);
     const r=await API.cmd('connTest',{group:g,fields:ui.connForm[g]});ui.connMsg[g]=r.ok?{ok:r.data.ok,text:r.data.msg+(r.data.writable?' Note: this login is allowed to change data; a read-only login is safer.':'')}:{ok:false,text:r.error};render(true)},
-  connSave:async el=>{const g=el.dataset.g;ui.connMsg=ui.connMsg||{};ui.connMsg[g]={ok:true,text:'Saving…'};render(true);
+  connSave:async el=>{const g=el.dataset.g;if(g==='machines'||g==='assets')ui.mtables={};ui.connMsg=ui.connMsg||{};ui.connMsg[g]={ok:true,text:'Saving…'};render(true);
     const r=await send('connSave',{group:g,fields:ui.connForm[g]},{quiet:true,retry:true});
     if(!r){ui.connMsg[g]={ok:false,text:'Not saved. '+(($('#toast')||{}).textContent||'')};render(true);return}
     ui.connInfo=r.data;if(ui.connForm[g]){ui.connForm[g].password='';ui.connForm[g].token=''}ui.connMsg[g]={ok:true,text:r.msg};render(true)},
@@ -1454,6 +1528,11 @@ const CH={
   showInactive:el=>{ui.showInactive=el.checked;render(true)},
   lst:el=>sendCH('listSet',{k:el.dataset.k,i:+el.dataset.i,v:el.value}),
   lineF:el=>sendCH('lineSet',{id:el.dataset.id,f:el.dataset.f,v:el.type==='checkbox'?el.checked:el.value}),
+  mdTest:async(el)=>{const id=el.dataset.id,w=el.dataset.w||'feed',k=w==='uptime'?id+'|uptime':id;ui.feedTest=ui.feedTest||{};ui.feedTest[k]={ok:true,text:'Reading…'};render(true);
+    const r=await API.cmd('lineFeedTest',{id,which:w});
+    if(!r.ok){ui.feedTest[k]={ok:false,text:r.error||'Failed'};render(true);return}
+    const d=r.data;ui.feedTest[k]={ok:true,text:w==='uptime'?`Newest row ${d.newest}: ${d.run?'running':'stopped'}.`
+      :`Newest row ${d.newest}: ${d.ppm} P/m${d.count!=null?` · filters cut counter ${d.count}`:''}${d.recipe?` · recipe ${d.recipe}`:''}${typeof d.run==='boolean'?` · ${d.run?'running':'stopped'}`:''}${d.runErr?` · ${d.runErr}`:''}.`};render(true)},
   shiftF:el=>sendCH('shiftSet',{s:+el.dataset.s,f:el.dataset.f,v:el.value}),
   brkF:el=>sendCH('breakSet',{s:+el.dataset.s,b:+el.dataset.b,f:el.dataset.f,v:el.value}),
   partF:el=>sendCH('partSet',{k:el.dataset.k,f:el.dataset.f,v:el.value}),

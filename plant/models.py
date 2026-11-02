@@ -22,7 +22,7 @@ SPEED_MODES = {
     "gb": [("fixed", "Fixed filters/hr")],
 }
 FEED_TYPES = [("demo", "Demo replay"), ("http", "Read from URL"), ("push", "Pushed to server"), ("influx", "InfluxDB query"),
-              ("none", "Not connected")]
+              ("db", "Database table"), ("none", "Not connected")]
 PALETTE = ["#c46c3c", "#5e9951", "#3f7fb5", "#8c5bb0", "#b5933a", "#3a9a98", "#b54a6a", "#6b7a8a"]
 
 
@@ -73,7 +73,14 @@ class Machine(models.Model):
     feed_query = models.TextField(blank=True, default="", help_text="InfluxDB query for this machine's readings ({machine} = its name)")
     feed_poll = models.IntegerField(default=10)
     feed_ppm_field = models.CharField(max_length=80, default="ppm")
-    feed_count_field = models.CharField(max_length=80, blank=True)
+    feed_count_field = models.CharField(max_length=80, blank=True, help_text="Filters cut (the machine's counter)")
+    feed_recipe_field = models.CharField(max_length=80, blank=True, help_text="Recipe loaded in the machine")
+    # "Database table" source: {"db": "machines", "table": .., "orderCol": newest row by, "keyCol": .., "keyVal": .., "maxAge": minutes}
+    feed_src = models.JSONField(default=dict, blank=True)
+    # Second place the run signal (High = running, Low = stopped) comes from, for uptime and downtime:
+    # {"type": "" (use the speed) | "feed" (a field of the reading above) | "db" (a column of a table), "field": ..,
+    #  "db", "table", "orderCol", "keyCol", "keyVal", "maxAge", "runWhen": "high" | "low"}
+    uptime_src = models.JSONField(default=dict, blank=True)
     demo_scale = models.FloatField(default=1)
     demo_offset = models.IntegerField(default=0)
 
