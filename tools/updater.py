@@ -180,23 +180,30 @@ class Run:
         shutil.copytree(b / "app", self.dir, dirs_exist_ok=True)
 
     def ensure_shortcuts(self):
-        """Desktop shortcut to Production Suite Admin, for servers updated here rather than with Setup.exe."""
+        """The Production Suite Admin shortcut on the desktop and in the Start menu, made again after every
+        update (same as Setup.exe), so servers updated here have it and it always points at this install."""
         exe = self.dir / "desktop" / "SuiteAdmin.exe"
-        public = os.environ.get("PUBLIC")
-        if not WIN or not exe.exists() or not public:
-            return
-        lnk = Path(public) / "Desktop" / "Production Suite Admin.lnk"
-        if lnk.exists():
+        if not WIN or not exe.exists():
             return
         q = lambda s: str(s).replace("'", "''")  # noqa: E731
-        ps = (f"$s = New-Object -ComObject WScript.Shell; $l = $s.CreateShortcut('{q(lnk)}'); $l.TargetPath = '{q(exe)}'; "
-              f"$l.WorkingDirectory = '{q(self.dir)}'; $l.IconLocation = '{q(self.dir / 'desktop' / 'suite.ico')}'; "
-              "$l.Description = 'Production Suite server settings: connections, start, stop and restart'; $l.Save()")
+        ps = ("$made = @(); $places = @(@([Environment]::GetFolderPath('CommonDesktopDirectory'), 'desktop'), "
+              "@((Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Production Suite'), 'Start menu')); "
+              "foreach ($pl in $places) { if (-not $pl[0]) { continue }; "
+              "if (-not (Test-Path $pl[0])) { New-Item -ItemType Directory -Path $pl[0] -Force | Out-Null }; "
+              "$s = New-Object -ComObject WScript.Shell; $l = $s.CreateShortcut((Join-Path $pl[0] 'Production Suite Admin.lnk')); "
+              f"$l.TargetPath = '{q(exe)}'; $l.WorkingDirectory = '{q(self.dir)}'; $l.IconLocation = '{q(self.dir / 'desktop' / 'suite.ico')},0'; "
+              "$l.Description = 'Production Suite server settings: connections, start, stop and restart'; $l.Save(); "
+              "if (Test-Path (Join-Path $pl[0] 'Production Suite Admin.lnk')) { $made += $pl[1] } }; "
+              "Write-Output ('made:' + ($made -join ','))")
         try:
-            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, timeout=60)
-            self.say("Added the Production Suite Admin shortcut to the desktop")
+            r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True, text=True, timeout=60)
+            made = next((x[5:] for x in (r.stdout or "").splitlines() if x.startswith("made:")), "")
+            if made:
+                self.say(f"Production Suite Admin shortcut is on the {made.replace(',', ' and the ')}")
+            else:
+                self.say("Couldn't add the Production Suite Admin shortcut; open it from " + str(exe))
         except (OSError, subprocess.TimeoutExpired):
-            pass
+            self.say("Couldn't add the Production Suite Admin shortcut; open it from " + str(exe))
 
     def prune_backups(self):
         root = self.dir / "backups"

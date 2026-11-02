@@ -6,8 +6,8 @@
   Windows PowerShell 5.1 compatible.
 #>
 
-$script:SuiteVersion = "1.3.1"
-$script:SuiteRevision = 2
+$script:SuiteVersion = "1.3.2"
+$script:SuiteRevision = 3
 $script:PyVersion = "3.12.7"
 $script:TaskWeb = "Production Suite Web"
 $script:TaskTicker = "Production Suite Ticker"
@@ -476,21 +476,44 @@ function Add-SuiteShortcuts([string]$installDir, [string]$port, [string]$station
         $file = Join-Path $desktop ("Production Suite - " + $item[0] + ".url")
         Set-Content -Path $file -Value @("[InternetShortcut]", "URL=http://localhost:$port/$($item[1])/$q") -Encoding ASCII
     }
-    # Production Suite Admin: the server's settings window (connections, start / stop / restart)
-    $adminExe = Join-Path $installDir "desktop\SuiteAdmin.exe"
-    if (Test-Path $adminExe) {
-        try {
-            $shell = New-Object -ComObject WScript.Shell
-            $lnk = $shell.CreateShortcut((Join-Path $desktop "Production Suite Admin.lnk"))
-            $lnk.TargetPath = $adminExe
-            $lnk.WorkingDirectory = $installDir
-            $lnk.Description = "Production Suite server settings: connections, start, stop and restart"
-            $ico = Join-Path $installDir "desktop\suite.ico"
-            if (Test-Path $ico) { $lnk.IconLocation = $ico }
-            $lnk.Save()
-        } catch { Write-SuiteLog "Couldn't add the Production Suite Admin shortcut: $($_.Exception.Message)" }
-    }
+    $warn = @(Add-AdminShortcut $installDir)
     $info = @{ version = $script:SuiteVersion; revision = $script:SuiteRevision; installed = (Get-Date).ToString("s"); python = $python; port = $port; folder = $installDir
                packagesHash = $script:PackagesHash } | ConvertTo-Json
     Set-Content -Path (Join-Path $installDir "install-info.json") -Value $info -Encoding ASCII
+    return $warn
+}
+
+# The "Production Suite Admin" shortcut (the server's settings window: connections, start / stop / restart),
+# on the desktop every user of this server sees and in the Start menu. Made again on every install and
+# update, so it always points at this install. Returns warnings (empty when both shortcuts are in place).
+function Add-AdminShortcut([string]$installDir) {
+    $warn = New-Object Collections.ArrayList
+    $exe = Join-Path $installDir "desktop\SuiteAdmin.exe"
+    if (-not (Test-Path $exe)) {
+        [void]$warn.Add("Production Suite Admin is missing from $installDir\desktop, so its shortcut wasn't added. Extract the whole download again and re-run setup.")
+        return @($warn)
+    }
+    $desk = [Environment]::GetFolderPath("CommonDesktopDirectory")
+    if (-not $desk) { $desk = Join-Path $env:PUBLIC "Desktop" }
+    $menu = [Environment]::GetFolderPath("CommonPrograms")
+    $places = @(,@($desk, "the desktop"))
+    if ($menu) { $places += ,@((Join-Path $menu "Production Suite"), "the Start menu") }
+    $ico = Join-Path $installDir "desktop\suite.ico"
+    foreach ($pl in $places) {
+        $file = Join-Path $pl[0] "Production Suite Admin.lnk"
+        try {
+            if (-not (Test-Path $pl[0])) { New-Item -ItemType Directory -Path $pl[0] -Force | Out-Null }
+            $shell = New-Object -ComObject WScript.Shell
+            $lnk = $shell.CreateShortcut($file)
+            $lnk.TargetPath = $exe
+            $lnk.WorkingDirectory = $installDir
+            $lnk.Description = "Production Suite server settings: connections, start, stop and restart"
+            if (Test-Path $ico) { $lnk.IconLocation = "$ico,0" }
+            $lnk.Save()
+            try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+        } catch { Write-SuiteLog "Couldn't add the Production Suite Admin shortcut to $($pl[1]): $($_.Exception.Message)" }
+        if (Test-Path $file) { Write-SuiteLog "Production Suite Admin shortcut: $file" }
+        else { [void]$warn.Add("Couldn't put the Production Suite Admin shortcut on $($pl[1]). Open it from $exe instead.") }
+    }
+    return @($warn)
 }
