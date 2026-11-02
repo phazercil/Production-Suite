@@ -31,6 +31,12 @@ def main(argv):
         from plant import control
         control.serve(HERE)
         return 0
+    if mode in ("web", "ticker"):  # so Stop can find exactly this process (without Windows Management)
+        try:
+            (HERE / "logs").mkdir(exist_ok=True)
+            (HERE / "logs" / f"{mode}.pid").write_text(str(os.getpid()), encoding="ascii")
+        except OSError:
+            pass
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "suite.settings")
     os.environ.setdefault("LOG_DIR", str(HERE / "logs"))
     os.environ["SUITE_LOG_NAME"] = mode

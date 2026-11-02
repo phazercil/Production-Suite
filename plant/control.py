@@ -102,19 +102,28 @@ class Suite:
         if WIN:
             for t in (TASKS["web"], TASKS["ticker"]):
                 self._cmd(["schtasks", "/End", "/TN", t], 60)
-            folder = str(self.dir).rstrip("\\").replace("'", "''")
-            # only the web app and the ticker: never this control service itself
-            ps = ("Get-CimInstance Win32_Process -Filter \"Name = 'python.exe' OR Name = 'cmd.exe'\" | Where-Object { $_.CommandLine -like '*"
-                  + folder + "*' -and ($_.CommandLine -like '*serve.py*web*' -or $_.CommandLine -like '*serve.py*ticker*' -or "
-                  "$_.CommandLine -like '*run-web.cmd*' -or $_.CommandLine -like '*run-ticker.cmd*') } | "
-                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
-            self._cmd(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps], 120)
+            # Ending the tasks stops their cmd.exe and, with it, the web app and ticker. Any of their Python processes
+            # still running are stopped by process id: never this control service itself.
+            mine = os.getpid()
+            for pid in self.suite_pythons():
+                if pid != mine:
+                    self._cmd(["taskkill", "/F", "/PID", str(pid)], 30)
         elif shutil.which("systemctl"):
             self._cmd(["systemctl", "stop", "production-suite", "production-suite-ticker"])
         for _ in range(20):
             if not self.answering(1):
                 break
             time.sleep(1)
+
+    def suite_pythons(self):
+        """Process ids of python.exe running the web app or the ticker, from the pid files serve.py writes."""
+        out = []
+        for name in ("web.pid", "ticker.pid"):
+            try:
+                out.append(int((self.dir / "logs" / name).read_text().strip()))
+            except (OSError, ValueError):
+                pass
+        return out
 
     def start(self):
         if WIN:

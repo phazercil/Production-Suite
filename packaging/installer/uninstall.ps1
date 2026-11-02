@@ -25,8 +25,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $Host.UI.RawUI.WindowTitle = "Production Suite uninstaller"
 
 if (-not $InstallDir) {
-    $t = Get-ScheduledTask -TaskName $TaskWeb -ErrorAction SilentlyContinue
-    if ($t) { $InstallDir = $t.Actions[0].WorkingDirectory }
+    # schtasks.exe, not the ScheduledTasks cmdlets: those go through Windows Management, which can hang
+    $x = (& schtasks.exe /Query /TN $TaskWeb /XML 2>$null) -join "`n"
+    if ($x -match '<WorkingDirectory>([^<]+)</WorkingDirectory>') { $InstallDir = $Matches[1].Trim() }
     elseif (Test-Path "C:\ProductionSuite\manage.py") { $InstallDir = "C:\ProductionSuite" }
 }
 Say ""
@@ -37,20 +38,21 @@ $v = Read-Host "Continue (y/N)"
 if ($v -notmatch '^(y|yes)$') { Say "Nothing was changed."; Pause-Close; exit 0 }
 
 foreach ($name in @($TaskWeb, $TaskTicker, $TaskUpdater, $TaskControl)) {
-    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+    & schtasks.exe /Query /TN $name 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        & schtasks.exe /End /TN $name 2>$null | Out-Null
+        & schtasks.exe /Delete /TN $name /F 2>$null | Out-Null
         Say "Removed scheduled task '$name'." Green
     }
 }
 if ($InstallDir) {
-    $pattern = "*" + $InstallDir.TrimEnd("\") + "*"
-    Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*" -or $_.CommandLine -like "*run-control.cmd*") } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $root = $InstallDir.TrimEnd("\") + "\"
+    Get-Process -Name python, pythonw, SuiteAdmin -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
 }
-Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+& netsh.exe advfirewall firewall delete rule name="$FirewallRule" 2>$null | Out-Null
 Say "Removed the firewall rule." Green
 Get-ChildItem -Path (Join-Path $env:PUBLIC "Desktop") -Filter "Production Suite - *.url" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 Remove-Item -Path (Join-Path ([Environment]::GetFolderPath("CommonDesktopDirectory")) "Production Suite Admin.lnk") -Force -ErrorAction SilentlyContinue
@@ -60,9 +62,7 @@ if ($menu) { Remove-Item -Path (Join-Path $menu "Production Suite") -Recurse -Fo
 $startup = [Environment]::GetFolderPath("CommonStartup")
 if ($startup) { Remove-Item -Path (Join-Path $startup "Production Suite.lnk") -Force -ErrorAction SilentlyContinue }
 # close the tray icon and any open Production Suite Admin windows
-Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq "SuiteAdmin.exe" -or $_.CommandLine -like "*SuiteAdmin.ps1*" } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-Process -Name SuiteAdmin -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
 Say "Removed the desktop shortcuts." Green
 
 if ($InstallDir -and (Test-Path $InstallDir)) {
