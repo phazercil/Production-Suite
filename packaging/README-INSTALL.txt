@@ -42,14 +42,19 @@ Install
      http://PLANTSERVER:8000/station/Barbara/   one machine's screen only
 
 The suite is installed in C:\ProductionSuite and starts by itself whenever the server
-starts (scheduled tasks "Production Suite Web" and "Production Suite Ticker"; a third,
+starts (scheduled tasks "Production Suite Web", "Production Suite Ticker" and
+"Production Suite Control"; another,
 "Production Suite Updater", only runs when an update is installed from Admin > Updates).
 The version and revision show in the bottom-right corner of every page.
 
-The "Production Suite Admin" shortcut on the server's desktop opens the server's settings
+The "Production Suite Admin" shortcut (desktop and Start menu) opens the server's settings
 window: start, stop or restart the suite, see its logs, and change any connection (records
 database, S2K and asset databases, InfluxDB, Paycom, Grafana, alerts, plant network, port,
-time zone). Changes are checked before they're saved.
+time zone). Changes are checked before they're saved. It works from any Windows login on the
+server, not just administrators: stopping the suite and changing settings ask for a shift
+lead PIN instead. A Production Suite icon next to the clock shows whether the suite is running
+(green) or stopped (red); right-click it to open Admin, start or restart the suite. A fourth
+scheduled task, "Production Suite Control", does this work for them (this server only).
 Shortcuts are put on the server's desktop.
 
 Next steps after installing

@@ -41,7 +41,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import updatefile  # noqa: E402
 
-TASK_WEB, TASK_TICKER = "Production Suite Web", "Production Suite Ticker"
+TASK_WEB, TASK_TICKER, TASK_CONTROL = "Production Suite Web", "Production Suite Ticker", "Production Suite Control"
 KEEP_BACKUPS = 3
 WIN = os.name == "nt"
 
@@ -178,6 +178,14 @@ class Run:
     def restore(self, b):
         self.clear_program_files()
         shutil.copytree(b / "app", self.dir, dirs_exist_ok=True)
+        self.grant_desktop()
+
+    def grant_desktop(self):
+        """Ordinary users may read the desktop folder (Production Suite Admin and the tray icon run as them);
+        new files would otherwise only get the install folder's administrators-only rule."""
+        d = self.dir / "desktop"
+        if WIN and d.is_dir():
+            subprocess.run(["icacls", str(d), "/grant", "*S-1-5-32-545:(OI)(CI)RX", "/T", "/C", "/Q"], capture_output=True, timeout=120)
 
     def ensure_shortcuts(self):
         """The Production Suite Admin shortcut on the desktop and in the Start menu, made again after every
@@ -188,6 +196,9 @@ class Run:
         q = lambda s: str(s).replace("'", "''")  # noqa: E731
         ps = ("$made = @(); $places = @(@([Environment]::GetFolderPath('CommonDesktopDirectory'), 'desktop'), "
               "@((Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Production Suite'), 'Start menu')); "
+              "$st = [Environment]::GetFolderPath('CommonStartup'); if ($st) { $s0 = New-Object -ComObject WScript.Shell; "
+              f"$t0 = $s0.CreateShortcut((Join-Path $st 'Production Suite.lnk')); $t0.TargetPath = '{q(exe)}'; $t0.Arguments = '--tray'; "
+              f"$t0.WorkingDirectory = '{q(self.dir)}'; $t0.IconLocation = '{q(self.dir / 'desktop' / 'suite.ico')},0'; $t0.Save() }}; "
               "foreach ($pl in $places) { if (-not $pl[0]) { continue }; "
               "if (-not (Test-Path $pl[0])) { New-Item -ItemType Directory -Path $pl[0] -Force | Out-Null }; "
               "$s = New-Object -ComObject WScript.Shell; $l = $s.CreateShortcut((Join-Path $pl[0] 'Production Suite Admin.lnk')); "
@@ -273,6 +284,7 @@ class Run:
             stage = "files"
             self.clear_program_files()
             updatefile.extract(zip_path, self.dir, "app")
+            self.grant_desktop()
             if m["hasPackages"]:
                 stage = "packages"
                 staging = self.upd / "wheels-new"
@@ -402,10 +414,13 @@ class Services:
         if WIN:
             for t in (TASK_WEB, TASK_TICKER):
                 self._run(["schtasks", "/End", "/TN", t])
-            # the task stops cmd.exe; also stop the Python processes it started (their command line names the folder)
+            # the task stops cmd.exe; also stop the Python processes it started (their command line names the folder).
+            # Not the control service. Open tray icons / Admin windows are closed too, or their files would be locked.
             folder = str(self.dir).rstrip("\\").replace("'", "''")
-            ps = ("Get-CimInstance Win32_Process -Filter \"Name = 'python.exe' OR Name = 'cmd.exe'\" | Where-Object { $_.CommandLine -like '*"
-                  + folder + "*' -and ($_.CommandLine -like '*serve.py*' -or $_.CommandLine -like '*run-web.cmd*' -or $_.CommandLine -like '*run-ticker.cmd*') }"
+            ps = ("Get-CimInstance Win32_Process -Filter \"Name = 'python.exe' OR Name = 'cmd.exe' OR Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'\" | "
+                  "Where-Object { $_.CommandLine -like '*" + folder + "*' -and ($_.CommandLine -like '*serve.py*web*' -or "
+                  "$_.CommandLine -like '*serve.py*ticker*' -or $_.CommandLine -like '*run-web.cmd*' -or $_.CommandLine -like '*run-ticker.cmd*' -or "
+                  "$_.Name -eq 'SuiteAdmin.exe' -or $_.CommandLine -like '*SuiteAdmin.ps1*') }"
                   " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
             self._run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps])
             time.sleep(3)
@@ -416,6 +431,9 @@ class Services:
         if WIN:
             for t in (TASK_WEB, TASK_TICKER):
                 self._run(["schtasks", "/Run", "/TN", t])
+            # the control service picks up its new program files
+            self._run(["schtasks", "/End", "/TN", TASK_CONTROL])
+            self._run(["schtasks", "/Run", "/TN", TASK_CONTROL])
         elif shutil.which("systemctl"):
             self._run(["systemctl", "start", "production-suite", "production-suite-ticker"])
 

@@ -2,6 +2,7 @@
 
     python serve.py web      the web app on WEB_PORT (default 8000), served by waitress
     python serve.py ticker   the minute ticker (machine readings, timed S2K / Paycom pulls)
+    python serve.py control  the control service for Production Suite Admin and the tray icon (127.0.0.1 only)
 
 Logs go to the logs folder next to this file (rotated, 5 x 5 MB per process).
 """
@@ -14,11 +15,22 @@ HERE = Path(__file__).resolve().parent
 
 def main(argv):
     mode = argv[1] if len(argv) > 1 else ""
-    if mode not in ("web", "ticker"):
+    if mode not in ("web", "ticker", "control"):
         print(__doc__)
         return 2
     sys.path.insert(0, str(HERE))
     os.chdir(HERE)
+    if mode == "control":  # no Django: it must keep working while the suite or its database is down
+        import logging
+        from logging.handlers import RotatingFileHandler
+        (HERE / "logs").mkdir(exist_ok=True)
+        h = RotatingFileHandler(HERE / "logs" / "control.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logging.getLogger("plant.control").addHandler(h)
+        logging.getLogger("plant.control").setLevel(logging.INFO)
+        from plant import control
+        control.serve(HERE)
+        return 0
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "suite.settings")
     os.environ.setdefault("LOG_DIR", str(HERE / "logs"))
     os.environ["SUITE_LOG_NAME"] = mode
