@@ -81,7 +81,7 @@ def build(me=None, station=None, light=False):
     machines = list(Machine.objects.filter(stage="s1").prefetch_related("trained_people"))
     lines = [{"id": m.name, "code": m.code, "rated": m.ppm, "color": m.color, "active": m.active,
               "feed": {"type": m.feed_type, "url": m.feed_url, "poll": m.feed_poll, "ppmField": m.feed_ppm_field, "countField": m.feed_count_field,
-                       "query": m.feed_query}}
+                       "recipeField": m.feed_recipe_field, "query": m.feed_query, "src": m.feed_src or {}, "uptime": m.uptime_src or {}}}
              for m in machines]
     mos = list(MO.objects.select_related("line").filter(Q(status="OPEN") | Q(updated__gte=t - timedelta(days=30))))
     cat = Catalog()
@@ -158,5 +158,5 @@ def server_info():
     except Exception as e:
         ok, err = False, str(e)
     return {"server": True, "version": settings.SUITE["VERSION"], "revision": settings.SUITE["REVISION"], "store": "mariadb" if db.vendor == "mysql" else db.vendor, "storeOk": ok,
-            "storeErr": err, "assets": integrations.assets_ready(), "s2kdb": integrations.s2k_db_ready(), "paycom": integrations.paycom_ready(), "speed": 1,
+            "storeErr": err, "assets": integrations.assets_ready(), "s2kdb": integrations.s2k_db_ready(), "machinesdb": integrations.machines_db_ready(), "paycom": integrations.paycom_ready(), "speed": 1,
             "influx": _influx_info()}

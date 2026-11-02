@@ -451,7 +451,7 @@ class ReportTests(Base):
         sh = ShiftRun.objects.create(machine=self.bar, line="Barbara", shift_name="1st shift", start=at(2026, 3, 4, 6), active=False)
         for i in range(60):
             PpmReading.objects.create(machine=self.bar, line="Barbara", shift=sh, t=at(2026, 3, 4, 7) + timedelta(minutes=i),
-                                      ppm=180 if i < 45 else 0, units=7 if i < 45 else 0)
+                                      ppm=180 if i < 45 else 0, units=7 if i < 45 else 0, run=i < 45)
         Downtime.objects.create(shift=sh, line="Barbara", mo="1", start_time=at(2026, 3, 4, 7, 45), end_time=at(2026, 3, 4, 8, 0), minutes=15, reason="Jam or misfeed")
 
     def get(self, scope, period, c=None):

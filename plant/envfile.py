@@ -11,6 +11,8 @@ ENV_KEYS_ORDER = [
     ("ASSET_DB_HOST", None), ("ASSET_DB_PORT", None), ("ASSET_DB_NAME", None), ("ASSET_DB_USER", None), ("ASSET_DB_PASSWORD", None),
     ("# --- S2K database (read-only: the suite never writes to it, optional)", None),
     ("S2K_DB_HOST", None), ("S2K_DB_PORT", None), ("S2K_DB_NAME", None), ("S2K_DB_USER", None), ("S2K_DB_PASSWORD", None),
+    ("# --- Machine data database: tables the machines (PLCs, loggers) write readings to (read-only, optional)", None),
+    ("MACHINE_DB_HOST", None), ("MACHINE_DB_PORT", None), ("MACHINE_DB_NAME", None), ("MACHINE_DB_USER", None), ("MACHINE_DB_PASSWORD", None),
     ("# --- Paycom employee directory (optional)", None),
     ("PAYCOM_SID", None), ("PAYCOM_TOKEN", None),
     ("# --- Machines that push readings send this in the X-Feed-Key header (optional)", None),

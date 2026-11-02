@@ -31,8 +31,8 @@ def demo_sample(m, ls):
     return {"ppm": round(v * (m.demo_scale or 1))}
 
 
-def sample_for(m, ls, t):
-    """Returns (sample or None, feed status dict)."""
+def _feed_sample(m, ls, t):
+    """Returns (sample or None, feed status dict) from the machine's main source."""
     if m.feed_type == "demo":
         s = demo_sample(m, ls)
         return s, {"type": "demo", "ok": True, "err": "", "ppm": s["ppm"], "t": ms(t)}
@@ -51,11 +51,52 @@ def sample_for(m, ls, t):
         except influx.InfluxError as e:
             ok = ls.gap < 2  # a short blip is not an alarm; 2½ minutes without data is
             return None, {"type": "influx", "ok": ok, "err": str(e), "ppm": None, "t": ms(t)}
+    if m.feed_type == "db":
+        from . import machinedata
+        prev = (ls.feed or {}).get("src") or {}
+        try:
+            s, state = machinedata.fetch_feed(m, prev, ms(t))
+            return s, {"type": "db", "ok": True, "err": "", "ppm": s["ppm"], "t": ms(t), "src": state}
+        except integrations.ConnError as e:
+            ok = ls.gap < 2
+            return None, {"type": "db", "ok": ok, "err": str(e), "ppm": None, "t": ms(t), "src": getattr(e, "state", None) or prev}
+        except Exception as e:  # noqa: BLE001 - a broken table must never stop the ticker
+            log.warning("machine table for %s: %s", m.name, e)
+            return None, {"type": "db", "ok": ls.gap < 2, "err": str(e)[:200], "ppm": None, "t": ms(t), "src": prev}
     if m.feed_type == "push":
         if ls.pushed is not None and ls.pushed_at and (t - ls.pushed_at).total_seconds() < 150:
-            return ls.pushed, {"type": "push", "ok": True, "err": "", "ppm": ls.pushed.get("ppm"), "t": ms(t)}
+            from . import machinedata
+            s = machinedata.add_extras(m, {"ppm": ls.pushed.get("ppm"), "count": ls.pushed.get("count")},
+                                       lambda f: integrations.pick(ls.pushed, f))
+            return s, {"type": "push", "ok": True, "err": "", "ppm": ls.pushed.get("ppm"), "t": ms(t)}
         return None, {"type": "push", "ok": False, "err": "No reading pushed in the last 2½ minutes", "ppm": None, "t": ms(t)}
     return None, {"type": "none", "ok": False, "err": "No machine feed set", "ppm": None, "t": ms(t)}
+
+
+def sample_for(m, ls, t):
+    """Returns (sample or None, feed status dict). The sample has the speed and, when the machine gives them,
+    the filters-cut counter, the recipe and the run signal (High/Low) from its second source."""
+    prev_run = (ls.feed or {}).get("runSrc") or {}
+    s, feed = _feed_sample(m, ls, t)
+    u = m.uptime_src or {}
+    if s is not None and u.get("type") == "db":
+        from . import machinedata
+        try:
+            run, state = machinedata.fetch_run(m, prev_run, ms(t))
+            s["run"] = run
+            feed["runSrc"] = state
+        except Exception as e:  # noqa: BLE001 - without the signal, uptime falls back to the speed for this minute
+            s.pop("run", None)
+            s["runErr"] = str(e)[:200]
+            feed["runSrc"] = getattr(e, "state", None) or prev_run
+    if s is not None:
+        if s.get("recipe") is not None:
+            feed["recipe"] = s["recipe"]
+        if u.get("type") in ("feed", "db"):
+            feed["run"] = s.get("run")
+            if s.get("runErr"):
+                feed["runErr"] = s["runErr"]
+    return s, feed
 
 
 def _tick_one_minute(m, t):

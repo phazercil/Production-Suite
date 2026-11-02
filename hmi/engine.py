@@ -222,7 +222,9 @@ def add_down(sh, start, end, reason=None):
 
 
 def tick(machine, sample, t):
-    """One minute of machine data. sample = {"ppm": .., "count": ..} or None when the feed is offline."""
+    """One minute of machine data. sample = {"ppm": .., "count": .., "recipe": .., "run": True/False} or None when
+    the feed is offline. "run" is the machine's run signal (High/Low) when it has one; without it the line counts
+    as stopped at or below the stop speed."""
     ls, _ = LineState.objects.get_or_create(machine=machine)
     ls.last_tick = t
     sh = ShiftRun.objects.select_for_update().filter(machine=machine, active=True).select_related("mo").first()
@@ -248,7 +250,11 @@ def tick(machine, sample, t):
     r = rules()
     ppm = 0 if co else max(0, round(ppm_raw))
     planned = any(a < t <= b for a, b, _ in planned_for_tick(sh, t))
-    reading = PpmReading.objects.create(machine=machine, line=machine.name, shift=sh, t=t, ppm=ppm, planned=planned)
+    signal = sample.get("run")
+    running = (signal if isinstance(signal, bool) else ppm > r["stopPpm"]) and not co
+    recipe = str(sample.get("recipe") or "")[:80]
+    reading = PpmReading.objects.create(machine=machine, line=machine.name, shift=sh, t=t, ppm=ppm, planned=planned, run=running,
+                                        recipe=recipe)
     units = 0
     cnt = to_number(sample.get("count"))
     if cnt is not None and cnt >= 0:
@@ -269,7 +275,7 @@ def tick(machine, sample, t):
             MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + units)
             sh.mo_count += units
     if not co:
-        if ppm <= r["stopPpm"]:
+        if not running:
             if not sh.stop_start:
                 sh.stop_start = t - timedelta(minutes=1)
             sh.state = "stopped"
@@ -293,14 +299,13 @@ def close_stop(sh, t):
 def shift_stats(sh):
     if not sh:
         return {"mins": 0, "run": 0, "down": 0, "uptime": 100}
-    stop = rules()["stopPpm"]
     win = planned_windows(sh)
     n = r = 0
-    for t, ppm in PpmReading.objects.filter(shift=sh).values_list("t", "ppm"):
-        if ppm <= stop and any(a < t <= b for a, b in win):
+    for t, running in PpmReading.objects.filter(shift=sh).values_list("t", "run"):
+        if not running and any(a < t <= b for a, b in win):
             continue  # stopped for a planned break or start-up: not downtime
         n += 1
-        r += ppm > stop
+        r += bool(running)
     return {"mins": n, "run": r, "down": n - r, "uptime": round(r / n * 100) if n else 100}
 
 
@@ -998,6 +1003,79 @@ def line_add(p, ctx):
     return {"data": {"id": m.name}}
 
 
+SOURCE_KEYS = {"db", "table", "orderCol", "keyCol", "keyVal", "maxAge"}
+
+
+def _set_source(m, f, v):
+    """Admin > Machine data: one setting of the machine's table (feed.src.<key>) or of its run signal (uptime.<key>).
+    Table and column names are only stored here; they are checked against the database's own list whenever read."""
+    from . import machinedata
+    which, key = ("feed", f[len("feed.src."):]) if f.startswith("feed.src.") else ("uptime", f[len("uptime."):])
+    cur = dict((m.feed_src if f.startswith("feed.src.") else m.uptime_src) or {})
+    keys = SOURCE_KEYS | ({"type", "field", "runWhen"} if which == "uptime" else set())
+    need(key in keys, "Unknown field.")
+    if key == "db":
+        need(v in machinedata.TABLE_DBS, "Pick the machine data database or the asset database.")
+        if cur.get("db") != v:
+            cur.update(table="", orderCol="", keyCol="", field="" if which == "uptime" else cur.get("field", ""))
+    elif key == "type":
+        need(v in ("", "feed", "db"), "Unknown run signal source.")
+        if v == "db":
+            cur.setdefault("db", "machines")
+    elif key == "runWhen":
+        need(v in ("high", "low"), "Pick High or Low.")
+    elif key == "maxAge":
+        try:
+            v = max(0.0, min(1440.0, float(v or 0)))
+        except (TypeError, ValueError):
+            raise Need("Type the minutes as a number (0 = never).")
+    else:
+        v = str(v or "").strip()
+        need(len(v) <= (80 if key == "keyVal" else 64), "That name is too long.")
+        if key == "table" and cur.get("table") != v:
+            cur.update(orderCol="", keyCol="", **({"field": ""} if which == "uptime" else {}))
+    cur[key] = v
+    if f.startswith("feed.src."):
+        m.feed_src = cur
+    else:
+        m.uptime_src = cur
+
+
+@cmd("lineFeedTest", "admin")
+def line_feed_test(p, ctx):
+    """Admin > Machine data > Test: the newest row of the machine's table (or run signal) and what the suite reads."""
+    from . import machinedata
+    m = line_of(p.get("id"))
+    need(m, "Machine not found.")
+    which = "uptime" if p.get("which") == "uptime" else "feed"
+    try:
+        if which == "feed":
+            need(m.feed_type == "db", "Test reads a database table; set the source to Database table first.")
+        else:
+            need((m.uptime_src or {}).get("type") == "db", "Set the run signal to come from a database table first.")
+        return {"data": machinedata.preview(m, which)}
+    except integrations.ConnError as e:
+        raise Need(str(e))
+    except Need:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise Need(f"Couldn't read it: {str(e)[:200]}")
+
+
+@cmd("machineTables", "admin")
+def machine_tables(p, ctx):
+    """Tables and their columns, for the machine-data pickers."""
+    from . import machinedata
+    db = p.get("db") or "machines"
+    need(db in machinedata.TABLE_DBS, "Pick the machine data database or the asset database.")
+    integrations.liveconfig.refresh()
+    need(db in integrations.connections.databases, f"{integrations.DB_NAMES[db]} is not set up yet. Add it under Databases and accounts above.")
+    try:
+        return {"data": {"db": db, "tables": machinedata.tables(db)}}
+    except integrations.ConnError as e:
+        raise Need(str(e))
+
+
 @cmd("lineSet", "admin")
 def line_set(p, ctx):
     m = line_of(p.get("id"))
@@ -1030,8 +1108,10 @@ def line_set(p, ctx):
         need(v or not busy, f"A shift is running on {m.name}. End it first.")
         m.active = bool(v)
     elif f == "feed.type":
-        need(v in ("demo", "http", "push", "influx", "none"), "Unknown feed type.")
+        need(v in ("demo", "http", "push", "influx", "db", "none"), "Unknown feed type.")
         m.feed_type = v
+        if v == "db":
+            m.feed_src = {"db": "machines", "maxAge": 3, **(m.feed_src or {})}
         if v == "influx" and not m.feed_query:
             from . import influx
             m.feed_query = influx.default_query(m.name, influx.config()["version"])
@@ -1058,7 +1138,11 @@ def line_set(p, ctx):
     elif f == "feed.ppmField":
         m.feed_ppm_field = str(v or "ppm").strip() or "ppm"
     elif f == "feed.countField":
-        m.feed_count_field = str(v or "").strip()
+        m.feed_count_field = str(v or "").strip()[:80]
+    elif f == "feed.recipeField":
+        m.feed_recipe_field = str(v or "").strip()[:80]
+    elif f.startswith("feed.src.") or f.startswith("uptime."):
+        _set_source(m, f, v)
     else:
         raise Need("Unknown field.")
     m.save()
@@ -1348,7 +1432,7 @@ def conn_test(p, ctx):
         except influx.InfluxError as e:
             r = {"ok": False, "msg": str(e)}
         return {"data": r}
-    need(group in ("assets", "s2k"), "Unknown connection.")
+    need(group in ("assets", "s2k", "machines"), "Unknown connection.")
     *_, r = _db_test(group, p.get("fields"))
     return {"data": r}
 
@@ -1358,7 +1442,7 @@ def conn_save(p, ctx):
     from plant import liveconfig
     from plant.liveconfig import TEXT_RE
     group, f = p.get("group"), p.get("fields") if isinstance(p.get("fields"), dict) else {}
-    if group in ("assets", "s2k"):
+    if group in ("assets", "s2k", "machines"):
         prefix, what, v, r = _db_test(group, f)
         need(r["ok"], r["msg"])
         liveconfig.save({f"{prefix}_HOST": v["host"], f"{prefix}_PORT": v["port"], f"{prefix}_NAME": v["name"],
@@ -1416,6 +1500,7 @@ def conn_remove(p, ctx):
     group = p.get("group")
     keys = {"assets": ["ASSET_DB_HOST", "ASSET_DB_PORT", "ASSET_DB_NAME", "ASSET_DB_USER", "ASSET_DB_PASSWORD"],
             "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD"],
+            "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD"],
             "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
             "influx": ["INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET"]}.get(group)
     need(keys, "Unknown connection.")

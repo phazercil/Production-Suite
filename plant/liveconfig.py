@@ -18,7 +18,8 @@ from django.db import connections
 from .dbconf import read_only_mysql
 from .envfile import read_env, write_env
 
-DB_GROUPS = {"assets": ("ASSET_DB", "The asset database"), "s2k": ("S2K_DB", "The S2K database")}
+DB_GROUPS = {"assets": ("ASSET_DB", "The asset database"), "s2k": ("S2K_DB", "The S2K database"),
+             "machines": ("MACHINE_DB", "The machine data database")}
 SUITE_KEYS = ("PAYCOM_SID", "PAYCOM_TOKEN", "FEED_KEY", "ALERT_SMTP_HOST", "ALERT_SMTP_PORT", "ALERT_SMTP_SECURITY", "ALERT_SMTP_USER",
               "ALERT_SMTP_PASSWORD", "ALERT_FROM", "ALERT_SMTP_INTERNET", "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "GRAFANA_TOKEN",
               "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET")

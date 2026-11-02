@@ -155,7 +155,7 @@ $verLabel = New-Object Windows.Forms.Label
 $verLabel.Text = "Server admin"; $verLabel.ForeColor = $C.sideDim
 $verLabel.SetBounds(21, 50, 185, 20); $side.Controls.Add($verLabel)
 
-$NAV = @(@("status", "Status"), @("records", "Records database"), @("readonly", "S2K and asset databases"), @("influx", "InfluxDB"),
+$NAV = @(@("status", "Status"), @("records", "Records database"), @("readonly", "Read-only databases"), @("influx", "InfluxDB"),
          @("accounts", "Paycom, Grafana, feeds"), @("alerts", "Downtime alerts"), @("network", "Network and server"))
 $navLabels = @{}
 $y = 92
@@ -405,10 +405,10 @@ $rSave.add_Click({
 })
 
 # ================================================================ S2K and asset databases
-$pD = New-Page "readonly" "S2K and asset databases" "Read-only connections. The suite signs in read-only and only runs SELECT queries; nothing is ever created or changed in these databases. Use read-only accounts."
+$pD = New-Page "readonly" "Read-only databases" "S2K, asset and machine data databases. The suite signs in read-only and only runs SELECT queries; nothing is ever created or changed in these databases. Use read-only accounts."
 $DB = @{}
 $yy = 0
-foreach ($g in @(@("s2k", "S2K database (open MOs)"), @("assets", "Asset database (changeover steps, specs)"))) {
+foreach ($g in @(@("s2k", "S2K database (open MOs)"), @("assets", "Asset database (changeover steps, specs)"), @("machines", "Machine data database (tables the machines log to)"))) {
     $k = $g[0]
     Add-Head $pD $g[1] $yy | Out-Null
     $DB[$k] = @{
@@ -422,7 +422,7 @@ foreach ($g in @(@("s2k", "S2K database (open MOs)"), @("assets", "Asset databas
     $yy += 266
 }
 function Get-DbFields([string]$k) { $d = $DB[$k]; return @{ host = $d.host.Text.Trim(); port = $d.port.Text.Trim(); name = $d.name.Text.Trim(); user = $d.user.Text.Trim(); password = $d.password.Text } }
-foreach ($k in @("s2k", "assets")) {
+foreach ($k in @("s2k", "assets", "machines")) {
     $DB[$k].test.add_Click({ param($src) $k = $src.Tag
         $r = Run-Step $DB[$k].status "Testing..." { $x = Invoke-SuiteCmd "connTest" @{ group = $k; fields = (Get-DbFields $k) }; if ($x.ok) { $x.data } else { $x } } })
     $DB[$k].save.add_Click({ param($src) $k = $src.Tag
@@ -549,7 +549,7 @@ function Load-Info {
     $rHost.Text = "" + $rec.host; $rPort.Text = "" + $rec.port; $rName.Text = "" + $rec.name; $rUser.Text = "" + $rec.user
     $rPass.Text = ""
     if ($rec.hasPassword) { Set-Status $rStatus $null "Using $($rec.engine): $($rec.name) on $($rec.host) as $($rec.user)." }
-    foreach ($k in @("s2k", "assets")) {
+    foreach ($k in @("s2k", "assets", "machines")) {
         $d = $r.conn.$k
         $DB[$k].host.Text = "" + $d.host; $DB[$k].port.Text = "" + $d.port; $DB[$k].name.Text = "" + $d.name; $DB[$k].user.Text = "" + $d.user; $DB[$k].password.Text = ""
         if (-not $DB[$k].status.Text) { Set-Status $DB[$k].status $null $(if ($d.on) { "Set up." } else { "Not set up." }) }

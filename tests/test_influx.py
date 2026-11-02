@@ -181,8 +181,8 @@ class InfluxTests(Base):
         now = timezone.now()
         PpmReading.objects.all().delete()
         PpmReading.objects.create(machine=sh.machine, line=sh.line, shift=sh, t=now - timedelta(minutes=3), ppm=190, units=4)
-        PpmReading.objects.create(machine=sh.machine, line=sh.line, shift=sh, t=now - timedelta(minutes=2), ppm=0, planned=True)
-        PpmReading.objects.create(machine=sh.machine, line=sh.line, shift=sh, t=now - timedelta(minutes=1), ppm=0)
+        PpmReading.objects.create(machine=sh.machine, line=sh.line, shift=sh, t=now - timedelta(minutes=2), ppm=0, planned=True, run=False)
+        PpmReading.objects.create(machine=sh.machine, line=sh.line, shift=sh, t=now - timedelta(minutes=1), ppm=0, run=False)
         Downtime.objects.all().delete()
         Downtime.objects.create(shift=sh, line=sh.line, mo="309215", start_time=now - timedelta(minutes=1), end_time=now, minutes=1, reason='Jam, "bad" roll')
         PlannedTime.objects.all().delete()  # the demo's own breaks depend on the time of day

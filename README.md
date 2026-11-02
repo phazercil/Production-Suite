@@ -248,6 +248,25 @@ import automatically and filter by department and position. Use *Show Paycom fie
 names your account returns; if department, position or badge come through blank, set
 `PAYCOM_FIELD_DEPT / _POSITION / _BADGE`. The import never changes roles, training or PINs.
 
+### Machine data
+
+Each pleater gives three values every minute: **pleats per minute**, **filters cut** (the machine's counter) and
+the **recipe** loaded in the machine. Admin › Connections › Machine data sets, per machine, where they come from:
+
+- **Database table** — the database the machines log to (Admin › Connections › Databases and accounts ›
+  Machine data database, or `MACHINE_DB_*` in `.env`; the asset database works too). Pick the table, the column
+  that tells which row is newest (a time stamp or an auto-number ID), and, when one table holds every machine,
+  the column that names the machine and this machine's value. Then pick the column for each value. The newest
+  row is read once a minute through a read-only login; table and column names only ever come from the
+  database's own list. If no new row arrives for the minutes you set (default 3), it counts as no data.
+- **Read from URL**, **Pushed to server** or **InfluxDB query** — the same three values as fields of the reading.
+
+**Uptime (run signal)** is optional: a second place that says whether the machine is running — another
+field or column of the same reading, or a column of a separate table. High/Low, 1/0, true/false, on/off and
+run/stop are understood, and it can be set to running-when-Low. When set, uptime, downtime and stop alarms
+follow the signal instead of the speed; a minute where it can't be read falls back to the speed (Admin › Rules ›
+stop speed). Every minute is stored with `run` (1 = running) and `recipe` in `hmi_ppm`, so Grafana uses the same rule.
+
 ### S2K
 
 Admin › Connections › S2K reads open MOs from one of:

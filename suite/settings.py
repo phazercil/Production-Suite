@@ -123,6 +123,7 @@ WSGI_APPLICATION = "suite.wsgi.application"
 #   assets:  optional read-only connection to the asset database that holds
 #            changeover instructions (queried with saved SQL from Admin › Changeover data)
 #   s2k:     optional read-only connection to the S2K database (open MOs, Admin › Connections › S2K)
+#   machines: optional read-only connection to the database the machines log their readings to
 # ---------------------------------------------------------------------------
 if env("DB_ENGINE", "sqlite").lower() in ("mariadb", "mysql"):
     DATABASES = {
@@ -151,7 +152,7 @@ else:
 # Read-only outside databases (see plant/dbconf.py): never written to, never migrated.
 from plant.dbconf import read_only_mysql  # noqa: E402
 
-for _alias, _prefix in (("assets", "ASSET_DB"), ("s2k", "S2K_DB")):
+for _alias, _prefix in (("assets", "ASSET_DB"), ("s2k", "S2K_DB"), ("machines", "MACHINE_DB")):
     _db = read_only_mysql(env, _prefix)
     if _db:
         DATABASES[_alias] = _db

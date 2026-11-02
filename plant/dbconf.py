@@ -8,11 +8,11 @@ The suite never writes to these. Four things make sure of it:
 - the installer only connects and reads the table list; it never creates a database or a table there.
 """
 
-READ_ONLY_DBS = ("assets", "s2k")
+READ_ONLY_DBS = ("assets", "s2k", "machines")
 
 
 def read_only_mysql(env, prefix):
-    """DATABASES entry for ASSET_DB_* or S2K_DB_* from .env, or None if not set."""
+    """DATABASES entry for ASSET_DB_*, S2K_DB_* or MACHINE_DB_* from .env, or None if not set."""
     if not env(f"{prefix}_HOST"):
         return None
     return {
@@ -22,7 +22,7 @@ def read_only_mysql(env, prefix):
         "NAME": env(f"{prefix}_NAME", ""),
         "USER": env(f"{prefix}_USER", ""),
         "PASSWORD": env(f"{prefix}_PASSWORD", ""),
-        "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 5, "read_timeout": 60,
+        "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 5, "read_timeout": 15 if prefix == "MACHINE_DB" else 60,
                     "init_command": "SET SESSION TRANSACTION READ ONLY"},
         "CONN_MAX_AGE": 0,
         "TEST": {"MIRROR": "default"},  # tests never touch the real outside databases

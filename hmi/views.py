@@ -163,7 +163,8 @@ def command(request):
 @csrf_exempt
 @require_POST
 def feed_push(request, machine):
-    """Machines (Node-RED, a PLC gateway) push {"ppm": 190, "count": 48211} with header X-Feed-Key."""
+    """Machines (Node-RED, a PLC gateway) push {"ppm": 190, "count": 48211, "recipe": "MG-24", "run": 1} with header
+    X-Feed-Key. ppm is required; the recipe and run-signal field names are set per machine in Admin > Machine data."""
     from plant import liveconfig
     liveconfig.refresh()
     key = settings.SUITE["FEED_KEY"]
@@ -176,7 +177,11 @@ def feed_push(request, machine):
     if not isinstance(p, dict) or engine.to_number(p.get("ppm")) is None or (p.get("count") not in (None, "") and engine.to_number(p.get("count")) is None):
         return JsonResponse({"ok": False, "error": 'Send {"ppm": number} and optionally "count": number.'}, status=400)
     ls, _ = LineState.objects.get_or_create(machine=m)
-    ls.pushed, ls.pushed_at = {"ppm": p.get("ppm"), "count": p.get("count")}, now()
+    keep = {k: v for k, v in list(p.items())[:40] if isinstance(k, str) and len(k) <= 80
+            and (v is None or isinstance(v, (bool, int, float)) or (isinstance(v, str) and len(v) <= 200) or isinstance(v, dict))}
+    if len(json.dumps(keep, default=str)) > 8000:
+        keep = {k: v for k, v in keep.items() if not isinstance(v, dict)}
+    ls.pushed, ls.pushed_at = {**keep, "ppm": p.get("ppm"), "count": p.get("count")}, now()
     ls.save(update_fields=["pushed", "pushed_at"])
     return JsonResponse({"ok": True})
 
