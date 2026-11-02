@@ -69,3 +69,16 @@ jobs:
           if ($bad) { exit 1 }
       - name: Installer zip builds (also checks the version numbers match)
         run: python packaging/build.py
+
+  windows:
+    name: Windows (signing and scheduled tasks)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sign a build with a test certificate, and register the scheduled tasks
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\ci\windows-check.ps1
