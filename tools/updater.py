@@ -526,9 +526,11 @@ def main(argv=None):
             run.goback()
         return 0
     except Failed as e:
-        st = json.loads((run.upd / "state.json").read_text(encoding="utf-8")) if (run.upd / "state.json").exists() else {}
-        if st.get("status") == "installing":
-            run.state(status="failed", message=str(e), finished=datetime.now().astimezone().isoformat(timespec="seconds"))
+        # Always say why, in Admin > Updates and the log, including failures before anything was installed
+        # (e.g. "go back" with no earlier version), so a request never just disappears.
+        print(f"Failed: {e}", flush=True)
+        extra = {} if run.lines else {"job": args.job}
+        run.state(status="failed", message=str(e), finished=datetime.now().astimezone().isoformat(timespec="seconds"), **extra)
         return 1
     finally:
         try:
