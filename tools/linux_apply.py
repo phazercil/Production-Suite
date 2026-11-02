@@ -64,6 +64,15 @@ def safe_write(path, text):
     os.replace(tmp, str(path))
 
 
+def own(path, folder):
+    """Give a file or folder this script made to whoever owns the install folder (the suite's account)."""
+    try:
+        st = Path(folder).stat()
+        os.chown(str(path), st.st_uid, st.st_gid, follow_symlinks=False)
+    except OSError:
+        pass
+
+
 def run(args):
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=120)
@@ -136,13 +145,11 @@ def apply_network(folder):
     ok = a_ok and f_ok is not False
     res = {"ok": ok, "msg": f"{a_msg} {f_msg}", "networks": nets, "at": datetime.now().astimezone().isoformat(timespec="seconds")}
     out = folder / "updates" / "network-result.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
+    if not out.parent.exists():   # make it the suite's folder, not root's, or the suite can't write requests to it
+        out.parent.mkdir(parents=True, exist_ok=True)
+        own(out.parent, folder)
     safe_write(out, json.dumps(res))
-    try:
-        st = folder.stat()
-        os.chown(out, st.st_uid, st.st_gid)
-    except OSError:
-        pass
+    own(out, folder)
     print(res["msg"])
     return 0 if ok else 1
 

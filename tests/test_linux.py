@@ -95,3 +95,20 @@ class RootHelperTests(SimpleTestCase):
         self.assertEqual(victim.read_text(), "keep")
         self.assertEqual((d / "result.json").read_text(), "{}")
         self.assertFalse((d / "result.json").is_symlink())
+
+    def test_updates_folder_it_creates_belongs_to_the_suite(self):
+        """At install the helper runs before the suite has made updates/; it must not leave it owned by root,
+        or the suite can never hand it a plant-network change again."""
+        import os
+        d = Path(tempfile.mkdtemp())
+        (d / ".env").write_text('PLANT_NETWORKS="192.168.100.0/24"\n')
+        chowned = []
+        with mock.patch.object(linux_apply, "ALLOW_INC", d / "allow.inc"), \
+                mock.patch.object(linux_apply, "run", return_value=(0, "")), \
+                mock.patch.object(linux_apply, "firewalld", return_value=(None, "no firewalld")), \
+                mock.patch.object(linux_apply.os, "chown", side_effect=lambda p, *a, **k: chowned.append(Path(p))):
+            linux_apply.apply_network(d)
+        self.assertIn(d / "updates", chowned)
+        self.assertIn(d / "updates" / "network-result.json", chowned)
+        self.assertTrue(json.loads((d / "updates" / "network-result.json").read_text())["ok"])
+        self.assertTrue(os.path.isdir(d / "updates"))

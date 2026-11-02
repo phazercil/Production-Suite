@@ -143,6 +143,7 @@ install -d -m 750 -o "$USER_NAME" -g "$USER_NAME" "$DIR"
 # copy without touching settings, records, logs, updates or the Python environment
 cp -a "$HERE/app/." "$DIR/"
 rm -rf "$DIR/wheels"; cp -a "$HERE/wheels" "$DIR/wheels"
+mkdir -p "$DIR/updates" "$DIR/logs" "$DIR/backups"
 chown -R "$USER_NAME:$USER_NAME" "$DIR"
 chmod 750 "$DIR"
 install -d -m 755 -o "$USER_NAME" -g "$USER_NAME" /var/www/production-suite "$STATIC"
