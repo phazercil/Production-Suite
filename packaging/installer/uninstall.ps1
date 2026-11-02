@@ -9,6 +9,7 @@ $ErrorActionPreference = "Continue"
 $TaskWeb = "Production Suite Web"
 $TaskTicker = "Production Suite Ticker"
 $TaskUpdater = "Production Suite Updater"
+$TaskControl = "Production Suite Control"
 $FirewallRule = "Production Suite"
 
 function Say([string]$msg, [string]$color = "Gray") { Write-Host $msg -ForegroundColor $color }
@@ -35,7 +36,7 @@ Say "This stops the suite on this server. Your records in MariaDB are not touche
 $v = Read-Host "Continue (y/N)"
 if ($v -notmatch '^(y|yes)$') { Say "Nothing was changed."; Pause-Close; exit 0 }
 
-foreach ($name in @($TaskWeb, $TaskTicker, $TaskUpdater)) {
+foreach ($name in @($TaskWeb, $TaskTicker, $TaskUpdater, $TaskControl)) {
     if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
@@ -45,7 +46,7 @@ foreach ($name in @($TaskWeb, $TaskTicker, $TaskUpdater)) {
 if ($InstallDir) {
     $pattern = "*" + $InstallDir.TrimEnd("\") + "*"
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*") } |
+        Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*" -or $_.CommandLine -like "*run-control.cmd*") } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
 }
@@ -56,6 +57,12 @@ Remove-Item -Path (Join-Path ([Environment]::GetFolderPath("CommonDesktopDirecto
 Remove-Item -Path (Join-Path $env:PUBLIC "Desktop\Production Suite Admin.lnk") -Force -ErrorAction SilentlyContinue
 $menu = [Environment]::GetFolderPath("CommonPrograms")
 if ($menu) { Remove-Item -Path (Join-Path $menu "Production Suite") -Recurse -Force -ErrorAction SilentlyContinue }
+$startup = [Environment]::GetFolderPath("CommonStartup")
+if ($startup) { Remove-Item -Path (Join-Path $startup "Production Suite.lnk") -Force -ErrorAction SilentlyContinue }
+# close the tray icon and any open Production Suite Admin windows
+Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -eq "SuiteAdmin.exe" -or $_.CommandLine -like "*SuiteAdmin.ps1*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Say "Removed the desktop shortcuts." Green
 
 if ($InstallDir -and (Test-Path $InstallDir)) {

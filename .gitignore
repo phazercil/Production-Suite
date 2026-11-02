@@ -15,3 +15,5 @@ backups/
 .venv/
 # build output
 dist/
+# written by the control service on the server
+desktop/control.port

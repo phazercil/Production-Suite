@@ -109,6 +109,7 @@ try {
     if ($existingDir) { Step "Stopping the running copy for the update"; Stop-Suite $existingDir; Say "Stopped." Green }
     Step "2. Copying the suite to $InstallDir"
     Copy-Suite $Root $InstallDir
+    try { foreach ($x in @(Add-AdminShortcut $InstallDir)) { if ($x) { Write-SuiteLog $x } } } catch { Write-SuiteLog "Shortcuts: $($_.Exception.Message)" }
     Say "Files copied." Green
 
     # ------------------------------------------------------------ packages

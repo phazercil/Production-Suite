@@ -6,11 +6,12 @@
   Windows PowerShell 5.1 compatible.
 #>
 
-$script:SuiteVersion = "1.3.2"
-$script:SuiteRevision = 3
+$script:SuiteVersion = "1.3.3"
+$script:SuiteRevision = 4
 $script:PyVersion = "3.12.7"
 $script:TaskWeb = "Production Suite Web"
 $script:TaskTicker = "Production Suite Ticker"
+$script:TaskControl = "Production Suite Control"
 $script:TaskUpdater = "Production Suite Updater"
 $script:FirewallRule = "Production Suite"
 $script:DefaultDir = "C:\ProductionSuite"
@@ -226,14 +227,18 @@ function Install-Python([scriptblock]$OnPercent) {
 
 # ---------------------------------------------------------------- the running copy
 function Stop-Suite([string]$dir) {
-    foreach ($t in @($script:TaskWeb, $script:TaskTicker)) {
+    foreach ($t in @($script:TaskWeb, $script:TaskTicker, $script:TaskControl)) {
         if (Get-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue }
     }
     if ($dir) {
         # The task stops cmd.exe; also stop the Python processes it started (their command line names the folder).
         $pattern = "*" + $dir.TrimEnd("\") + "*"
         Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'cmd.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*") } |
+            Where-Object { $_.CommandLine -like $pattern -and ($_.CommandLine -like "*serve.py*" -or $_.CommandLine -like "*run-web.cmd*" -or $_.CommandLine -like "*run-ticker.cmd*" -or $_.CommandLine -like "*run-control.cmd*") } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        # the tray icon and Production Suite Admin windows (any user) would keep their files locked; they come back at the next login
+        Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'SuiteAdmin.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like $pattern -and ($_.Name -eq "SuiteAdmin.exe" -or $_.CommandLine -like "*SuiteAdmin.ps1*") } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Wait-Pumped 2000
     }
@@ -400,30 +405,44 @@ function Invoke-SuiteSetup([string]$installDir, [string]$venvPy, [hashtable]$ans
 # ---------------------------------------------------------------- Windows: tasks, firewall, shortcuts
 function Register-SuiteTasks([string]$installDir, [string]$port) {
     foreach ($t in @(@($script:TaskWeb, "run-web.cmd", "Production Suite screens: Operator Kiosk, Scheduler and Data Kiosk on port $port."),
-                     @($script:TaskTicker, "run-ticker.cmd", "Production Suite minute ticker: machine readings and timed S2K / Paycom pulls."))) {
+                     @($script:TaskTicker, "run-ticker.cmd", "Production Suite minute ticker: machine readings and timed S2K / Paycom pulls."),
+                     @($script:TaskControl, "run-control.cmd", "Production Suite control service: lets Production Suite Admin and the tray icon start, stop and set up the suite without Windows admin rights (this server only)."))) {
+        if (-not (Test-Path (Join-Path $installDir $t[1]))) { continue }
+        Write-SuiteLog "Registering the scheduled task '$($t[0])'"
         if (Get-ScheduledTask -TaskName $t[0] -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $t[0] -Confirm:$false }
         $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$(Join-Path $installDir $t[1])`"" -WorkingDirectory $installDir
         $trigger = New-ScheduledTaskTrigger -AtStartup
         $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+        $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
             -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
         try {
-            Register-ScheduledTask -TaskName $t[0] -Description $t[2] -Action $action -Trigger $trigger -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
+            Register-ScheduledTask -TaskName $t[0] -Description $t[2] -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -ErrorAction Stop | Out-Null
         } catch { throw "Couldn't register the scheduled task '$($t[0])': $($_.Exception.Message)" }
         & $script:Pump
     }
-    # The updater: no schedule of its own. The suite starts it (Admin > Updates, or a file in updates\inbox) to stop
-    # the suite, install an update, and start it again; run-update.cmd does nothing if no update was asked for.
-    if (Get-ScheduledTask -TaskName $script:TaskUpdater -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $script:TaskUpdater -Confirm:$false }
-    $action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$(Join-Path $installDir "run-update.cmd")`"" -WorkingDirectory $installDir
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
-    try {
-        Register-ScheduledTask -TaskName $script:TaskUpdater -Description "Production Suite updates: installs an update file when the suite asks for it (Operator Kiosk > Admin > Updates)." `
-            -Action $action -Principal $principal -Settings $settings -ErrorAction Stop | Out-Null
-    } catch { Write-SuiteLog "Couldn't register the updater task ($($_.Exception.Message)); updates from Admin > Updates won't start until setup runs again." }
+    Write-SuiteLog "Starting the scheduled tasks"
     Start-ScheduledTask -TaskName $script:TaskWeb
     Start-ScheduledTask -TaskName $script:TaskTicker
+    if (Get-ScheduledTask -TaskName $script:TaskControl -ErrorAction SilentlyContinue) { Start-ScheduledTask -TaskName $script:TaskControl }
+    & $script:Pump
+    Register-UpdaterTask $installDir
+}
+
+# The updater task: no schedule of its own. The suite starts it (Admin > Updates, or a file in updates\inbox) to stop
+# the suite, install an update and start it again; run-update.cmd does nothing if no update was asked for.
+# Made with schtasks.exe (with a time limit) after the suite is already running, so a problem here can never
+# hold up or stop the install: at worst, updates from Admin > Updates need setup to be run again.
+function Register-UpdaterTask([string]$installDir) {
+    Write-SuiteLog "Registering the scheduled task '$($script:TaskUpdater)'"
+    $cmd = "cmd.exe /c `"`"$(Join-Path $installDir "run-update.cmd")`"`""
+    try {
+        $code = Invoke-Program "schtasks.exe" @("/Create", "/F", "/TN", $script:TaskUpdater, "/TR", $cmd, "/SC", "ONCE", "/ST", "00:00",
+                                                 "/RU", "SYSTEM", "/RL", "HIGHEST") -timeoutSec 60
+        if ($code -ne 0) { Write-SuiteLog "Couldn't register the updater task (schtasks code $code); updates from Admin > Updates won't start until setup runs again." }
+        else { Write-SuiteLog "Registered the updater task." }
+    } catch {
+        Write-SuiteLog "Couldn't register the updater task ($($_.Exception.Message)); updates from Admin > Updates won't start until setup runs again."
+    }
 }
 
 # Opens the port to the plant network only. Returns a list of warnings (empty when all is well).
@@ -476,11 +495,33 @@ function Add-SuiteShortcuts([string]$installDir, [string]$port, [string]$station
         $file = Join-Path $desktop ("Production Suite - " + $item[0] + ".url")
         Set-Content -Path $file -Value @("[InternetShortcut]", "URL=http://localhost:$port/$($item[1])/$q") -Encoding ASCII
     }
-    $warn = @(Add-AdminShortcut $installDir)
+    try { $warn = @(Add-AdminShortcut $installDir) } catch { $warn = @("Couldn't add the Production Suite Admin shortcut: $($_.Exception.Message)") }
+    try { Start-SuiteTray } catch { Write-SuiteLog "Couldn't start the tray icon: $($_.Exception.Message)" }
     $info = @{ version = $script:SuiteVersion; revision = $script:SuiteRevision; installed = (Get-Date).ToString("s"); python = $python; port = $port; folder = $installDir
                packagesHash = $script:PackagesHash } | ConvertTo-Json
     Set-Content -Path (Join-Path $installDir "install-info.json") -Value $info -Encoding ASCII
     return $warn
+}
+
+# Production Suite Admin and the tray icon run as whoever is signed in, so ordinary users may read (not change)
+# the desktop folder they live in. The rest of the install folder stays administrators and the system account only.
+function Grant-DesktopRead([string]$installDir) {
+    $d = Join-Path $installDir "desktop"
+    if (-not (Test-Path $d)) { return }
+    try {
+        $code = Invoke-Program "icacls.exe" @($d, "/grant", "*S-1-5-32-545:(OI)(CI)RX", "/T", "/C", "/Q")
+        if ($code -ne 0) { Write-SuiteLog "Couldn't let users open Production Suite Admin (icacls code $code); only administrators will be able to." }
+    } catch { Write-SuiteLog "Couldn't let users open Production Suite Admin ($($_.Exception.Message)); only administrators will be able to." }
+}
+
+# Starts the tray icon now for whoever is signed in. Opening the Startup shortcut through Explorer runs it as
+# that user, not as the administrator running setup.
+function Start-SuiteTray {
+    $startup = [Environment]::GetFolderPath("CommonStartup")
+    $file = $(if ($startup) { Join-Path $startup "Production Suite.lnk" } else { "" })
+    if ($file -and (Test-Path $file)) {
+        try { Start-Process explorer.exe -ArgumentList "`"$file`"" } catch { Write-SuiteLog "Couldn't start the tray icon: $($_.Exception.Message)" }
+    }
 }
 
 # The "Production Suite Admin" shortcut (the server's settings window: connections, start / stop / restart),
@@ -493,10 +534,12 @@ function Add-AdminShortcut([string]$installDir) {
         [void]$warn.Add("Production Suite Admin is missing from $installDir\desktop, so its shortcut wasn't added. Extract the whole download again and re-run setup.")
         return @($warn)
     }
+    Grant-DesktopRead $installDir
     $desk = [Environment]::GetFolderPath("CommonDesktopDirectory")
-    if (-not $desk) { $desk = Join-Path $env:PUBLIC "Desktop" }
+    if (-not $desk -and $env:PUBLIC) { $desk = Join-Path $env:PUBLIC "Desktop" }
     $menu = [Environment]::GetFolderPath("CommonPrograms")
-    $places = @(,@($desk, "the desktop"))
+    $places = @()
+    if ($desk) { $places += ,@($desk, "the desktop") }
     if ($menu) { $places += ,@((Join-Path $menu "Production Suite"), "the Start menu") }
     $ico = Join-Path $installDir "desktop\suite.ico"
     foreach ($pl in $places) {
@@ -514,6 +557,21 @@ function Add-AdminShortcut([string]$installDir) {
         } catch { Write-SuiteLog "Couldn't add the Production Suite Admin shortcut to $($pl[1]): $($_.Exception.Message)" }
         if (Test-Path $file) { Write-SuiteLog "Production Suite Admin shortcut: $file" }
         else { [void]$warn.Add("Couldn't put the Production Suite Admin shortcut on $($pl[1]). Open it from $exe instead.") }
+    }
+    # the tray icon, at every login for every user
+    $startup = [Environment]::GetFolderPath("CommonStartup")
+    if ($startup) {
+        $file = Join-Path $startup "Production Suite.lnk"
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            $lnk = $shell.CreateShortcut($file)
+            $lnk.TargetPath = $exe; $lnk.Arguments = "--tray"; $lnk.WorkingDirectory = $installDir
+            $lnk.Description = "Production Suite tray icon: shows whether the suite is running"
+            if (Test-Path $ico) { $lnk.IconLocation = "$ico,0" }
+            $lnk.Save()
+            try { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } catch { }
+        } catch { Write-SuiteLog "Couldn't add the tray icon to Startup: $($_.Exception.Message)" }
+        if (-not (Test-Path $file)) { [void]$warn.Add("Couldn't add the Production Suite tray icon to Startup. Start it with `"$exe`" --tray.") }
     }
     return @($warn)
 }

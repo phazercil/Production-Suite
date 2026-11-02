@@ -33,6 +33,16 @@ try {
     [void][PS.Dpi]::SetProcessDPIAware()
 } catch { }
 [Windows.Forms.Application]::EnableVisualStyles()
+# Anything unexpected is written to the setup log and shown, instead of the window just closing or freezing.
+try {
+    [Windows.Forms.Application]::SetUnhandledExceptionMode([Windows.Forms.UnhandledExceptionMode]::CatchException)
+    [Windows.Forms.Application]::add_ThreadException({
+        param($sender, $e)
+        try { Write-SuiteLog "ERROR (unexpected): $($e.Exception.ToString())" } catch { }
+        [Windows.Forms.MessageBox]::Show("Setup hit an unexpected problem: $($e.Exception.Message)`n`nThe details are in $env:ProgramData\ProductionSuite-install.log.",
+            "Production Suite setup", "OK", "Error") | Out-Null
+    })
+} catch { }
 
 . (Join-Path $Here "common.ps1")
 Write-SuiteLog "---- Production Suite $script:SuiteVersion setup window started by $([Environment]::UserName)"
@@ -377,6 +387,7 @@ function Start-Prepare {
         if ($existing) { Stop-Suite $existing }
         Set-Progress 14 "Copying the program files to $($Setup.installDir)"
         Copy-Suite $Root $Setup.installDir
+        try { foreach ($x in @(Add-AdminShortcut $Setup.installDir)) { if ($x) { Write-SuiteLog $x } } } catch { Write-SuiteLog "Shortcuts: $($_.Exception.Message)" }
         Set-Progress 22 "Installing the packages the suite needs (no internet needed)"
         $Setup.venvPy = Install-Packages $Root $Setup.installDir $Setup.python { param($p) Set-Progress (22 + 13 * $p / 100) }
         Set-Progress 35 "Ready for your settings"
