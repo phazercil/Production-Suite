@@ -1,0 +1,4 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}End of shift report{% endblock %}
+{% block body %}<pre id="reportText" class="reporttext">{{ text }}</pre><p class="note">Copy it into an email or a message.</p>{% endblock %}
+{% block foot %}<button type="button" class="btn primary" data-copy="#reportText">Copy</button>{% endblock %}

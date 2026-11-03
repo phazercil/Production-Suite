@@ -1,0 +1,2 @@
+{% load suite %}{% if rows %}<div class="tblwrap" style="margin-top:8px;max-height:320px"><table class="xl"><thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead><tbody>
+{% for r in rows %}<tr>{% for c in columns %}<td class="l">{{ r|get:c|default_if_none:"" }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>{% else %}<p class="note" style="margin-top:6px">No rows.</p>{% endif %}

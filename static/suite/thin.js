@@ -78,11 +78,14 @@
   const typing = el => el && el.matches && el.matches("input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select");
   body.addEventListener("htmx:beforeSwap", e => {
     const t = e.detail.target, a = document.activeElement;
-    if (auto(e) && (busy || (t && typing(a) && t.contains(a)))) {
+    if (auto(e) && (busy || (t && typing(a) && t.contains(a)) || (t && (t.matches("form[data-dirty],[data-hold]") || t.querySelector("form[data-dirty],[data-hold]"))))) {
       e.detail.shouldSwap = false;
       held.add(t.id || t);
     }
   });
+  // a form someone has typed into but not sent yet, or a panel showing a result someone asked for ([data-hold]: a test,
+  // a new key, an open editor), is never replaced by an automatic refresh
+  document.addEventListener("input", e => { const f = e.target.closest && e.target.closest("form"); if (f && !f.hasAttribute("data-autosave")) f.dataset.dirty = "1"; });
   document.addEventListener("focusout", () => setTimeout(() => {
     if (!held.size || typing(document.activeElement)) return;
     held.clear();
@@ -112,6 +115,8 @@
   function closeModal() { const m = modal(); if (!m) return; m.hidden = true; m.innerHTML = ""; }
   body.addEventListener("htmx:afterSwap", e => { if (e.detail.target && e.detail.target.id === "modal") openModal(); tick(); });
   body.addEventListener("suite:closeModal", closeModal);
+  // a dialog button marked data-close-after closes its dialog once the server has accepted it
+  body.addEventListener("htmx:afterRequest", e => { const el = e.detail.elt; if (el && el.hasAttribute && el.hasAttribute("data-close-after") && e.detail.successful) closeModal(); });
   document.addEventListener("click", e => {
     if (e.target.closest("[data-close]")) { e.preventDefault(); closeModal(); }
     else if (e.target.id === "modal") closeModal();
@@ -137,6 +142,23 @@
     const k = el.dataset.keepScroll;
     el.scrollLeft = k in scrolls ? scrolls[k] : +(el.dataset.scrollTo || 0);
   }));
+  // "Copy" buttons: copy the text the server put on the page (plain http pages have no clipboard API, so fall back)
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-copy]");
+    if (!b) return;
+    const el = document.querySelector(b.dataset.copy); if (!el) return;
+    const text = el.value !== undefined && el.tagName !== "PRE" ? el.value : el.textContent;
+    const done = ok => toast(ok ? "Copied" : "Select the text and copy it", ok ? "" : "bad");
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(() => done(true), () => done(legacyCopy(text))); }
+    else done(legacyCopy(text));
+  });
+  function legacyCopy(text) {
+    const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    let ok = false; try { ok = document.execCommand("copy"); } catch (x) { ok = false; }
+    ta.remove(); return ok;
+  }
   // show how many pictures (files) are picked in a form, before it is sent
   document.addEventListener("change", e => {
     const f = e.target.closest && e.target.closest("form");

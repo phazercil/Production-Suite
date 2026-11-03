@@ -1,0 +1,4 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block body %}{% if body %}<p>{{ body }}</p>{% endif %}{% if note %}<p class="note">{{ note }}</p>{% endif %}{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button type="button" class="btn danger" hx-post="/kiosk/do/{{ action }}" hx-vals='{{ vals }}' hx-params="none" {% if tgt %}hx-target="{{ tgt }}" hx-swap="outerHTML"{% endif %} data-close-after>{{ yes }}</button>{% endblock %}

@@ -1,0 +1,4 @@
+<tr class="{% if not x.d.reason %}unset{% endif %}"><td><b>{{ x.letter }}</b></td><td>{{ x.d.start_time|clock }} – {{ x.d.end_time|clock }}</td><td>{{ x.d.minutes }}</td><td>{{ x.d.line }}</td><td>{{ x.d.mo }}</td>
+  <td class="l">{% if x.errors %}<button class="linkbtn" hx-get="/kiosk/m/errlog?id={{ x.d.id }}" hx-target="#modal" hx-swap="innerHTML" aria-label="Machine errors during this stop">{% include "hmi/k/_err_chips.html" with errs=x.errors max="3" max_n=3 neg_max=-3 %}</button>{% else %}<span class="note">—</span>{% endif %}</td>
+  <td>{% include "hmi/k/_reason_cell.html" with back="" %}</td>
+  <td class="l"><input type="text" name="notes" value="{{ x.d.notes }}" placeholder="What happened?" hx-post="/kiosk/do/downtimeSet" hx-trigger="change" hx-vals='{"id": "{{ x.d.id }}"}' hx-params="id,notes" aria-label="Notes"></td></tr>

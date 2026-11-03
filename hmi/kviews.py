@@ -9,6 +9,7 @@
 The browser only shows what comes back (static/suite/thin.js + htmx). See hmi/kscreen.py for what each page shows.
 """
 import json
+import re
 
 from django.http import Http404, HttpResponse
 from django.shortcuts import redirect, render
@@ -25,7 +26,7 @@ from . import engine, kscreen
 from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
-BUILT = {"controls"}   # pages already built on the server; the rest follow
+BUILT = {"controls", "schedule", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -38,7 +39,7 @@ def screen(request):
 
 def ctx_for(s, **kw):
     from urllib.parse import quote
-    base = f"/kiosk-station/{quote(s.lock)}" if s.lock else "/kiosk"
+    base = f"/station/{quote(s.lock)}" if s.lock else "/operator"
     return {"S": s, "me": s.me, "station": s.station, "lock": s.lock, "now_ms": ms(s.t), "base": base, **kw}
 
 
@@ -60,7 +61,7 @@ def err_in_modal(msg):
 
 def go(page, toast=None, s=None):
     """Move the screen to another page."""
-    base = ctx_for(s)["base"] if s else "/kiosk"
+    base = ctx_for(s)["base"] if s else "/operator"
     resp = HttpResponse("")
     resp["HX-Redirect"] = f"{base}/{page}/"
     return thin.trigger(resp, toast=toast, close=True)
@@ -121,6 +122,9 @@ def page(request, page="controls", lock=None):
         if request.GET.get("line"):
             request.session["station"] = request.GET["line"]
     page = page if page in PAGES else "controls"
+    for k in ("tab", "view", "status", "sort", "inactive"):   # a link straight to a page's option (/operator/admin/?tab=alerts)
+        if request.GET.get(k) is not None:
+            request.session[f"k.{k}"] = request.GET[k][:40]
     s = screen(request)
     if s.lock and page in kscreen.LOCKED_OUT:
         return redirect(ctx_for(s)["base"] + "/controls/")
@@ -138,9 +142,39 @@ def view(request, page):
     return render(request, f"hmi/k/v_{page.replace('-', '_')}.html", ctx_for(s, page=page, **view_data(s, page, request)))
 
 
+def page_option(request, key, allowed, default):
+    """A page's display choice (timeline/calendar, a filter, a sort): from the request, remembered for this screen."""
+    v = request.GET.get(key)
+    if v is not None and (allowed is None or v in allowed):
+        request.session[f"k.{key}"] = v
+    v = request.session.get(f"k.{key}", default)
+    return v if allowed is None or v in allowed else default
+
+
 def view_data(s, page, request):
     if page == "controls":
         return {"R": s.run_screen()}
+    if page == "schedule":
+        sort = page_option(request, "sort", None, "")
+        return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "calendar"}, "timeline"),
+                                           page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort)}
+    if page == "qc-log":
+        return {"P": kscreen.qc_log_page(s)}
+    if page == "downtime":
+        return {"P": kscreen.downtime_page(s)}
+    if page == "maintenance":
+        return {"P": kscreen.maintenance_page(s)}
+    if page == "status":
+        return {"P": kscreen.status_page(s)}
+    if page == "end-of-shift":
+        return {"P": kscreen.shift_report(s)}
+    if page == "team":
+        return {"P": kscreen.team_page(s, page_option(request, "inactive", {"0", "1"}, "0") == "1")}
+    if page == "admin":
+        from . import kadmin
+        tab = page_option(request, "tab", {k for k, _ in kadmin.TABS}, "machines")
+        from .models import AuditLog
+        return {"tab": tab, "tabs": kadmin.TABS, "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
     return {}
 
 
@@ -333,6 +367,66 @@ def m_end(request, s):
     return modal_response(request, "hmi/k/m_end.html", **ctx_for(s, stats=shift_stats(s.shift), mo=s.cur_mo, need=len(s.need_reason())))
 
 
+@modal("errlog")
+def m_errlog(request, s):
+    from .models import Downtime
+    d = Downtime.objects.filter(pk=request.GET.get("id") or 0).first()
+    if not d:
+        return thin.refused("That stop is no longer on file.")
+    rows = downtime_rows(s, [d])
+    return modal_response(request, "hmi/k/m_errlog.html", **ctx_for(s, d=d, errors=rows[0]["errors"] if rows else []))
+
+
+@modal("report")
+def m_report(request, s):
+    r = kscreen.shift_report(s)
+    return modal_response(request, "hmi/k/m_report.html", **ctx_for(s, text=r["text"] if r else ""))
+
+
+@modal("paycomFields")
+def m_paycom_fields(request, s):
+    """What Paycom sends: its field names and the first employees as the import reads them."""
+    from . import kadmin
+    r = kadmin.run(request, s, "paycomFields", {})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") or r.get("login") else thin.refused(r["error"])
+    d = r["data"]
+    return modal_response(request, "hmi/k/m_paycom_fields.html", **ctx_for(s, fields=d["fields"], rows=d["sample"],
+                                                                          columns=["code", "name", "status", "active", "department", "position", "badge"]))
+
+
+@modal("addPerson")
+def m_add_person(request, s):
+    if not s.is_admin:
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, admin_only=True, people=kscreen.people_for_login(True), next="addPerson"))
+    return modal_response(request, "hmi/k/m_add_person.html", **ctx_for(s))
+
+
+@modal("confirm")
+def m_confirm(request, s):
+    """Are you sure? for something that can't easily be undone. The button runs the action with its values."""
+    from . import kadmin
+    a, key = request.GET.get("a", ""), request.GET.get("k", "")
+    spec = kadmin.CONFIRM.get(key or a)
+    if not spec:
+        return thin.refused("Unknown action.")
+    vals = {k: v for k, v in request.GET.items() if k not in ("a", "k", "t")}
+    tgt = request.GET.get("t", "")   # a panel the answer replaces (#sources), when the action sends one back
+    tgt = tgt if re.fullmatch(r"#[a-z][a-z0-9-]*", tgt) else ""
+    fmt = dict(vals)
+    if a == "run" and vals.get("c") == "lineDel":
+        n = MO.objects.filter(line__name=vals.get("id", ""), status="OPEN").count()
+        fmt["queued"] = f"{n} queued MO{'s' if n != 1 else ''} will go back to Unscheduled. " if n else ""
+    title, body, note, yes = (x.format_map(_Blank(fmt)) for x in spec)
+    return modal_response(request, "hmi/k/m_confirm.html", **ctx_for(s, title=title, body=body, note=note, yes=yes, action=a, tgt=tgt,
+                                                                     vals=json.dumps(vals)))
+
+
+class _Blank(dict):
+    def __missing__(self, k):
+        return ""
+
+
 @modal("downPrompt")
 def m_down_prompt(request, s):
     rows = downtime_rows(s, s.need_reason())
@@ -357,7 +451,8 @@ def downtime_rows(s, downs):
 def act(request, name):
     s = screen(request)
     touch(request)
-    fn = ACTIONS.get(name)
+    from . import kadmin
+    fn = ACTIONS.get(name) or kadmin.ACTIONS.get(name)
     if not fn:
         raise Http404("No such action")
     return fn(request, s, form_params(request))
@@ -454,6 +549,23 @@ ACTIONS["overrideSet"] = simple("overrideSet", close=True)
 ACTIONS["overrideClear"] = simple("overrideClear", toast=False, close=True)
 ACTIONS["ticketStatus"] = simple("ticketStatus", toast=False)
 ACTIONS["ackNotices"] = simple("ackNotices", toast=False)
+ACTIONS["settingSet"] = simple("settingSet", toast=False)
+ACTIONS["userSet"] = simple("userSet", toast=False)
+ACTIONS["paycomImport"] = simple("paycomImport")
+
+
+@action("userAdd")
+def a_user_add(request, s, p):
+    r = run(request, s, "userAdd", {k: p.get(k, "") for k in ("name", "pin", "role")})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") or r.get("login") else err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg") or "Added", close=True)
+
+
+@action("train")
+def a_train(request, s, p):
+    r = run(request, s, "userSet", {"id": p.get("id"), "f": "train", "v": {"line": p.get("line"), "on": bool(p.get("on"))}})
+    return thin.done() if r["ok"] else (login_needed(request, s, r) if r.get("admin") else thin.refused(r["error"]))
 
 
 @action("qcSave")

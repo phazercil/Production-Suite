@@ -67,6 +67,14 @@ def plan(t, ref):
     if isinstance(t, (int, float)):
         from datetime import datetime
         t = datetime.fromtimestamp(t / 1000, timezone.get_current_timezone())
+    elif isinstance(t, str):
+        from datetime import datetime
+        try:
+            t = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        except ValueError:
+            return t
+        if timezone.is_naive(t):
+            t = timezone.make_aware(t)
     return plan_label(t, ref)
 
 
@@ -75,3 +83,41 @@ def ms(dt):
     """Milliseconds since 1970, for clocks and timers the page ticks."""
     from plant.util import ms as to_ms
     return to_ms(dt) if dt else ""
+
+
+@register.filter
+def pairs(spec):
+    """"a:A,b:B" -> [("a", "A"), ("b", "B")], for small fixed choice lists in templates."""
+    return [tuple(x.split(":", 1)) for x in str(spec).split(",") if ":" in x]
+
+
+@register.filter
+def split(spec, sep=","):
+    return [x.strip() for x in str(spec).split(sep)]
+
+
+@register.filter
+def fields(spec):
+    """"a|b|c|d,e|f|g|h" -> [("a","b","c","d"), ...] for a fixed list of inputs in a template."""
+    return [tuple((x.split("|") + ["", "", "", ""])[:4]) for x in str(spec).split(",") if x]
+
+
+@register.filter
+def get(d, k):
+    try:
+        return d.get(k, "")
+    except AttributeError:
+        return ""
+
+
+@register.filter
+def jsonlist(v):
+    """A list as JSON text, for a hidden field that carries it back to the server."""
+    import json
+    return json.dumps(list(v or []))
+
+
+@register.filter
+def names(items):
+    """[{"name": ...}, ...] -> the names, for a picker."""
+    return [x.get("name") for x in (items or [])]

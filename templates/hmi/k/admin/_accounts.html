@@ -1,0 +1,58 @@
+{% load suite %}<div id="accounts" class="panel" {% if hold %}data-hold{% endif %}><h2 class="h2">Databases and accounts</h2>
+  <p class="sub" style="margin-top:4px">Add or change these any time; no reinstall or restart needed. Passwords are kept in the server's protected settings file, never shown here again, and never stored in the records database. The suite only reads from the asset and S2K databases: it signs in read-only and never creates or changes anything there.</p>
+  <p class="note" style="margin-top:6px">Records database: {{ I.records.engine }}{% if I.records.host %} · {{ I.records.name }} on {{ I.records.host }} as {{ I.records.user }}{% endif %}. To move the records to another server, run Setup on the server.</p>
+  {% if not I.writable %}<p class="note" style="margin-top:6px;color:var(--bad)">The server can't write its settings file, so changes can't be saved here. Re-run Setup to repair the folder permissions.</p>{% endif %}
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+  {% for b in dbBoxes %}<form class="panel" style="background:var(--well-3)" hx-post="/kiosk/do/connSave" hx-target="#accounts" hx-swap="outerHTML" autocomplete="off">
+    <input type="hidden" name="group" value="{{ b.g }}">
+    <div class="row"><h3 class="h2 grow" style="font-size:18px">{{ b.title }}</h3>{% if b.d.on %}<span class="pill ok">CONNECTED</span>{% else %}<span class="pill idle">NOT SET UP</span>{% endif %}</div>
+    <p class="sub" style="margin-top:4px">{{ b.help }}</p>
+    <div class="grid3" style="margin-top:8px">
+      <label class="f">Server name or address<input type="text" name="host" value="{{ b.f.host }}" spellcheck="false" placeholder="192.168.100.30"></label>
+      <label class="f">Port<input type="number" name="port" value="{{ b.f.port }}"></label>
+      <label class="f">Database name<input type="text" name="name" value="{{ b.f.name }}" spellcheck="false"></label>
+      <label class="f">Read-only user<input type="text" name="user" value="{{ b.f.user }}" spellcheck="false"></label>
+      <label class="f">Password<input type="password" name="password" autocomplete="new-password" placeholder="{% if b.d.hasPassword %}Leave blank to keep the saved one{% endif %}"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/connTest" hx-target="#accounts" hx-swap="outerHTML">Test connection</button><button class="btn primary">Save</button>{% if b.d.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "{{ b.g }}"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML" hx-confirm="Remove the {{ b.title }} login from the server?">Remove</button>{% endif %}</div>
+    {% include "hmi/k/admin/_msg.html" with m=b.msg %}</form>{% endfor %}
+
+  {% with d=I.paycom %}<form class="panel" style="background:var(--well-3)" hx-post="/kiosk/do/connSave" hx-target="#accounts" hx-swap="outerHTML" autocomplete="off">
+    <input type="hidden" name="group" value="paycom">
+    <div class="row"><h3 class="h2 grow" style="font-size:18px">Paycom</h3>{% if d.on %}<span class="pill ok">SET UP</span>{% else %}<span class="pill idle">NOT SET UP</span>{% endif %}</div>
+    <p class="sub" style="margin-top:4px">Imports the operator list. This is an internet connection (Paycom is a cloud service), used only when set up here.</p>
+    <div class="grid2" style="margin-top:8px"><label class="f">SID<input type="text" name="sid" value="{% if pcForm %}{{ pcForm.sid }}{% else %}{{ d.sid }}{% endif %}" spellcheck="false"></label>
+      <label class="f">API token<input type="password" name="token" autocomplete="new-password" placeholder="{% if d.hasToken %}Leave blank to keep the saved one{% endif %}"></label></div>
+    <div class="row" style="margin-top:8px"><button class="btn primary">Save</button>{% if d.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "paycom"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML" hx-confirm="Remove the Paycom login from the server?">Remove</button>{% endif %}</div>
+    {% include "hmi/k/admin/_msg.html" with m=msgs.paycom %}</form>{% endwith %}
+
+  {% with d=I.influx f=influxBox.f v2=influxBox.v2 %}<form class="panel" style="background:var(--well-3)" hx-post="/kiosk/do/connSave" hx-target="#accounts" hx-swap="outerHTML" autocomplete="off">
+    <input type="hidden" name="group" value="influx">
+    <div class="row"><h3 class="h2 grow" style="font-size:18px">InfluxDB</h3>{% if d.on %}<span class="pill ok">CONNECTED</span>{% else %}<span class="pill idle">NOT SET UP</span>{% endif %}</div>
+    <p class="sub" style="margin-top:4px">Read machine speed and counts from InfluxDB (choose "InfluxDB query" for a machine under Machine data), and/or copy the suite's minute readings, downtime and planned breaks into a bucket so Grafana dashboards on InfluxDB use the same downtime rules as the suite. InfluxDB 3: choose 1.x and use the token as the password.</p>
+    <div class="grid3" style="margin-top:8px">
+      <label class="f">Version<select name="version" hx-post="/kiosk/do/connRedraw" hx-trigger="change" hx-target="#accounts" hx-swap="outerHTML"><option value="2" {% if v2 %}selected{% endif %}>2.x (Flux, token)</option><option value="1" {% if not v2 %}selected{% endif %}>1.x or 3.x (InfluxQL)</option></select></label>
+      <label class="f">Address<input type="text" name="url" value="{{ f.url }}" spellcheck="false" placeholder="http://192.168.100.40:8086"></label>
+      {% if v2 %}<label class="f">Organization<input type="text" name="org" value="{{ f.org }}" spellcheck="false"></label>{% else %}<label class="f">User name<input type="text" name="user" value="{{ f.user }}" spellcheck="false"></label>{% endif %}
+      <label class="f">{% if v2 %}API token{% else %}Password or token{% endif %}<input type="password" name="token" autocomplete="new-password" placeholder="{% if d.hasToken %}Leave blank to keep the saved one{% endif %}"></label>
+      {% if not v2 %}<label class="f">Database to read from<input type="text" name="db" value="{{ f.db }}" spellcheck="false"></label>{% endif %}
+      <label class="f">Copy suite records to bucket (blank = don't)<input type="text" name="out" value="{{ f.out }}" spellcheck="false" placeholder="production_suite"></label>
+    </div>
+    <p class="note" style="margin-top:6px">{% if v2 %}A token with read access to your machine bucket is enough for machine data; copying records also needs write access to that one bucket.{% else %}The user needs read access; copying records also needs write access to that database.{% endif %} Create the bucket in InfluxDB first. Queries the suite runs can only read.</p>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/connTest" hx-target="#accounts" hx-swap="outerHTML">Test connection</button><button class="btn primary">Save</button>{% if d.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "influx"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML" hx-confirm="Remove the InfluxDB connection from the server?">Remove</button>{% endif %}</div>
+    {% include "hmi/k/admin/_msg.html" with m=influxBox.msg %}</form>{% endwith %}
+
+  {% with d=I.grafana %}<form class="panel" style="background:var(--well-3)" hx-post="/kiosk/do/connSave" hx-target="#accounts" hx-swap="outerHTML" autocomplete="off">
+    <input type="hidden" name="group" value="grafana">
+    <div class="row"><h3 class="h2 grow" style="font-size:18px">Grafana service account token</h3>{% if d.hasToken %}<span class="pill ok">SET</span>{% else %}<span class="pill idle">NOT SET</span>{% endif %}</div>
+    <p class="sub" style="margin-top:4px">Lets the Reports page show the data behind your Grafana panels. In Grafana: Administration › Service accounts › Add (Viewer role) › Add token, then paste it here.</p>
+    <div class="row" style="margin-top:8px"><input type="password" name="token" style="flex:1;min-width:0" autocomplete="new-password" placeholder="{% if d.hasToken %}Paste a new token to replace the saved one{% else %}glsa_…{% endif %}" aria-label="Grafana token"><button class="btn primary">Save</button>{% if d.hasToken %}<button type="button" class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "grafana"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML">Remove</button>{% endif %}</div>
+    {% include "hmi/k/admin/_msg.html" with m=msgs.grafana %}</form>{% endwith %}
+
+  {% with d=I.feed %}<div class="panel" style="background:var(--well-3)">
+    <div class="row"><h3 class="h2 grow" style="font-size:18px">Machine feed key</h3>{% if d.on %}<span class="pill ok">SET</span>{% else %}<span class="pill idle">NOT SET</span>{% endif %}</div>
+    <p class="sub" style="margin-top:4px">Machines or gateways that push readings to the server send this key in the X-Feed-Key header. Needed only for machines set to "Pushed to server".</p>
+    <div class="row" style="margin-top:8px"><button class="btn primary" hx-post="/kiosk/do/connSave" hx-vals='{"group": "feed"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML" {% if d.on %}hx-confirm="Make a new key? Gateways using the old key stop being accepted."{% endif %}>{% if d.on %}Make a new key{% else %}Make a key{% endif %}</button>{% if d.on %}<button class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "feed"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML">Remove</button>{% endif %}</div>
+    {% if newKey %}<p style="margin-top:8px">New key (shown once, copy it into each gateway): <code id="feedkey" class="num" style="user-select:all">{{ newKey }}</code> <button class="btn sm" data-copy="#feedkey">Copy</button></p>{% endif %}
+    {% include "hmi/k/admin/_msg.html" with m=msgs.feed %}</div>{% endwith %}
+  </div></div>

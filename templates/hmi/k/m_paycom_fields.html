@@ -1,0 +1,6 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Paycom fields{% endblock %}
+{% block body %}<p class="sub">Fields Paycom sends: <span class="num">{{ fields|join:", "|default:"none" }}</span></p>
+<p class="note" style="margin-top:6px">If department, position or badge come through blank below, set PAYCOM_FIELD_DEPT / _POSITION / _BADGE in the server .env, or PAYCOM_FETCH_DETAILS=1.</p>
+{% include "hmi/k/admin/_rows.html" %}{% endblock %}
+{% block foot %}<button type="button" class="btn primary" data-close>Close</button>{% endblock %}

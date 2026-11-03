@@ -1,0 +1,25 @@
+{% if not P %}<h1 class="h1">End of Shift</h1><div class="empty">No shift yet. Start one from the Run screen.</div>
+{% else %}
+<div class="row"><h1 class="h1 grow">End of Shift report</h1><button class="btn" hx-get="/kiosk/m/report" hx-target="#modal" hx-swap="innerHTML">Copy report</button>{% if P.sh.active %}<button class="btn danger" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">End shift</button>{% endif %}</div>
+<p class="sub">{{ P.sh.line }}{% if P.sh.shift_name %} · {{ P.sh.shift_name }}{% endif %} · {{ P.who }} · {{ P.sh.start|day }} {{ P.sh.start|clock }} – {% if P.sh.active %}now (shift still running){% else %}{{ P.sh.end|clock }}{% endif %}</p>
+<div class="grid3">
+  <div class="panel stat"><span>Units made</span><b>{{ P.sh.count|num }}</b></div>
+  <div class="panel stat"><span>Uptime</span><b>{{ P.st.uptime }}%</b></div>
+  <div class="panel stat"><span>Downtime</span><b>{{ P.st.down }} min</b></div>
+  <div class="panel stat"><span>QC checks</span><b>{{ P.qc }} <small style="font-size:14px">{{ P.qcFail }} fail</small></b></div>
+  <div class="panel stat"><span>Scrap</span><b>{{ P.scrap }}</b></div>
+  <div class="panel stat"><span>Rolls run</span><b>{{ P.rolls|length }}</b></div>
+</div>
+<div class="grid2">
+  <div class="panel"><h2 class="h2">MOs run</h2><div class="tblwrap" style="margin-top:8px"><table class="xl"><thead><tr><th>MO</th><th>Item</th><th>Qty this shift</th><th>Start</th><th>End</th></tr></thead><tbody>{% for m in P.mos %}<tr><td>{{ m.mo }}</td><td>{{ m.item }}</td><td>{{ m.qty }}</td><td>{{ m.start|clock }}</td><td>{% if m.end %}{{ m.end|clock }}{% else %}running{% endif %}</td></tr>{% empty %}<tr><td colspan="5">None</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="panel"><h2 class="h2">Downtime by reason</h2><div class="bars" style="margin-top:10px">{% for b in P.byReason %}<div class="bar"><span>{{ b.k }}</span><i style="width:{{ b.pct|floatformat:1 }}%;{% if b.k != 'Not entered' %}background:var(--ink-3){% endif %}"></i><span class="num">{{ b.v }} min</span></div>{% empty %}<p class="note">No stops.</p>{% endfor %}</div>
+    {% if P.needReason %}<p class="note" style="color:var(--warn)">{{ P.needReason }} stops still need a reason. <a href="{{ base }}/downtime/" style="color:var(--accent)">Enter them</a></p>{% endif %}</div>
+  <div class="panel"><h2 class="h2">Roll tags</h2><div class="tblwrap" style="margin-top:8px"><table class="xl"><thead><tr><th>Roll</th><th>Material</th><th>Lot</th><th>MO</th><th>Loaded</th></tr></thead><tbody>{% for x in P.rolls %}<tr><td>{{ x.roll }}</td><td>{{ x.material }}</td><td>{{ x.lot }}</td><td>{{ x.mo }}</td><td>{{ x.t|clock }}</td></tr>{% empty %}<tr><td colspan="5">None scanned</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="panel"><h2 class="h2">Issues, tickets and notes</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+    {% if P.sh.issues %}<div><b>Start-of-shift issue:</b> {{ P.sh.issues }}</div>{% endif %}
+    {% if P.sh.end_issues %}<div><b>End-of-shift issue:</b> {{ P.sh.end_issues }}</div>{% endif %}
+    {% for x in P.tickets %}<div><b>Ticket</b> {{ x.t.machine }} · {{ x.t.type }} · {{ x.t.status }}{% if x.pics %} · {{ x.pics }} picture{{ x.pics|pluralize }}{% endif %}</div>{% endfor %}
+    {% for n in P.notes %}<div><b class="num">{{ n.t|clock }}</b> {{ n.text }}</div>{% endfor %}
+    {% if not P.sh.issues and not P.sh.end_issues and not P.tickets and not P.notes %}<p class="note">Nothing reported.</p>{% endif %}</div></div>
+</div>
+{% endif %}

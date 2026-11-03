@@ -1,0 +1,54 @@
+{% with m=c.m src=c.src up=c.up es=c.es db=c.db live=c.live %}<div id="mc-{{ m.pk }}" class="panel" style="background:var(--well-3)" {% if c.test %}data-hold{% endif %}>
+  <div class="row"><h3 class="h2 grow" style="font-size:18px">{{ m.name }}</h3>
+    {% if live.t %}<span class="note">Now: {% if live.ok and live.ppm is not None %}{{ live.ppm }} P/m{% else %}no data{% endif %}{% if live.recipe %} · recipe {{ live.recipe }}{% endif %}{% if live.run is True %} · running{% elif live.run is False %} · stopped{% endif %}</span>{% endif %}
+    {% if c.conn %}<span class="pill {% if c.conn.ok %}ok{% else %}bad{% endif %}" title="{{ c.conn.msg }}">{% if c.conn.ok %}OK{% else %}FAILED{% endif %}</span>{% endif %}</div>
+  <div class="row" style="margin-top:8px;align-items:flex-end"><label class="f" style="min-width:220px">Source<select name="v" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ m.name|escapejs }}", "f": "feed.type"}' hx-params="id,f,v" hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">{% for k, v in c.feedLabels %}<option value="{{ k }}" {% if m.feed_type == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+    {% if S.is_admin and m.feed_type != "none" %}{% if db %}<button class="btn" hx-post="/kiosk/do/mdTest" hx-vals='{"id": "{{ m.name|escapejs }}", "which": "feed"}' hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">Test</button>{% else %}<button class="btn" hx-post="/kiosk/do/testConn" hx-vals='{"k": "feed:{{ m.name|escapejs }}"}'>Test</button>{% endif %}{% endif %}
+    {% if S.is_admin and up.type == "db" %}<button class="btn" hx-post="/kiosk/do/mdTest" hx-vals='{"id": "{{ m.name|escapejs }}", "which": "uptime"}' hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">Test run signal</button>{% endif %}
+    {% if S.is_admin and es.type == "db" %}<button class="btn" hx-post="/kiosk/do/mdTest" hx-vals='{"id": "{{ m.name|escapejs }}", "which": "err"}' hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">Test alarm log</button>{% endif %}</div>
+
+  {% if db %}{% include "hmi/k/admin/_mtable.html" with pre="feed.src." src=src T=c.T tbls=c.tables cols=c.cols %}
+  {% elif m.feed_type == "http" %}<div class="grid2" style="margin-top:8px"><label class="f">URL to read{% include "hmi/k/admin/_mtext.html" with f="feed.url" val=m.feed_url t="url" ph="http://nodered:1880/"|add:m.name %}</label><label class="f">Read every (s){% include "hmi/k/admin/_mtext.html" with f="feed.poll" val=m.feed_poll t="number" min="2" %}</label></div>
+  {% elif m.feed_type == "influx" %}<label class="f" style="margin-top:8px">InfluxDB query<textarea name="v" spellcheck="false" {% if not S.is_admin %}disabled{% endif %} style="min-height:110px;font-family:var(--f-mono);font-size:12px" hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ m.name|escapejs }}", "f": "feed.query"}' hx-params="id,f,v" hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">{{ m.feed_query }}</textarea></label>{% if not c.influxOn %}<div class="note" style="color:var(--bad)">Set up InfluxDB above first.</div>{% endif %}
+  {% elif m.feed_type == "push" %}<p class="note" style="margin-top:8px"><code>POST http://&lt;server&gt;/api/feed/{{ m.name|urlencode:"" }}</code> with header <code>X-Feed-Key</code>.</p>{% endif %}
+
+  {% if m.feed_type in "db,http,push,influx"|split %}<h4 class="h3" style="margin-top:12px">Values from the machine</h4><div class="grid3" style="margin-top:6px">
+    {% if m.feed_type == "push" %}<label class="f">Pleats per minute<input type="text" value="ppm" disabled><span class="note">Always sent as ppm.</span></label><label class="f">Filters cut (counter)<input type="text" value="count" disabled><span class="note">Optional, sent as count.</span></label>
+    {% else %}<label class="f">Pleats per minute{% if db %}{% include "hmi/k/admin/_msel.html" with f="feed.ppmField" val=m.feed_ppm_field opts=c.cols blank="Pick the column" %}{% else %}{% include "hmi/k/admin/_mtext.html" with f="feed.ppmField" val=m.feed_ppm_field ph="ppm" %}{% endif %}<span class="note">Required.</span></label>
+    <label class="f">Filters cut (counter){% if db %}{% include "hmi/k/admin/_msel.html" with f="feed.countField" val=m.feed_count_field opts=c.cols blank="Not given" %}{% else %}{% include "hmi/k/admin/_mtext.html" with f="feed.countField" val=m.feed_count_field ph="count" %}{% endif %}<span class="note">Optional. Without it, filters = pleats ÷ pleats per filter.</span></label>{% endif %}
+    <label class="f">Recipe in the machine{% if db %}{% include "hmi/k/admin/_msel.html" with f="feed.recipeField" val=m.feed_recipe_field opts=c.cols blank="Not given" %}{% else %}{% include "hmi/k/admin/_mtext.html" with f="feed.recipeField" val=m.feed_recipe_field ph="recipe" %}{% endif %}<span class="note">Optional. Shown on the screens and kept with each minute.</span></label></div>{% endif %}
+  {% include "hmi/k/admin/_msg.html" with m=c.test.feed %}
+
+  {% if m.feed_type != "none" and m.feed_type != "demo" %}
+  <h4 class="h3" style="margin-top:12px">Uptime (run signal)</h4><div class="grid3" style="margin-top:6px">
+    <label class="f">Where it comes from<select name="v" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ m.name|escapejs }}", "f": "uptime.type"}' hx-params="id,f,v" hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">
+      <option value="" {% if not up.type %}selected{% endif %}>Speed: stopped at or below {{ c.stop }} P/m</option>
+      <option value="feed" {% if up.type == "feed" %}selected{% endif %}>{% if db %}Another column of the same table{% else %}Another field of the same reading{% endif %}</option>
+      <option value="db" {% if up.type == "db" %}selected{% endif %}>A separate database table</option></select></label>
+    {% if up.type %}<label class="f">Signal {% if up.type == "feed" and not db %}field{% else %}column{% endif %}{% if up.type == "feed" and not db %}{% include "hmi/k/admin/_mtext.html" with f="uptime.field" val=up.field ph="run" %}{% elif up.type == "feed" %}{% include "hmi/k/admin/_msel.html" with f="uptime.field" val=up.field opts=c.cols blank="Pick the column" %}{% else %}{% include "hmi/k/admin/_msel.html" with f="uptime.field" val=up.field opts=c.ucols blank="Pick the column" %}{% endif %}</label>
+    <label class="f">Running when the signal is<select name="v" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ m.name|escapejs }}", "f": "uptime.runWhen"}' hx-params="id,f,v" hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML"><option value="high" {% if up.runWhen != "low" %}selected{% endif %}>High (1, true, on, run)</option><option value="low" {% if up.runWhen == "low" %}selected{% endif %}>Low (0, false, off)</option></select></label>{% endif %}
+  </div>
+  {% if up.type == "db" %}{% include "hmi/k/admin/_mtable.html" with pre="uptime." src=up T=c.UT tbls=c.utables cols=c.ucols %}{% endif %}
+  {% if up.type %}<p class="note" style="margin-top:4px">Uptime, downtime and stop alarms follow this signal. If it can't be read in a minute, that minute uses the speed instead.</p>{% endif %}
+  {% include "hmi/k/admin/_msg.html" with m=c.test.uptime %}
+
+  <h4 class="h3" style="margin-top:12px">Errors and alarms</h4><div class="grid3" style="margin-top:6px">
+    <label class="f">Where they come from<select name="v" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ m.name|escapejs }}", "f": "err.type"}' hx-params="id,f,v" hx-target="#mc-{{ m.pk }}" hx-swap="outerHTML">
+      <option value="" {% if not es.type %}selected{% endif %}>Not kept</option>
+      <option value="feed" {% if es.type == "feed" %}selected{% endif %}>{% if db %}Columns of the same table{% else %}Fields of the same reading{% endif %}</option>
+      <option value="db" {% if es.type == "db" %}selected{% endif %}>The machine's alarm log table</option></select></label>
+    {% if es.type == "feed" %}
+      <label class="f">Error code{% if db %}{% include "hmi/k/admin/_msel.html" with f="err.field" val=es.field opts=c.cols blank="Pick the column" %}{% else %}{% include "hmi/k/admin/_mtext.html" with f="err.field" val=es.field ph="error" %}{% endif %}</label>
+      <label class="f">Error message (optional){% if db %}{% include "hmi/k/admin/_msel.html" with f="err.textField" val=es.textField opts=c.cols blank="Not given" %}{% else %}{% include "hmi/k/admin/_mtext.html" with f="err.textField" val=es.textField ph="errorText" %}{% endif %}</label>
+    {% elif es.type == "db" %}
+      <label class="f">Alarm code{% include "hmi/k/admin/_msel.html" with f="err.codeCol" val=es.codeCol opts=c.ecols blank="Not given" %}</label>
+      <label class="f">Alarm message{% include "hmi/k/admin/_msel.html" with f="err.textCol" val=es.textCol opts=c.ecols blank="Not given" %}</label>
+      <label class="f">When it happened{% include "hmi/k/admin/_msel.html" with f="err.timeCol" val=es.timeCol opts=c.ecols blank="Use the time it was read" %}</label>{% endif %}
+    {% if es.type %}<label class="f">Values that mean no error{% include "hmi/k/admin/_mtext.html" with f="err.ok" val=es.ok ph="0, OK, none (always)" %}</label>{% endif %}
+  </div>
+  {% if es.type == "db" %}{% include "hmi/k/admin/_mtable.html" with pre="err." src=es T=c.ET tbls=c.etables cols=c.ecols noAge=True %}{% endif %}
+  {% if es.type == "feed" %}<p class="note" style="margin-top:4px">An error is kept from the minute it appears until it changes or clears.</p>{% elif es.type == "db" %}<p class="note" style="margin-top:4px">Each new row becomes one entry. Reading starts from the newest row; older history isn't imported.</p>{% endif %}
+  {% if es.type %}<p class="note">Each downtime shows the errors reported during it (and in the 2 minutes before), on the Downtime page and when picking a reason.</p>{% endif %}
+  {% include "hmi/k/admin/_msg.html" with m=c.test.err %}
+  {% endif %}
+</div>{% endwith %}

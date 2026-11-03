@@ -1,0 +1,8 @@
+<div class="row"><h1 class="h1 grow">Maintenance</h1><button class="btn primary" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">New ticket</button></div>
+<div class="tblwrap"><table class="xl"><thead><tr><th>Opened</th><th>Machine</th><th>Issue</th><th>Priority</th><th>Notes</th><th>Pictures</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
+{% for x in P.tickets %}<tr><td>{{ x.t.t|day }} {{ x.t.t|clock }}</td><td>{{ x.t.machine }}</td><td>{{ x.t.type }}</td><td>{% if x.t.priority == "High" %}<span class="pill bad">High · line down</span>{% else %}{{ x.t.priority }}{% endif %}</td><td class="l">{{ x.t.notes }}</td>
+  <td class="l"><div class="thumbs sm">{% for pid in x.photos %}<button class="thumb" hx-get="/kiosk/m/photo?id={{ pid }}" hx-target="#modal" hx-swap="innerHTML" aria-label="Picture {{ forloop.counter }} on this ticket"><img src="/api/hmi/ticket-photo/{{ pid }}?size=thumb" alt="" loading="lazy"></button>{% endfor %}</div>
+    {% if x.photos|length < P.limit %}<form hx-post="/kiosk/do/ticketPhoto" hx-encoding="multipart/form-data" hx-trigger="change" hx-swap="none"><input type="hidden" name="id" value="{{ x.t.id }}"><label class="btn sm ghost" style="margin-top:4px">{% icon "camera" %}Add picture<input type="file" name="photo" accept="image/*" multiple hidden></label></form>{% endif %}</td>
+  <td>{{ x.t.by }}</td><td>{{ x.t.status }}</td><td>{% if x.t.status != "Closed" %}<button class="btn" hx-post="/kiosk/do/ticketStatus" hx-vals='{"id": "{{ x.t.id }}"}'>{% if x.t.status == "Open" %}Start work{% else %}Close{% endif %}</button>{% endif %}</td></tr>
+{% empty %}<tr><td colspan="9">No tickets.</td></tr>{% endfor %}
+</tbody></table></div>

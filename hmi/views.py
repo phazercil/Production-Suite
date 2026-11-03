@@ -5,9 +5,8 @@ from django.conf import settings
 from django.core.cache import cache
 import logging
 from django.http import JsonResponse
-from django.shortcuts import render
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from plant.models import Machine, Person, PlantSettings
@@ -17,22 +16,6 @@ from . import engine, snapshot
 from .models import LineState
 
 log = logging.getLogger("plant")
-
-
-@ensure_csrf_cookie
-def kiosk(request):
-    return render(request, "hmi/kiosk.html", {"mode": "operator"})
-
-
-@ensure_csrf_cookie
-def station(request, machine):
-    """A machine's own address, e.g. /station/Barbara/. Shows only that machine's operator screens:
-    no mode bar, no switching machines, no Team or Admin pages (shift leads use /operator/ for those)."""
-    m = Machine.objects.filter(name__iexact=machine, stage="s1").first()
-    if not m:
-        names = ", ".join(Machine.objects.filter(stage="s1").values_list("name", flat=True))
-        return render(request, "hmi/no_station.html", {"name": machine, "names": names, "kiosk_lock": True}, status=404)
-    return render(request, "hmi/kiosk.html", {"mode": "operator", "kiosk_lock": True, "station_lock": m.name})
 
 
 def body(request):
