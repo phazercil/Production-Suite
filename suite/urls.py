@@ -7,6 +7,7 @@ from labor import views as labor
 from reports import views as reports
 from hmi import views as hmi
 from scheduler import views as sch
+from suite import thin
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/operator/", permanent=False)),
@@ -43,6 +44,8 @@ urlpatterns = [
     # Data Kiosk
     path("data/", dk.board, name="data"),
     path("api/data/state", dk.state),
+    path("data/r/<str:name>", dk.region),
+    path("thin/watch", thin.watch),
     # Reports
     path("reports/", reports.board, name="reports"),
     path("api/report", reports.report),

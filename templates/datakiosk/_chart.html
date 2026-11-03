@@ -1,0 +1,1 @@
+<div class="panel" id="chart-{{ c.name|slugify }}" hx-get="/data/r/chart?line={{ c.name|urlencode }}" hx-trigger="suite:changed from:body"><h3>{{ title|default:"Pleater speed · this shift" }}</h3>{{ c.chart|safe }}</div>

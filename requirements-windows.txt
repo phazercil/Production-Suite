@@ -1,6 +1,6 @@
 # Installed by the Windows installer into the .venv folder, from the "wheels" folder that ships with it
 # (no internet needed). All are pure Python except Pillow (pictures on maintenance tickets), which ships
-# one wheel per Python version (3.10 to 3.14 on Windows, 3.11 and 3.12 on Linux).
+# one wheel per Python version (3.10 to 3.14 on Windows, 3.11 to 3.13 on Linux).
 Django==5.2.18
 asgiref==3.11.1
 sqlparse==0.5.5

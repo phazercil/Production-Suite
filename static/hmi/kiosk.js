@@ -452,7 +452,7 @@ VIEWS.maintenance=()=>{
   return `<div class="row"><h1 class="h1 grow">Maintenance</h1><button class="btn primary" data-action="maintTicket">New ticket</button></div>
   <div class="tblwrap"><table class="xl"><thead><tr><th>Opened</th><th>Machine</th><th>Issue</th><th>Priority</th><th>Notes</th><th>Pictures</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
   ${list.map(t=>{const ph=t.photos||[];return `<tr><td>${fmtD(t.t)} ${fmtT(t.t)}</td><td>${esc(t.machine)}</td><td>${esc(t.type)}</td><td>${t.priority==='High'?'<span class="pill bad">High · line down</span>':t.priority}</td><td class="l">${esc(t.notes)}</td>
-    <td class="l"><div class="thumbs sm">${ph.map((p,i)=>`<button class="thumb" data-action="photoView" data-id="${p.id}" aria-label="Picture ${i+1} on this ticket"><img src="/api/hmi/ticket-photo/${p.id}" alt="" loading="lazy"></button>`).join('')}</div>
+    <td class="l"><div class="thumbs sm">${ph.map((p,i)=>`<button class="thumb" data-action="photoView" data-id="${p.id}" aria-label="Picture ${i+1} on this ticket"><img src="/api/hmi/ticket-photo/${p.id}?size=thumb" alt="" loading="lazy"></button>`).join('')}</div>
       ${ph.length<PHOTO_LIMIT?`<label class="btn sm ghost" style="margin-top:4px">${IC.camera}Add picture<input type="file" accept="image/*" multiple hidden data-change="ticketPhotoAdd" data-id="${t.id}"></label>`:''}</td>
     <td>${esc(t.by)}</td><td>${t.status}</td><td>${t.status!=='Closed'?`<button class="btn" data-action="ticketStatus" data-id="${t.id}">${t.status==='Open'?'Start work':'Close'}</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="9">No tickets.</td></tr>'}
   </tbody></table></div>`;
@@ -1319,19 +1319,12 @@ function openTicket(){
     `<button class="btn go" data-action="saveTicket">Submit ticket</button>`);
   ui.tPhotos=[];
 }
-/* ---------- maintenance pictures: taken with the tablet's camera, shrunk to 1600 px JPEG before sending ---------- */
-const PHOTO_MAX=1600, PHOTO_LIMIT=6;
+/* ---------- maintenance pictures: sent as the camera took them; the server turns them upright and shrinks them ---------- */
+const PHOTO_LIMIT=6;
 const photoButtons=(change,id)=>`<label class="btn sm">${IC.camera||''}Take a picture<input type="file" accept="image/*" capture="environment" hidden data-change="${change}"${id!=null?` data-id="${id}"`:''}></label>
   <label class="btn sm ghost">Choose a picture<input type="file" accept="image/*" multiple hidden data-change="${change}"${id!=null?` data-id="${id}"`:''}></label>`;
-function shrinkPhoto(file){
-  return new Promise((res,rej)=>{const u=URL.createObjectURL(file),img=new Image();
-    img.onload=()=>{const k=Math.min(1,PHOTO_MAX/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement('canvas');
-      c.width=Math.max(1,Math.round(img.naturalWidth*k));c.height=Math.max(1,Math.round(img.naturalHeight*k));
-      c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(b=>b?res(b):rej(new Error('That picture couldn\'t be read.')),'image/jpeg',0.82)};
-    img.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('That file isn\'t a picture.'))};img.src=u});
-}
 async function uploadPhoto(ticket,blob){
-  const fd=new FormData();fd.append('ticket',ticket);fd.append('photo',blob,'photo.jpg');
+  const fd=new FormData();fd.append('ticket',ticket);fd.append('photo',blob,blob.name||'photo.jpg');
   try{const r=await fetch('/api/hmi/ticket-photo',{method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrf()},body:fd});return await r.json()}
   catch(e){return {ok:false,error:'Couldn\'t reach the server.'}}
 }
@@ -1583,10 +1576,10 @@ const CH={
   updFile:el=>{ui.updFile=el.files&&el.files[0]||null},
   tPhotos:async el=>{const files=[...(el.files||[])];el.value='';ui.tPhotos=ui.tPhotos||[];const m=$('#tPicMsg');
     for(const f of files){if(ui.tPhotos.length>=PHOTO_LIMIT){if(m)m.textContent=`Up to ${PHOTO_LIMIT} pictures.`;break}
-      try{const b=await shrinkPhoto(f);ui.tPhotos.push({blob:b,url:URL.createObjectURL(b)})}catch(e){if(m)m.textContent=e.message}}
+      if(!/^image\//.test(f.type||'')){if(m)m.textContent='That file isn\'t a picture.';continue}ui.tPhotos.push({blob:f,url:URL.createObjectURL(f)})}
     drawTicketPics()},
   ticketPhotoAdd:async el=>{const files=[...(el.files||[])];el.value='';if(!files.length)return;if(!user()){openLogin();return}
-    let n=0,err='';for(const f of files){try{const r=await uploadPhoto(el.dataset.id,await shrinkPhoto(f));if(r.ok)n++;else err=r.error}catch(e){err=e.message}}
+    let n=0,err='';for(const f of files){const r=await uploadPhoto(el.dataset.id,f);if(r.ok)n++;else err=r.error}
     toast(n?`${n} picture${n>1?'s':''} added${err?' · '+err:''}`:err||'No picture added');Remote.get(true)},
   updF:el=>{(ui.updForm=ui.updForm||{})[el.dataset.f]=el.value},
   updFR:el=>{(ui.updForm=ui.updForm||{})[el.dataset.f]=el.value;render(true)},
