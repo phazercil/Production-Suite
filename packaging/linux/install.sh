@@ -122,7 +122,8 @@ say "  ${PRETTY_NAME}"
 
 # ---------------------------------------------------------------- 2. packages
 step "2. Installing Python, Apache and the SELinux tools (dnf)"
-extra=(httpd policycoreutils-python-utils curl)
+extra=(httpd policycoreutils-python-utils)
+command -v curl >/dev/null || extra+=(curl)   # curl-minimal counts; asking for curl next to it makes dnf refuse
 [ "$WITH_MARIADB" = 1 ] && extra+=(mariadb-server)
 # Pythons the suite's packages are included for (packaging/wheels): 3.11 to 3.14
 py_ok() { "$1" -c 'import sys, venv, ensurepip; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 14) else 1)' >/dev/null 2>&1; }
