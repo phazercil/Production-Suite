@@ -4,5 +4,5 @@ VERSION changes with each release; REVISION goes up by one with every build (ins
 so two screens showing different revisions are running different builds. Updates refuse to install a
 revision older than the one already installed (use Admin > Updates > Go back for that).
 """
-VERSION = "1.4.0"
-REVISION = 6
+VERSION = "1.5.0"
+REVISION = 7

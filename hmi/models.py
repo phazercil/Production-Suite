@@ -49,6 +49,7 @@ class LineState(models.Model):
     feed = models.JSONField(default=dict, blank=True)
     pushed = models.JSONField(null=True, blank=True)
     pushed_at = models.DateTimeField(null=True, blank=True)
+    err_state = models.JSONField(default=dict, blank=True)  # where the alarm log table was read up to
 
     class Meta:
         db_table = "hmi_line_state"
@@ -141,6 +142,39 @@ class Ticket(models.Model):
     class Meta:
         db_table = "hmi_tickets"
         ordering = ["t"]
+
+
+class TicketPhoto(models.Model):
+    """A picture of what is wrong, taken on a tablet or phone when the ticket is opened (or added later).
+    Kept in the records database, so it is backed up with everything else. Re-saved as JPEG by the screen."""
+    ticket = models.ForeignKey(Ticket, related_name="photos", on_delete=models.CASCADE)
+    t = models.DateTimeField()
+    by = models.CharField(max_length=120)
+    content_type = models.CharField(max_length=20, default="image/jpeg")
+    data = models.BinaryField()
+    size = models.IntegerField(default=0)
+    width = models.IntegerField(default=0)
+    height = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = "hmi_ticket_photo"
+        ordering = ["t", "id"]
+
+
+class MachineError(models.Model):
+    """An error or alarm the machine reported. From a field of its reading (open while the value stays the
+    same, closed when it clears) or from rows of its alarm log table (one entry per row)."""
+    machine = models.ForeignKey(Machine, null=True, blank=True, on_delete=models.SET_NULL)
+    line = models.CharField(max_length=60, db_index=True)
+    start = models.DateTimeField(db_index=True)
+    end = models.DateTimeField(null=True, blank=True, help_text="Blank while the error is still showing")
+    code = models.CharField(max_length=80, blank=True)
+    text = models.CharField(max_length=300, blank=True)
+    source = models.CharField(max_length=8, default="feed")  # feed | log
+
+    class Meta:
+        db_table = "hmi_machine_errors"
+        ordering = ["start", "id"]
 
 
 class ShiftNote(models.Model):

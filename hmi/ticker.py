@@ -31,6 +31,12 @@ def demo_sample(m, ls):
     return {"ppm": round(v * (m.demo_scale or 1))}
 
 
+def machinedata_text(code, text):
+    from . import machinedata
+    c, x = machinedata.text(code), machinedata.text(text, 120)
+    return f"{c} · {x}" if x and x != c else c
+
+
 def _feed_sample(m, ls, t):
     """Returns (sample or None, feed status dict) from the machine's main source."""
     if m.feed_type == "demo":
@@ -111,6 +117,15 @@ def _tick_one_minute(m, t):
             return False
         minute = ls.next_tick
         s, feed = sample_for(m, ls, minute)
+        if (m.error_src or {}).get("type"):
+            from . import machineerrors
+            try:
+                with transaction.atomic():  # a broken alarm log never stops this minute from counting
+                    machineerrors.collect(m, ls, s, minute)
+            except Exception as e:  # noqa: BLE001
+                log.warning("machine errors for %s: %s", m.name, e)
+            if s is not None and machineerrors.is_error(m, s.get("error")):
+                feed["error"] = machinedata_text(s.get("error"), s.get("errorText"))
         ls.feed = feed
         ls.save(update_fields=["feed", "demo_idx"])
         engine.tick(m, s, minute)
@@ -214,6 +229,14 @@ def timed_pulls(state, t):
         except Exception as e:  # one source failing never stops the others
             log.warning("data source %s: %s", src.name, e)
             DataSource.objects.filter(pk=src.pk).update(last_at=t, last_ok=False, last_msg=str(e)[:300])
+    # Pictures on tickets closed long ago (Admin > Rules > photoDays), once a day
+    if due("photos", 24 * 60):
+        def purge_photos():
+            from . import photos
+            n = photos.purge(t, engine.rules().get("photoDays", 365))
+            if n:
+                log.info("removed %s pictures of old closed maintenance tickets", n)
+        run("photos", purge_photos)
     # Updates: files dropped in updates/inbox, and an update that is due (Admin > Updates)
     if not state.get("updates") or (t - state["updates"]).total_seconds() >= 15:
         state["updates"] = t

@@ -101,7 +101,7 @@ class SecurityHeadersMiddleware:
         except Exception:
             frame = "'none'"
         resp.setdefault("Content-Security-Policy",
-                        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
                         f"font-src 'self'; connect-src 'self'; frame-src {frame}; frame-ancestors 'self'; "
                         "form-action 'self'; base-uri 'self'; object-src 'none'")
         resp.setdefault("X-Content-Type-Options", "nosniff")

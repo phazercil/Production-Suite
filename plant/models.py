@@ -81,6 +81,10 @@ class Machine(models.Model):
     # {"type": "" (use the speed) | "feed" (a field of the reading above) | "db" (a column of a table), "field": ..,
     #  "db", "table", "orderCol", "keyCol", "keyVal", "maxAge", "runWhen": "high" | "low"}
     uptime_src = models.JSONField(default=dict, blank=True)
+    # Errors and alarms from the machine, kept so each downtime shows what the machine reported:
+    # {"type": "" | "feed" (fields of the reading: "field" = code, "textField") | "db" (an alarm log table: "db", "table",
+    #  "orderCol", "keyCol", "keyVal", "timeCol", "codeCol", "textCol"), "ok": values that mean no error}
+    error_src = models.JSONField(default=dict, blank=True)
     demo_scale = models.FloatField(default=1)
     demo_offset = models.IntegerField(default=0)
 
@@ -221,7 +225,8 @@ DEFAULT_CONFIG = {
     "issueTypes": ["Pleater jam", "Blade / cutter", "Glue system", "Side band applicator", "Electrical / sensor", "Air / pneumatics",
                    "Guarding / safety", "Other"],
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
-    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15},
+    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
+              "photoDays": 365},
 }
 DEFAULT_SETTINGS = {
     "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "webhook": "", "useDb": False,

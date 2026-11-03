@@ -19,7 +19,7 @@ from plant.util import MIN, Catalog, default_ops, from_ms, iso_date, ms, now, pa
 
 from . import integrations
 from .models import (PlannedTime, AuditLog, ChangeoverCache, Downtime, Event, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag,
-                     SavedQuery, ShiftNote, ShiftRun, Ticket)
+                     SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError)
 
 log = logging.getLogger("plant")
 
@@ -313,7 +313,7 @@ def rename_machine_records(old, new):
     """Carry a machine's records over to its new name. Used by the kiosk Admin page and the Scheduler."""
     if not old or old == new:
         return
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, ShiftNote, MoRun):
+    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, ShiftNote, MoRun, MachineError):
         model.objects.filter(line=old).update(line=new)
     Ticket.objects.filter(machine=old).update(machine=new)
     Ticket.objects.filter(line=old).update(line=new)
@@ -612,7 +612,7 @@ def ticket_add(p, ctx):
                               priority=p.get("priority") if p.get("priority") in ("Low", "Medium", "High") else "Medium",
                               notes=str(p.get("notes") or "").strip())
     event("maintenance", {"id": t.id, "machine": machine, "type": t.type, "priority": t.priority})
-    return {"msg": "Maintenance ticket sent"}
+    return {"msg": "Maintenance ticket sent", "data": {"id": t.id}}
 
 
 @cmd("ticketStatus")
@@ -1004,22 +1004,29 @@ def line_add(p, ctx):
 
 
 SOURCE_KEYS = {"db", "table", "orderCol", "keyCol", "keyVal", "maxAge"}
+# prefix of the Admin field -> (Machine attribute, extra keys it takes, columns cleared when the table changes)
+SOURCES = {"feed.src.": ("feed_src", set(), ()),
+           "uptime.": ("uptime_src", {"type", "field", "runWhen"}, ("field",)),
+           "err.": ("error_src", {"type", "field", "textField", "timeCol", "codeCol", "textCol", "ok"}, ("timeCol", "codeCol", "textCol"))}
 
 
 def _set_source(m, f, v):
-    """Admin > Machine data: one setting of the machine's table (feed.src.<key>) or of its run signal (uptime.<key>).
-    Table and column names are only stored here; they are checked against the database's own list whenever read."""
+    """Admin > Machine data: one setting of the machine's table (feed.src.<key>), its run signal (uptime.<key>) or
+    its errors and alarms (err.<key>). Table and column names are only stored here; they are checked against the
+    database's own list whenever they are read."""
     from . import machinedata
-    which, key = ("feed", f[len("feed.src."):]) if f.startswith("feed.src.") else ("uptime", f[len("uptime."):])
-    cur = dict((m.feed_src if f.startswith("feed.src.") else m.uptime_src) or {})
-    keys = SOURCE_KEYS | ({"type", "field", "runWhen"} if which == "uptime" else set())
-    need(key in keys, "Unknown field.")
+    pre = next(x for x in SOURCES if f.startswith(x))
+    attr, extra, cols = SOURCES[pre]
+    key = f[len(pre):]
+    cur = dict(getattr(m, attr) or {})
+    need(key in SOURCE_KEYS | extra, "Unknown field.")
+    clear = {c: "" for c in ("orderCol", "keyCol", *cols)}
     if key == "db":
         need(v in machinedata.TABLE_DBS, "Pick the machine data database or the asset database.")
         if cur.get("db") != v:
-            cur.update(table="", orderCol="", keyCol="", field="" if which == "uptime" else cur.get("field", ""))
+            cur.update(table="", **clear)
     elif key == "type":
-        need(v in ("", "feed", "db"), "Unknown run signal source.")
+        need(v in ("", "feed", "db"), "Unknown source.")
         if v == "db":
             cur.setdefault("db", "machines")
     elif key == "runWhen":
@@ -1031,28 +1038,29 @@ def _set_source(m, f, v):
             raise Need("Type the minutes as a number (0 = never).")
     else:
         v = str(v or "").strip()
-        need(len(v) <= (80 if key == "keyVal" else 64), "That name is too long.")
+        need(len(v) <= (200 if key == "ok" else 80 if key in ("keyVal", "field", "textField") else 64), "That is too long.")
         if key == "table" and cur.get("table") != v:
-            cur.update(orderCol="", keyCol="", **({"field": ""} if which == "uptime" else {}))
+            cur.update(**clear)
     cur[key] = v
-    if f.startswith("feed.src."):
-        m.feed_src = cur
-    else:
-        m.uptime_src = cur
+    setattr(m, attr, cur)
 
 
 @cmd("lineFeedTest", "admin")
 def line_feed_test(p, ctx):
-    """Admin > Machine data > Test: the newest row of the machine's table (or run signal) and what the suite reads."""
-    from . import machinedata
+    """Admin > Machine data > Test: the newest row of the machine's table, run signal or alarm log, and what the
+    suite reads from it. Changes nothing."""
+    from . import machinedata, machineerrors
     m = line_of(p.get("id"))
     need(m, "Machine not found.")
-    which = "uptime" if p.get("which") == "uptime" else "feed"
+    which = p.get("which") if p.get("which") in ("uptime", "err") else "feed"
     try:
         if which == "feed":
             need(m.feed_type == "db", "Test reads a database table; set the source to Database table first.")
-        else:
+        elif which == "uptime":
             need((m.uptime_src or {}).get("type") == "db", "Set the run signal to come from a database table first.")
+        else:
+            need((m.error_src or {}).get("type") == "db", "Set errors to come from an alarm log table first.")
+            return {"data": {"rows": machineerrors.preview(m)}}
         return {"data": machinedata.preview(m, which)}
     except integrations.ConnError as e:
         raise Need(str(e))
@@ -1141,7 +1149,7 @@ def line_set(p, ctx):
         m.feed_count_field = str(v or "").strip()[:80]
     elif f == "feed.recipeField":
         m.feed_recipe_field = str(v or "").strip()[:80]
-    elif f.startswith("feed.src.") or f.startswith("uptime."):
+    elif f.startswith(("feed.src.", "uptime.", "err.")):
         _set_source(m, f, v)
     else:
         raise Need("Unknown field.")
@@ -1873,7 +1881,7 @@ def data_reset(p, ctx):
         from plant.demo import seed_demo
         seed_demo(reset=True)
         return {"msg": "Demo data loaded", "relogin": True}
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache):
+    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, MachineError):
         model.objects.all().delete()
     MO.objects.all().delete()
     Machine.objects.filter(feed_type="demo").update(feed_type="none")

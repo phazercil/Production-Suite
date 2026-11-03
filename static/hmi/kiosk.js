@@ -150,10 +150,13 @@ const canOverride=()=>!!(ME&&(ME.role==='admin'||ME.role==='maintenance'));
 const qcDue=()=>shiftOn()&&S.settings.autoQC&&now()-S.qcLast>=S.settings.qcEvery*MIN;
 const unreadSched=()=>S.notices.filter(n=>!n.read&&n.kind!=='team');
 const openTickets=()=>S.tickets.filter(t=>t.status!=='Closed');
+// errors still showing on a machine, plus alarm-log entries since its current stop began
+const curErrors=line=>{const R=S.runs[line]||{},sh=R.shift,from=sh&&sh.stopStart?sh.stopStart-2*MIN:now()-10*MIN;return (R.errors||[]).filter(x=>x.end==null||x.end>=from).reverse()};
 function alarms(){
   const a=[];
   if(SRV.server&&!SRV.storeOk) a.push({sev:'bad',text:`The server cannot save records: ${SRV.storeErr}`,go:'admin'});
   if(shiftOn()&&S.feed&&S.feed.type&&!S.feed.ok) a.push({sev:'bad',text:`No machine data from ${station}: ${S.feed.err||'feed offline'}`,go:'status'});
+  if(shiftOn()&&S.feed&&S.feed.error) a.push({sev:'warn',text:`${station} reports: ${S.feed.error}`,go:'downtime'});
   const nr=reasonDue()?needReason().length:0; if(nr) a.push({sev:'bad',text:`${nr} downtime ${nr>1?'entries need':'entry needs'} a reason`,go:'downtime'});
   if(qcDue()) a.push({sev:'warn',text:`QC check due (every ${S.settings.qcEvery} min)`,go:'qcCheck'});
   unreadSched().forEach(n=>a.push({sev:'warn',text:n.text,go:'schedule',notice:n.id}));
@@ -282,6 +285,7 @@ const IC={
  end:ico('<rect x="6" y="6" width="12" height="12" rx="1"/>'),
  co:ico('<path d="M4 7h13l-3-3M20 17H7l3 3"/>'),
  maint:ico('<path d="M14 6l4 4-8 8H6v-4zM12 8l4 4"/>'),
+ camera:ico('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>'),
  draw:ico('<path d="M5 5h14v14H5zM9 9h6M9 13h6"/>'),
  qc:ico('<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5M8.5 11l2 2 3.5-4"/>'),
  rolls:ico('<ellipse cx="8" cy="12" rx="3" ry="6"/><path d="M8 6h9a3 6 0 0 1 0 12H8"/>'),
@@ -446,22 +450,38 @@ VIEWS['qc-log']=()=>{
 VIEWS.maintenance=()=>{
   const list=[...S.tickets].reverse();
   return `<div class="row"><h1 class="h1 grow">Maintenance</h1><button class="btn primary" data-action="maintTicket">New ticket</button></div>
-  <div class="tblwrap"><table class="xl"><thead><tr><th>Opened</th><th>Machine</th><th>Issue</th><th>Priority</th><th>Notes</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
-  ${list.map(t=>`<tr><td>${fmtD(t.t)} ${fmtT(t.t)}</td><td>${esc(t.machine)}</td><td>${esc(t.type)}</td><td>${t.priority==='High'?'<span class="pill bad">High · line down</span>':t.priority}</td><td class="l">${esc(t.notes)}</td><td>${esc(t.by)}</td><td>${t.status}</td><td>${t.status!=='Closed'?`<button class="btn" data-action="ticketStatus" data-id="${t.id}">${t.status==='Open'?'Start work':'Close'}</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8">No tickets.</td></tr>'}
+  <div class="tblwrap"><table class="xl"><thead><tr><th>Opened</th><th>Machine</th><th>Issue</th><th>Priority</th><th>Notes</th><th>Pictures</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
+  ${list.map(t=>{const ph=t.photos||[];return `<tr><td>${fmtD(t.t)} ${fmtT(t.t)}</td><td>${esc(t.machine)}</td><td>${esc(t.type)}</td><td>${t.priority==='High'?'<span class="pill bad">High · line down</span>':t.priority}</td><td class="l">${esc(t.notes)}</td>
+    <td class="l"><div class="thumbs sm">${ph.map((p,i)=>`<button class="thumb" data-action="photoView" data-id="${p.id}" aria-label="Picture ${i+1} on this ticket"><img src="/api/hmi/ticket-photo/${p.id}" alt="" loading="lazy"></button>`).join('')}</div>
+      ${ph.length<PHOTO_LIMIT?`<label class="btn sm ghost" style="margin-top:4px">${IC.camera}Add picture<input type="file" accept="image/*" multiple hidden data-change="ticketPhotoAdd" data-id="${t.id}"></label>`:''}</td>
+    <td>${esc(t.by)}</td><td>${t.status}</td><td>${t.status!=='Closed'?`<button class="btn" data-action="ticketStatus" data-id="${t.id}">${t.status==='Open'?'Start work':'Close'}</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="9">No tickets.</td></tr>'}
   </tbody></table></div>`;
 };
 
+// Errors and alarms the machine reported during a stop (or up to 2 minutes before it)
+function errChips(list,max=4){
+  if(!list||!list.length)return '';
+  const one=x=>`<span class="errchip" title="${esc((x.text||x.code)+' · '+fmtT(x.start)+(x.end&&x.end!==x.start?' – '+fmtT(x.end):x.end?'':' – still showing'))}">${esc(x.code||x.text)}${x.code&&x.text?` <span>${esc(x.text)}</span>`:''}</span>`;
+  return `<div class="errchips">${list.slice(0,max).map(one).join('')}${list.length>max?`<span class="note">+${list.length-max} more</span>`:''}</div>`;
+}
+function errLog(d){
+  modal(`Machine errors · ${esc(d.line)} ${fmtT(d.start)} – ${fmtT(d.end)}`,`<p class="sub">What ${esc(d.line)} reported during this stop (and in the 2 minutes before it).</p>
+    <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Time</th><th>Code</th><th>Message</th></tr></thead><tbody>
+    ${(d.errors||[]).map(x=>`<tr><td>${fmtT(x.start)}${x.end&&x.end!==x.start?` – ${fmtT(x.end)}`:x.end?'':' – still showing'}</td><td><b>${esc(x.code)}</b></td><td class="l">${esc(x.text)}</td></tr>`).join('')}</tbody></table></div>`);
+}
 VIEWS.downtime=()=>{
   const evs=shiftDowns(), sh=S.shift, older=S.downtime.filter(d=>d.shift!==sid()&&!d.reason&&d.line===station);
   const row=(d,i)=>`<tr class="${d.reason?'':'unset'}"><td><b>${i!=null?String.fromCharCode(65+i%26):''}</b></td><td>${fmtT(d.start)} – ${fmtT(d.end)}</td><td>${d.mins}</td><td>${esc(d.line)}</td><td>${d.mo||''}</td>
+    <td class="l">${(d.errors||[]).length?`<button class="linkbtn" data-action="errLog" data-id="${d.id}" aria-label="Machine errors during this stop">${errChips(d.errors,3)}</button>`:'<span class="note">—</span>'}</td>
     <td>${reasonCell(d)}</td>
     <td class="l"><input type="text" id="dn-${d.id}" data-change="dNotes" data-id="${d.id}" value="${esc(d.notes)}" placeholder="What happened?"></td></tr>`;
   const reasons={};S.downtime.filter(d=>d.shift===sid()).forEach(d=>{const k=d.reason||'Not entered';reasons[k]=(reasons[k]||0)+d.mins});
   const max=Math.max(1,...Object.values(reasons));
   return `<div class="row"><h1 class="h1 grow">Downtime · ${esc(station)}</h1><span class="sub">Stops of ${C().rules.minDown} minutes or more are logged automatically; breaks, lunch and the first ${C().rules.startGrace||0} minutes of a shift are not downtime. A reason is required once stops without one add up to ${C().rules.reasonAfter||0} minutes.${canOverride()?' As maintenance or a shift lead you can type your own reason or change one already entered.':''}</span></div>
   ${sh&&sh.stopStart?`<div class="panel" style="border-color:var(--bad)"><b>Line stopped since ${fmtT(sh.stopStart)}</b> · ${Math.round((now()-sh.stopStart)/MIN)} min so far. It will appear below when the line restarts.</div>`:''}
-  <div class="tblwrap"><table class="xl"><thead><tr><th></th><th>Time</th><th>Min</th><th>Line</th><th>MO</th><th>Reason</th><th>Notes</th></tr></thead><tbody>
-  ${evs.map(row).join('')}${older.map(d=>row(d,null)).join('')}${!evs.length&&!older.length?'<tr><td colspan="7">No stops this shift.</td></tr>':''}</tbody></table></div>
+  ${sh&&sh.stopStart&&curErrors(station).length?`<div class="panel" style="border-color:var(--warn)"><b>The machine is reporting:</b>${errChips(curErrors(station),6)}</div>`:''}
+  <div class="tblwrap"><table class="xl"><thead><tr><th></th><th>Time</th><th>Min</th><th>Line</th><th>MO</th><th>Machine errors</th><th>Reason</th><th>Notes</th></tr></thead><tbody>
+  ${evs.map(row).join('')}${older.map(d=>row(d,null)).join('')}${!evs.length&&!older.length?'<tr><td colspan="8">No stops this shift.</td></tr>':''}</tbody></table></div>
   ${Object.keys(reasons).length?`<div class="panel"><h2 class="h2">This shift by reason</h2><div class="bars" style="margin-top:10px">${Object.entries(reasons).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="bar"><span>${esc(k)}</span><i style="width:${v/max*100}%;${k==='Not entered'?'':'background:var(--ink-3)'}"></i><span class="num">${v} min</span></div>`).join('')}</div></div>`:''}`;
 };
 VIEWS.status=()=>{
@@ -474,6 +494,7 @@ VIEWS.status=()=>{
     <dl class="kv" style="margin-top:8px"><dt>Rated</dt><dd class="num">${l.rated} P/m</dd>
     <dt>Machine data</dt><dd>${{demo:'Demo replay',http:'Read from URL',push:'Pushed to the server',influx:'InfluxDB query',db:'Database table',none:'Not connected'}[(l.feed||{}).type]||'—'}${f.t?(f.ok?' · <span class="pill ok">OK</span>':` · <span class="pill bad" title="${esc(f.err)}">NO DATA</span>`):''}</dd>
     ${f.recipe?`<dt>Recipe</dt><dd>${esc(f.recipe)}</dd>`:''}
+    ${(l.feed.errors||{}).type?`<dt>Machine errors</dt><dd>${curErrors(l.id).length?errChips(curErrors(l.id),3):'<span class="note">None now</span>'}${(R.errLog||{}).ok===false?` <span class="pill warn" title="${esc(R.errLog.err)}">ALARM LOG NOT READ</span>`:''}</dd>`:''}
     ${(l.feed.uptime||{}).type?`<dt>Run signal</dt><dd>${f.runErr?`<span class="pill warn" title="${esc(f.runErr)}">NOT READ</span> <span class="note">uptime uses the speed</span>`:f.run===true?'<span class="pill ok">RUNNING</span>':f.run===false?'<span class="pill bad">STOPPED</span>':'—'}</dd>`:''}
     ${on?`<dt>Operator</dt><dd>${esc(sh.userName||sh.user)}</dd><dt>MO</dt><dd>${mo?`${mo.mo} · ${esc(mo.item)}`:'—'}</dd><dt>Speed now</dt><dd class="num">${h.length?h[h.length-1].ppm:0} P/m</dd><dt>Shift count</dt><dd class="num">${sh.count.toLocaleString()}</dd><dt>Uptime</dt><dd class="num">${st.uptime}% · ${st.down} min down</dd>`:''}
     <dt>Next up</dt><dd>${nxt?`${esc(nxt.item)} · MO ${nxt.mo}`:'Nothing scheduled'}</dd></dl></div></div>`}).join('')}</div>
@@ -598,8 +619,8 @@ function openDownPrompt(){
   const total=unexplainedMins();
   modal('Why did the line stop?',`<p class="sub">${esc(station)} has ${list.length} stop${list.length>1?'s':''} adding up to <b>${total} min</b> without a reason. Pick a reason for each one${canOverride()?', or choose Other to type your own':''}.</p>
     ${user()?'':'<p class="note" style="color:var(--warn)">Log in to enter reasons.</p>'}
-    <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Time</th><th>Min</th><th>MO</th><th>Reason</th></tr></thead><tbody>
-    ${list.map(d=>`<tr><td>${fmtT(d.start)} – ${fmtT(d.end)}</td><td>${d.mins}</td><td>${esc(d.mo||'')}</td><td>${reasonCell(d,'dp')}</td></tr>`).join('')}</tbody></table></div>
+    <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Time</th><th>Min</th><th>MO</th><th>Machine errors</th><th>Reason</th></tr></thead><tbody>
+    ${list.map(d=>`<tr><td>${fmtT(d.start)} – ${fmtT(d.end)}</td><td>${d.mins}</td><td>${esc(d.mo||'')}</td><td class="l">${errChips(d.errors,3)||'<span class="note">—</span>'}</td><td>${reasonCell(d,'dp')}</td></tr>`).join('')}</tbody></table></div>
     <p class="note" style="margin-top:8px">The reasons list is kept in Admin › Downtime reasons. ${canOverride()?'':'If the right reason isn\'t listed, ask maintenance or your shift lead.'}</p>`,
     `${user()?'':'<button class="btn primary" data-action="downLogin">Log in</button>'}${canOverride()?'<button class="btn ghost" data-action="close">Later</button>':''}`);
   ui.modal='downPrompt';
@@ -659,6 +680,7 @@ function grafanaQueriesPanel(){
     ['Speed without planned stops',`SELECT t AS time, ppm AS "P/m"\nFROM hmi_ppm\nWHERE line = '$line' AND planned = 0 AND $__timeFilter(t)\nORDER BY t`],
     ['Filters made',`SELECT $__timeGroupAlias(t, '1h'), SUM(units) AS "Filters"\nFROM hmi_ppm\nWHERE line = '$line' AND $__timeFilter(t)\nGROUP BY 1 ORDER BY 1`],
     ['Planned breaks as shaded regions (dashboard annotation)',`SELECT start AS time, end AS timeend, kind AS text\nFROM hmi_planned\nWHERE line = '$line' AND $__timeFilter(start)`],
+    ['Machine errors and alarms (table panel)',`SELECT start AS time, code AS "Code", text AS "Message", TIMESTAMPDIFF(MINUTE, start, COALESCE(end, NOW())) AS "Min"\nFROM hmi_machine_errors\nWHERE line = '$line' AND $__timeFilter(start)\nORDER BY start DESC`],
     ['Machine vision QC pass %',`SELECT $__timeGroupAlias(t, '1h'), 100 * AVG(passed) AS "Pass %"\nFROM hmi_qc_auto\nWHERE line = '$line' AND $__timeFilter(t)\nGROUP BY 1 ORDER BY 1`]];
   const IX=SRV.influx&&SRV.influx.out, b=IX?SRV.influx.out:'', v2=IX&&SRV.influx.version!=='1';
   if(IX) q.push(...(v2?[
@@ -749,7 +771,7 @@ function mSelect(id,lid,f,val,opts,blank,dis){
   return `<select id="${id}" data-change="lineF" data-id="${esc(lid)}" data-f="${f}" ${dis}>${blank!==null?`<option value="" ${!val?'selected':''}>${esc(blank)}</option>`:''}${val&&!has?`<option value="${esc(val)}" selected>${esc(val)}${known?' (not found)':''}</option>`:''}${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}</option>`).join('')}</select>`;
 }
 // Where a table's rows come from: database, table, newest row, which rows are this machine's.
-function mTableFields(l,pre,src,adm,dis){
+function mTableFields(l,pre,src,adm,dis,noAge){
   const id=l.id, k=pre.replace(/\W/g,''), T=mTables(src.db||'machines',adm), tbls=(T.tables||[]).map(t=>t.name);
   const cols=((T.tables||[]).find(t=>t.name===src.table)||{columns:[]}).columns.map(c=>c.name);
   const ready=src.db==='assets'?SRV.assets:SRV.machinesdb;
@@ -759,7 +781,7 @@ function mTableFields(l,pre,src,adm,dis){
     <label class="f">Newest row by${mSelect(`md-${k}-ob-${id}`,id,pre+'orderCol',src.orderCol||'',cols,'Pick a time stamp or ID column',dis)}</label>
     <label class="f">Rows for this machine (if the table has several)${mSelect(`md-${k}-kc-${id}`,id,pre+'keyCol',src.keyCol||'',cols,'Whole table is this machine',dis)}</label>
     ${src.keyCol?`<label class="f">…where ${esc(src.keyCol)} is<input type="text" id="md-${k}-kv-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}keyVal" value="${esc(src.keyVal||'')}" placeholder="${esc(id)}" ${dis}></label>`:''}
-    <label class="f">No data after (min without a new row, 0 = never)<input type="number" min="0" step="1" id="md-${k}-ma-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}maxAge" value="${src.maxAge!=null?src.maxAge:(pre==='uptime.'?0:3)}" ${dis}></label>
+    ${noAge?'':`<label class="f">No data after (min without a new row, 0 = never)<input type="number" min="0" step="1" id="md-${k}-ma-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="${pre}maxAge" value="${src.maxAge!=null?src.maxAge:(pre==='uptime.'?0:3)}" ${dis}></label>`}
   </div>${!ready?`<p class="note" style="color:var(--bad);margin-top:4px">Set up the ${esc(TABLE_DBS[src.db||'machines'].toLowerCase())} under Databases and accounts above first.</p>`:T.err?`<p class="note" style="color:var(--bad);margin-top:4px">${esc(T.err)}</p>`:T.loading?'<p class="note" style="margin-top:4px">Loading tables…</p>':''}`};
 }
 function machineDataPanel(adm){
@@ -794,21 +816,42 @@ function machineDataPanel(adm){
       </div>${ut==='db'?uf.html:''}
       ${ut?`<p class="note" style="margin-top:4px">Uptime, downtime and stop alarms follow this signal. If it can't be read in a minute, that minute uses the speed instead.</p>`:''}`;
     }
-    const tr=R[id], tu=R[id+'|uptime'];
+    // errors and alarms the machine reports, kept with each downtime
+    let errHtml='';
+    if(f.type!=='none'&&f.type!=='demo'){
+      const es=f.errors||{}, et=es.type||'', ef=et==='db'?mTableFields(l,'err.',es,adm,dis,true):null;
+      const fld=(key,label,ph,req)=>`<label class="f">${label}${db?mSelect(`md-e-${key}-${id}`,id,'err.'+key,es[key]||'',tf.cols,req?'Pick the column':'Not given',dis):`<input type="text" id="md-e-${key}-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="err.${key}" value="${esc(es[key]||'')}" placeholder="${ph}" ${dis}>`}</label>`;
+      const col=(key,label,blank)=>`<label class="f">${label}${mSelect(`md-e-${key}-${id}`,id,'err.'+key,es[key]||'',ef.cols,blank,dis)}</label>`;
+      errHtml=`<h4 class="h3" style="margin-top:12px">Errors and alarms</h4><div class="grid3" style="margin-top:6px">
+        <label class="f">Where they come from<select id="md-e-t-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="err.type" ${dis}>
+          <option value="" ${!et?'selected':''}>Not kept</option>
+          <option value="feed" ${et==='feed'?'selected':''}>${db?'Columns of the same table':'Fields of the same reading'}</option>
+          <option value="db" ${et==='db'?'selected':''}>The machine's alarm log table</option></select></label>
+        ${et==='feed'?`${fld('field','Error code',db?'':'error',true)}${fld('textField','Error message (optional)',db?'':'errorText',false)}`:''}
+        ${et==='db'?`${col('codeCol','Alarm code','Not given')}${col('textCol','Alarm message','Not given')}${col('timeCol','When it happened','Use the time it was read')}`:''}
+        ${et?`<label class="f">Values that mean no error<input type="text" id="md-e-ok-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="err.ok" value="${esc(es.ok||'')}" placeholder="0, OK, none (always)" ${dis}></label>`:''}
+      </div>${et==='db'?ef.html:''}
+      ${et==='feed'?'<p class="note" style="margin-top:4px">An error is kept from the minute it appears until it changes or clears.</p>':et==='db'?'<p class="note" style="margin-top:4px">Each new row becomes one entry. Reading starts from the newest row; older history isn\'t imported.</p>':''}
+      ${et?'<p class="note">Each downtime shows the errors reported during it (and in the 2 minutes before), on the Downtime page and when picking a reason.</p>':''}`;
+    }
+    const tr=R[id], tu=R[id+'|uptime'], te=R[id+'|err'];
     const live1=live.t?`<span class="note">Now: ${live.ok&&live.ppm!=null?`${live.ppm} P/m`:'no data'}${live.recipe?` · recipe ${esc(live.recipe)}`:''}${live.run===true?' · running':live.run===false?' · stopped':''}</span>`:'';
     return `<div class="panel" style="background:var(--well-3)">
       <div class="row"><h3 class="h2 grow" style="font-size:18px">${esc(id)}</h3>${live1}${status('feed:'+id)}</div>
       <div class="row" style="margin-top:8px;align-items:flex-end"><label class="f" style="min-width:220px">Source<select id="fd-t-${esc(id)}" data-change="lineF" data-id="${esc(id)}" data-f="feed.type" ${dis}>${Object.entries(FEED_LABEL).map(([k,v])=>`<option value="${k}" ${f.type===k?'selected':''}>${v}</option>`).join('')}</select></label>
         ${adm&&SRV.server&&f.type!=='none'?`<button class="btn" data-action="${db?'mdTest':'testConn'}" data-id="${esc(id)}" data-k="${esc('feed:'+id)}">Test</button>`:''}
-        ${adm&&SRV.server&&up.type==='db'?`<button class="btn" data-action="mdTest" data-id="${esc(id)}" data-w="uptime">Test run signal</button>`:''}</div>
+        ${adm&&SRV.server&&up.type==='db'?`<button class="btn" data-action="mdTest" data-id="${esc(id)}" data-w="uptime">Test run signal</button>`:''}
+        ${adm&&SRV.server&&(f.errors||{}).type==='db'?`<button class="btn" data-action="mdTest" data-id="${esc(id)}" data-w="err">Test alarm log</button>`:''}</div>
       ${where}${values}
       ${tr?`<p style="margin-top:6px;color:${tr.ok?'var(--ok)':'var(--bad)'}">${esc(tr.text)}</p>`:''}
       ${upHtml}
       ${tu?`<p style="margin-top:6px;color:${tu.ok?'var(--ok)':'var(--bad)'}">${esc(tu.text)}</p>`:''}
+      ${errHtml}
+      ${te?`<p style="margin-top:6px;color:${te.ok?'var(--ok)':'var(--bad)'};white-space:pre-line">${esc(te.text)}</p>`:''}
     </div>`;
   };
   return `<div class="panel"><h2 class="h2">Machine data</h2>
-    <p class="sub" style="margin-top:4px">Once a minute the server reads each machine: pleats per minute, filters cut and the recipe loaded. Pick where each machine's readings are, and optionally a second place for its run signal (High = running) for uptime.</p>
+    <p class="sub" style="margin-top:4px">Once a minute the server reads each machine: pleats per minute, filters cut and the recipe loaded. Pick where each machine's readings are, optionally a second place for its run signal (High = running) for uptime, and where its errors and alarms come from so each downtime shows what the machine reported.</p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">${S.lines.map(card).join('')||'<p class="note">Add machines first (Admin › Machines).</p>'}</div>
     <dl class="kv" style="margin-top:10px;font-size:14px">
       <dt>Database table</dt><dd>The newest row (by the column you pick, usually a time stamp or an auto-number ID) is read each minute, through a read-only login. One table can hold every machine: pick the column that names the machine. If no new row arrives within the minutes you set, it counts as no data.</dd>
@@ -816,6 +859,7 @@ function machineDataPanel(adm){
       <dt>InfluxDB query</dt><dd>The newest values from the query; Flux results by <code>_field</code>, InfluxQL by column. <code>{machine}</code> is replaced with the machine's name. Readings older than 2½ minutes count as no data.</dd>
       <dt>Pushed to server</dt><dd><code>POST http://&lt;server&gt;/api/feed/&lt;machine&gt;</code> with <code>{"ppm":190,"count":48211,"recipe":"MG-24","run":1}</code> and header <code>X-Feed-Key</code>.</dd>
       <dt>Filters cut</dt><dd>The machine's counter. The suite counts how much it went up each minute; a reset to zero is handled.</dd>
+      <dt>Errors and alarms</dt><dd>An error code (and message) in the reading, kept from when it appears until it clears; or the machine's alarm log table, one entry per new row. Pushed readings can send <code>"error":"E214","errorText":"Film break"</code>.</dd>
       <dt>Run signal</dt><dd>High/Low, 1/0, true/false, on/off or run/stop. Without one, the line counts as stopped at or below the stop speed (Admin › Rules).</dd>
       <dt>No reading</dt><dd>After 2½ minutes without data, the screen shows an alarm and nothing is recorded, so a dropped feed never looks like downtime.</dd></dl></div>`;
 }
@@ -937,7 +981,7 @@ VIEWS['end-of-shift']=()=>{
     <div class="panel"><h2 class="h2">Issues, tickets and notes</h2><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
       ${sh.issues?`<div><b>Start-of-shift issue:</b> ${esc(sh.issues)}</div>`:''}
       ${sh.endIssues?`<div><b>End-of-shift issue:</b> ${esc(sh.endIssues)}</div>`:''}
-      ${r.tickets.map(t=>`<div><b>Ticket</b> ${esc(t.machine)} · ${esc(t.type)} · ${t.status}</div>`).join('')}
+      ${r.tickets.map(t=>`<div><b>Ticket</b> ${esc(t.machine)} · ${esc(t.type)} · ${t.status}${(t.photos||[]).length?` · ${t.photos.length} picture${t.photos.length>1?'s':''}`:''}</div>`).join('')}
       ${r.notes.map(n=>`<div><b class="num">${fmtT(n.t)}</b> ${esc(n.text)}</div>`).join('')}
       ${!sh.issues&&!sh.endIssues&&!r.tickets.length&&!r.notes.length?'<p class="note">Nothing reported.</p>':''}</div></div>
   </div>`;
@@ -1146,6 +1190,7 @@ const ADM={
       <label class="f">QC check interval (min)<input type="number" min="5" id="r-qc" value="${S.settings.qcEvery}" data-change="set" data-k="qcEvery" ${dis}><span class="note">How often the QC reminder comes due.</span></label>
       <label class="chk"><input type="checkbox" id="r-aqc" ${S.settings.autoQC?'checked':''} data-change="set" data-k="autoQC" ${dis}> Auto QC reminder on</label>
       ${num('adminTimeout','Log out shift lead after idle (min)','0 keeps admin mode on until someone logs out.')}
+      ${num('photoDays','Keep pictures on closed maintenance tickets (days)','Pictures are kept in the records database. 0 keeps them for good.')}
     </div></div>`},
   backup:()=>{const adm=isAdmin(),dis=adm?'':'disabled';const exp=JSON.stringify({app:'pleat-line-hmi',exported:new Date().toISOString(),config:S.config,lines:S.lines,users:S.users.map(u=>({...u,pin:undefined}))},null,1);
     return `<div class="panel"><h2 class="h2">Copy settings to another station</h2><p class="sub" style="margin-top:4px">Machines, shifts, reasons, checklists, parts, rules, feed rates and people (without PINs).</p>
@@ -1268,8 +1313,36 @@ function openTicket(){
     <label class="f">Machine<select id="tMach">${[...S.lines.map(l=>l.id),...C().equipment].map(m=>`<option ${S.shift&&S.shift.line===m?'selected':''}>${esc(m)}</option>`).join('')}</select></label>
     <label class="f">Issue<select id="tType">${C().issueTypes.map(x=>`<option>${x}</option>`).join('')}</select></label>
     <label class="f">Priority<select id="tPri"><option>Low</option><option selected>Medium</option><option value="High">High · line down</option></select></label></div>
-    <label class="f">Notes<textarea id="tNotes" placeholder="What is happening, when it started, what you tried" autofocus></textarea></label>`,
+    <label class="f">Notes<textarea id="tNotes" placeholder="What is happening, when it started, what you tried" autofocus></textarea></label>
+    <div style="margin-top:10px"><div class="row"><b class="grow">Pictures of what is wrong</b>${photoButtons('tPhotos')}</div>
+      <div class="thumbs" id="tPics" style="margin-top:8px"></div><p class="note" id="tPicMsg">Optional. Up to ${PHOTO_LIMIT} pictures.</p></div>`,
     `<button class="btn go" data-action="saveTicket">Submit ticket</button>`);
+  ui.tPhotos=[];
+}
+/* ---------- maintenance pictures: taken with the tablet's camera, shrunk to 1600 px JPEG before sending ---------- */
+const PHOTO_MAX=1600, PHOTO_LIMIT=6;
+const photoButtons=(change,id)=>`<label class="btn sm">${IC.camera||''}Take a picture<input type="file" accept="image/*" capture="environment" hidden data-change="${change}"${id!=null?` data-id="${id}"`:''}></label>
+  <label class="btn sm ghost">Choose a picture<input type="file" accept="image/*" multiple hidden data-change="${change}"${id!=null?` data-id="${id}"`:''}></label>`;
+function shrinkPhoto(file){
+  return new Promise((res,rej)=>{const u=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{const k=Math.min(1,PHOTO_MAX/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement('canvas');
+      c.width=Math.max(1,Math.round(img.naturalWidth*k));c.height=Math.max(1,Math.round(img.naturalHeight*k));
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(b=>b?res(b):rej(new Error('That picture couldn\'t be read.')),'image/jpeg',0.82)};
+    img.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('That file isn\'t a picture.'))};img.src=u});
+}
+async function uploadPhoto(ticket,blob){
+  const fd=new FormData();fd.append('ticket',ticket);fd.append('photo',blob,'photo.jpg');
+  try{const r=await fetch('/api/hmi/ticket-photo',{method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrf()},body:fd});return await r.json()}
+  catch(e){return {ok:false,error:'Couldn\'t reach the server.'}}
+}
+function drawTicketPics(){
+  const el=$('#tPics');if(!el)return;
+  el.innerHTML=ui.tPhotos.map((p,i)=>`<div class="thumb"><img src="${p.url}" alt="Picture ${i+1}"><button class="btn sm ghost" data-action="tPhotoDel" data-i="${i}" aria-label="Remove picture ${i+1}">Remove</button></div>`).join('');
+}
+function openPhoto(id){
+  const t=S.tickets.find(x=>(x.photos||[]).some(p=>p.id===id)),p=t&&t.photos.find(x=>x.id===id);
+  modal(t?`${esc(t.machine)} · ${esc(t.type)}`:'Picture',`<img class="photo-big" src="/api/hmi/ticket-photo/${id}" alt="Picture on the maintenance ticket">${p?`<p class="note" style="margin-top:6px">Taken by ${esc(p.by)} · ${fmtD(p.t)} ${fmtT(p.t)}</p>`:''}`,
+    `<a class="btn ghost" href="/api/hmi/ticket-photo/${id}" target="_blank" rel="noopener">Open full size</a>`);
 }
 function drawingSVG(p){
   const pl=Array.from({length:16},(_,i)=>`<line x1="${70+i*14}" y1="60" x2="${70+i*14}" y2="230" stroke="#7a8895" stroke-width="1"/>`).join('');
@@ -1365,7 +1438,13 @@ const A={
     if(!r.ok){$('#qErr').textContent=r.error;return} closeModal(); toast(r.msg);
   },
   saveRoll:async()=>{const r=await send('rollAdd',{roll:$('#rId').value,material:$('#rMat').value,lot:$('#rLot').value,feet:$('#rFt').value});if(r)openRolls()},
-  saveTicket:async()=>{const r=await send('ticketAdd',{machine:$('#tMach').value,type:$('#tType').value,priority:$('#tPri').value,notes:$('#tNotes').value});if(r)closeModal()},
+  saveTicket:async()=>{const pics=ui.tPhotos||[];const r=await send('ticketAdd',{machine:$('#tMach').value,type:$('#tType').value,priority:$('#tPri').value,notes:$('#tNotes').value},{quiet:pics.length>0});if(!r)return;
+    let bad=0;for(const [i,p] of pics.entries()){const m=$('#tPicMsg');if(m)m.textContent=`Sending picture ${i+1} of ${pics.length}…`;const u=await uploadPhoto(r.data.id,p.blob);if(!u.ok)bad++}
+    pics.forEach(p=>URL.revokeObjectURL(p.url));ui.tPhotos=[];closeModal();
+    toast(bad?`Ticket sent, but ${bad} picture${bad>1?'s':''} didn't upload. Add ${bad>1?'them':'it'} from the Maintenance page.`:pics.length?`Maintenance ticket sent with ${pics.length} picture${pics.length>1?'s':''}`:r.msg||'Maintenance ticket sent');Remote.get(true)},
+  tPhotoDel:el=>{const p=ui.tPhotos.splice(+el.dataset.i,1)[0];if(p)URL.revokeObjectURL(p.url);drawTicketPics()},
+  photoView:el=>openPhoto(+el.dataset.id),
+  errLog:el=>{const d=S.downtime.find(x=>x.id===+el.dataset.id);if(d)errLog(d)},
   ticketStatus:el=>send('ticketStatus',{id:el.dataset.id},{quiet:true}),
   getDrawing:async el=>{const r=await send('getDrawing',{part:el.dataset.k},{quiet:true});if(r){openDrawing();const n=$('#drawNote');if(n)n.textContent=r.msg}},
   saveOverride:async()=>{const v=id=>$(id).value.trim();const r=await send('overrideSet',{ppm:v('#oPpm'),pleats:v('#oPl'),ph:v('#oPh'),glue:v('#oGlue'),why:v('#oWhy')});if(r)closeModal()},
@@ -1502,6 +1581,13 @@ const CH={
   srcF:el=>{const E=ui.srcEdit;if(!E)return;const f=el.dataset.f;E[f]=el.type==='checkbox'?el.checked:el.value;if(f==='kind'||f==='mode'||f==='line')render(true)},
   srcMap:el=>{const E=ui.srcEdit;if(!E)return;const k=el.dataset.k;E.mapping[k]=k==='fields'?el.value.split(',').map(x=>x.trim()).filter(Boolean):el.value},
   updFile:el=>{ui.updFile=el.files&&el.files[0]||null},
+  tPhotos:async el=>{const files=[...(el.files||[])];el.value='';ui.tPhotos=ui.tPhotos||[];const m=$('#tPicMsg');
+    for(const f of files){if(ui.tPhotos.length>=PHOTO_LIMIT){if(m)m.textContent=`Up to ${PHOTO_LIMIT} pictures.`;break}
+      try{const b=await shrinkPhoto(f);ui.tPhotos.push({blob:b,url:URL.createObjectURL(b)})}catch(e){if(m)m.textContent=e.message}}
+    drawTicketPics()},
+  ticketPhotoAdd:async el=>{const files=[...(el.files||[])];el.value='';if(!files.length)return;if(!user()){openLogin();return}
+    let n=0,err='';for(const f of files){try{const r=await uploadPhoto(el.dataset.id,await shrinkPhoto(f));if(r.ok)n++;else err=r.error}catch(e){err=e.message}}
+    toast(n?`${n} picture${n>1?'s':''} added${err?' · '+err:''}`:err||'No picture added');Remote.get(true)},
   updF:el=>{(ui.updForm=ui.updForm||{})[el.dataset.f]=el.value},
   updFR:el=>{(ui.updForm=ui.updForm||{})[el.dataset.f]=el.value;render(true)},
   updFolder:async el=>{const r=await API.cmd('updFolder',{when:el.value});if(r.ok){ui.upd=r.data;toast('Saved')}else toast(r.error);render(true)},
@@ -1528,10 +1614,10 @@ const CH={
   showInactive:el=>{ui.showInactive=el.checked;render(true)},
   lst:el=>sendCH('listSet',{k:el.dataset.k,i:+el.dataset.i,v:el.value}),
   lineF:el=>sendCH('lineSet',{id:el.dataset.id,f:el.dataset.f,v:el.type==='checkbox'?el.checked:el.value}),
-  mdTest:async(el)=>{const id=el.dataset.id,w=el.dataset.w||'feed',k=w==='uptime'?id+'|uptime':id;ui.feedTest=ui.feedTest||{};ui.feedTest[k]={ok:true,text:'Reading…'};render(true);
+  mdTest:async(el)=>{const id=el.dataset.id,w=el.dataset.w||'feed',k=w==='feed'?id:id+'|'+w;ui.feedTest=ui.feedTest||{};ui.feedTest[k]={ok:true,text:'Reading…'};render(true);
     const r=await API.cmd('lineFeedTest',{id,which:w});
     if(!r.ok){ui.feedTest[k]={ok:false,text:r.error||'Failed'};render(true);return}
-    const d=r.data;ui.feedTest[k]={ok:true,text:w==='uptime'?`Newest row ${d.newest}: ${d.run?'running':'stopped'}.`
+    const d=r.data;ui.feedTest[k]={ok:true,text:w==='err'?(d.rows.length?'Newest alarm rows:\n'+d.rows.map(x=>`${x.at||'row '+x.row}  ${x.code}${x.code&&x.text?' · ':''}${x.text}`).join('\n'):'The alarm log table is empty.'):w==='uptime'?`Newest row ${d.newest}: ${d.run?'running':'stopped'}.`
       :`Newest row ${d.newest}: ${d.ppm} P/m${d.count!=null?` · filters cut counter ${d.count}`:''}${d.recipe?` · recipe ${d.recipe}`:''}${typeof d.run==='boolean'?` · ${d.run?'running':'stopped'}`:''}${d.runErr?` · ${d.runErr}`:''}.`};render(true)},
   shiftF:el=>sendCH('shiftSet',{s:+el.dataset.s,f:el.dataset.f,v:el.value}),
   brkF:el=>sendCH('breakSet',{s:+el.dataset.s,b:+el.dataset.b,f:el.dataset.f,v:el.value}),

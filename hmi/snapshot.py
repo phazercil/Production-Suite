@@ -11,7 +11,8 @@ from scheduler.engine import eta, load_world
 
 from . import integrations
 from .engine import shift_stats
-from .models import AuditLog, Downtime, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag, ShiftNote, ShiftRun, Ticket
+from .models import (AuditLog, Downtime, LineState, MachineError, MoRun, Notice, PpmReading, QCCheck, RollTag, ShiftNote, ShiftRun, Ticket,
+                     TicketPhoto)
 
 QDEF = {
     "changeover_steps": {"title": "Changeover steps", "help": "One row per step, in the order operators do them.", "order": True,
@@ -73,6 +74,24 @@ def network_info(st):
             "default": netsafety.DEFAULT_NETWORKS[0]}
 
 
+def downtime_json(qs):
+    """Downtime with the errors and alarms the machine reported during each stop."""
+    from . import machineerrors
+    downs = list(qs)
+    errs = machineerrors.for_downtime(downs)
+    return [{"id": d.id, "shift": d.shift_id, "line": d.line, "mo": d.mo, "start": ms(d.start_time), "end": ms(d.end_time), "mins": d.minutes,
+             "reason": d.reason, "notes": d.notes, "by": d.by, "errors": errs.get(d.id, [])} for d in downs]
+
+
+def tickets_json(qs):
+    tickets = list(qs)
+    pics = {}
+    for p in TicketPhoto.objects.filter(ticket__in=tickets).values("id", "ticket_id", "by", "t", "width", "height"):
+        pics.setdefault(p["ticket_id"], []).append({"id": p["id"], "by": p["by"], "t": ms(p["t"]), "w": p["width"], "h": p["height"]})
+    return [{"id": k.id, "shift": k.shift_id, "t": ms(k.t), "line": k.line, "by": k.by, "machine": k.machine, "type": k.type,
+             "priority": k.priority, "notes": k.notes, "status": k.status, "photos": pics.get(k.id, [])} for k in tickets]
+
+
 def build(me=None, station=None, light=False):
     """Full state for the kiosk. `light` drops the history tables (Data Kiosk)."""
     t = now()
@@ -81,7 +100,8 @@ def build(me=None, station=None, light=False):
     machines = list(Machine.objects.filter(stage="s1").prefetch_related("trained_people"))
     lines = [{"id": m.name, "code": m.code, "rated": m.ppm, "color": m.color, "active": m.active,
               "feed": {"type": m.feed_type, "url": m.feed_url, "poll": m.feed_poll, "ppmField": m.feed_ppm_field, "countField": m.feed_count_field,
-                       "recipeField": m.feed_recipe_field, "query": m.feed_query, "src": m.feed_src or {}, "uptime": m.uptime_src or {}}}
+                       "recipeField": m.feed_recipe_field, "query": m.feed_query, "src": m.feed_src or {}, "uptime": m.uptime_src or {},
+                       "errors": m.error_src or {}}}
              for m in machines]
     mos = list(MO.objects.select_related("line").filter(Q(status="OPEN") | Q(updated__gte=t - timedelta(days=30))))
     cat = Catalog()
@@ -98,8 +118,13 @@ def build(me=None, station=None, light=False):
         if sh:
             hist = [{"t": ms(r["t"]), "ppm": r["ppm"]} for r in PpmReading.objects.filter(shift=sh).order_by("t").values("t", "ppm")[:1500]]
         stats = shift_stats(sh) if sh else {"mins": 0, "run": 0, "down": 0, "uptime": 100}
+        errors = []
+        if (m.error_src or {}).get("type"):
+            from . import machineerrors
+            errors = [machineerrors.as_json(x) for x in MachineError.objects.filter(line=m.name, start__gte=sh.start if sh else t - timedelta(hours=8))
+                      .order_by("-start")[:30]]
         runs[m.name] = {"shift": shift_json(last), "hist": hist, "qcLast": ms(sh.qc_last) if sh else 0, "feed": (ls.feed if ls else {}) or {},
-                        "stats": stats}
+                        "stats": stats, "errors": errors, "errLog": (ls.err_state or {}) if ls else {}}
         fin = None
         if sh and sh.mo and sh.state != "changeover":
             world = world or load_world()
@@ -133,14 +158,12 @@ def build(me=None, station=None, light=False):
     if light:
         return snap
     snap.update({
-        "downtime": [{"id": d.id, "shift": d.shift_id, "line": d.line, "mo": d.mo, "start": ms(d.start_time), "end": ms(d.end_time), "mins": d.minutes,
-                      "reason": d.reason, "notes": d.notes, "by": d.by} for d in Downtime.objects.filter(Q(end_time__gte=since) | Q(reason__isnull=True))],
+        "downtime": downtime_json(Downtime.objects.filter(Q(end_time__gte=since) | Q(reason__isnull=True))),
         "qc": [{"id": q.id, "shift": q.shift_id, "t": ms(q.t), "line": q.line, "mo": q.mo, "item": q.item, "by": q.by, "len": q.len, "wid": q.wid, "ph": q.ph,
                 "sbl": q.sbl, "sbr": q.sbr, "glue": q.glue, "cut": q.cut, "scrap": q.scrap, "pass": q.passed} for q in QCCheck.objects.filter(t__gte=since)],
         "rolls": [{"id": r.id, "shift": r.shift_id, "t": ms(r.t), "line": r.line, "roll": r.roll, "material": r.material, "lot": r.lot, "feet": r.feet,
                    "mo": r.mo, "countAt": r.count_at, "by": r.by} for r in RollTag.objects.filter(t__gte=since)],
-        "tickets": [{"id": k.id, "shift": k.shift_id, "t": ms(k.t), "line": k.line, "by": k.by, "machine": k.machine, "type": k.type,
-                     "priority": k.priority, "notes": k.notes, "status": k.status} for k in Ticket.objects.filter(Q(t__gte=since) | ~Q(status="Closed"))],
+        "tickets": tickets_json(Ticket.objects.filter(Q(t__gte=since) | ~Q(status="Closed"))),
         "notes": [{"id": n.id, "shift": n.shift_id, "t": ms(n.t), "line": n.line, "by": n.by, "text": n.text} for n in ShiftNote.objects.filter(t__gte=since)],
         "moLog": [{"id": r.id, "shift": r.shift_id, "line": r.line, "mo": r.mo, "item": r.item, "qty": r.qty, "scrap": r.scrap, "start": ms(r.start_time),
                    "end": ms(r.end_time)} for r in MoRun.objects.filter(end_time__gte=since)],

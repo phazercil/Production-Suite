@@ -32,7 +32,7 @@ def ensure_basics():
 def wipe():
     from hmi import models as H
     from scheduler.models import Job
-    for model in (H.PpmReading, H.Downtime, H.QCCheck, H.RollTag, H.Ticket, H.ShiftNote, H.MoRun, H.Notice, H.AuditLog, H.Event,
+    for model in (H.PpmReading, H.Downtime, H.QCCheck, H.RollTag, H.Ticket, H.ShiftNote, H.MoRun, H.Notice, H.AuditLog, H.Event, H.MachineError,
                   H.ChangeoverCache, H.LineState, H.ShiftRun, Job, MO, Person, PartSpec, ShiftBreak):
         model.objects.all().delete()
     Machine.objects.all().delete()
@@ -143,5 +143,12 @@ def seed_demo(reset=True):
                            lot="L2603-117", feet=3200, mo="309215", count_at=0, by=jo.name)
     Ticket.objects.create(shift=sh, t=start + timedelta(minutes=70), line="Barbara", by=jo.name, machine="Barbara", type="Pleater jam",
                           priority="Medium", notes="Media walking left at the score wheels after restart.")
+    # what the pleater reported during its stops (demo machine errors)
+    from hmi.models import MachineError
+    demo_errs = [("E214", "Media break detected"), ("E031", "Score wheel guard open"), ("E107", "Glue pot low temperature")]
+    for i, d in enumerate(Downtime.objects.filter(shift=sh).order_by("start_time")[:3]):
+        code, text = demo_errs[i % len(demo_errs)]
+        MachineError.objects.create(machine=bar, line="Barbara", start=d.start_time + timedelta(seconds=20), end=d.end_time, code=code,
+                                    text=text, source="feed")
     Notice.objects.create(t=start + timedelta(minutes=120), text="MO 306856 (MG3686HP) moved from Barbara to Salvatore", kind="schedule")
     PlantSettings.bump()

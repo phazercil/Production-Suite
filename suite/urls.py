@@ -23,6 +23,8 @@ urlpatterns = [
     path("api/ingest/<str:name>", hmi.ingest),
     path("api/version", hmi.version),
     path("api/updates/upload", hmi.update_upload),
+    path("api/hmi/ticket-photo", hmi.ticket_photo_upload),
+    path("api/hmi/ticket-photo/<int:pk>", hmi.ticket_photo),
     # Scheduler
     path("scheduler/", sch.board, name="scheduler"),
     path("api/scheduler/state", sch.state),
