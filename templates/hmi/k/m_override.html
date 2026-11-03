@@ -1,0 +1,10 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Change setting - Admin{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/overrideSet"{% endblock %}
+{% block body %}<p class="sub">Temporary for the current MO only. Clears at the next changeover.</p><div class="grid2">
+  <label class="f">Target speed (P/m)<input type="number" name="ppm" value="{{ o.ppm|default:'' }}" placeholder="{{ rated }}"></label>
+  <label class="f">Pleats per unit<input type="number" name="pleats" value="{{ o.pleats|default:'' }}" placeholder="{{ p.pleats }}"></label>
+  <label class="f">Pleat height (in)<input type="number" step="0.01" name="ph" value="{{ o.ph|default:'' }}" placeholder="{{ p.ph }}"></label>
+  <label class="f">Glue temp (°F)<input type="number" name="glue" value="{{ o.glue|default:'' }}" placeholder="350"></label>
+  <label class="f">Reason<input type="text" name="why" value="{{ o.why|default:'' }}" placeholder="Why this run differs"></label></div>{% endblock %}
+{% block foot %}{% if o %}<button type="button" class="btn ghost" hx-post="/kiosk/do/overrideClear">Clear</button>{% endif %}<button class="btn go" type="submit">Apply to this MO</button>{% endblock %}

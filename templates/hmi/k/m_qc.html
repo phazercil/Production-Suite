@@ -1,0 +1,15 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}QC check{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/qcSave"{% endblock %}
+{% block body %}
+  <p class="sub">{{ p.key|default:"No MO" }} · drawing rev {{ p.rev }} · inches</p>
+  <div class="spec">{% for k, label, target in fields %}
+    <label class="f">{{ label }} <span class="num">{{ target|floatformat:2 }} ±{{ p.tol }}</span><input type="number" step="0.01" name="{{ k }}" id="q-{{ k }}" placeholder="{{ target|floatformat:2 }}"
+      hx-post="/kiosk/do/qcField" hx-trigger="input changed delay:300ms" hx-vals='{"k": "{{ k }}"}' hx-params="k,{{ k }}"></label>{% endfor %}</div>
+  <div class="grid2">
+    <div class="f"><span class="note">Glue QC</span><div class="seg"><label><input type="radio" name="glue" value="Pass" checked><span>Pass</span></label><label><input type="radio" name="glue" value="Fail"><span>Fail</span></label></div></div>
+    <div class="f"><span class="note">Cut QC</span><div class="seg"><label><input type="radio" name="cut" value="Pass" checked><span>Pass</span></label><label><input type="radio" name="cut" value="Fail"><span>Fail</span></label></div></div>
+    <label class="f">Scrap count, past 30 min<input type="number" name="scrap" value="0" min="0"></label>
+  </div>
+{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Save QC check</button>{% endblock %}

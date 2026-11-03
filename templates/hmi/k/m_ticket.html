@@ -1,0 +1,16 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Maintenance ticket{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/ticketAdd" hx-encoding="multipart/form-data"{% endblock %}
+{% block body %}
+  <div class="grid2">
+    <label class="f">Machine<select name="machine">{% for m in machines %}<option {% if m == sel %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <label class="f">Issue<select name="type">{% for x in issues %}<option>{{ x }}</option>{% endfor %}</select></label>
+    <label class="f">Priority<select name="priority"><option>Low</option><option selected>Medium</option><option value="High">High · line down</option></select></label></div>
+  <label class="f">Notes<textarea name="notes" placeholder="What is happening, when it started, what you tried" autofocus></textarea></label>
+  <div style="margin-top:10px"><div class="row"><b class="grow">Pictures of what is wrong</b>
+    <label class="btn sm">{% icon "camera" %}Take a picture<input type="file" name="photo" accept="image/*" capture="environment" hidden></label>
+    <label class="btn sm ghost">Choose pictures<input type="file" name="photo" accept="image/*" multiple hidden></label></div>
+    <p class="note" data-files-note="Optional. Up to {{ limit }} pictures. They are sent with the ticket.">Optional. Up to {{ limit }} pictures. They are sent with the ticket.</p></div>
+  <div class="htmx-indicator note">Sending…</div>
+{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Submit ticket</button>{% endblock %}

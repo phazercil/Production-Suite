@@ -1,0 +1,8 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Shift notes{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/noteAdd"{% endblock %}
+{% block body %}
+  <label class="f">New note<textarea name="text" autofocus placeholder="For the next shift or the lead"></textarea></label>
+  <div style="display:flex;flex-direction:column;gap:8px">{% for n in notes %}<div class="panel"><b class="num">{{ n.t|clock }}</b> · {{ n.by }}<div>{{ n.text }}</div></div>{% empty %}<p class="note">No notes yet this shift.</p>{% endfor %}</div>
+{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Save note</button>{% endblock %}

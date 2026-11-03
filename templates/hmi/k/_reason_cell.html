@@ -1,0 +1,5 @@
+{% if x.locked %}<span>{{ x.d.reason }}</span><br><span class="note">by {{ x.d.by }}</span>
+{% else %}<select name="reason" aria-label="Reason" hx-post="/kiosk/do/downtimeSet" hx-trigger="change" hx-vals='{"id": "{{ x.d.id }}", "back": "{{ back }}"}' hx-params="id,reason,back">
+  <option value="">Choose a reason…</option>{% for r in S.cfg.reasons %}<option {% if x.d.reason == r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+  {% if x.custom %}<option selected>{{ x.d.reason }}</option>{% endif %}{% if S.can_override %}<option value="__other">Other… (type a reason)</option>{% endif %}</select>
+  {% if x.d.reason and x.d.by %}<br><span class="note">by {{ x.d.by }}</span>{% endif %}{% endif %}

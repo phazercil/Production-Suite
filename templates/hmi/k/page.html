@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Operator Kiosk{% endblock %}
+{% block body_attrs %}data-watch="/thin/watch?scope=kiosk" data-every="2000" data-now="{{ now_ms }}" data-ping="/api/hmi/ping"{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'hmi/kiosk.css' %}">{% endblock %}
+{% block content %}
+<div class="mbody">
+<div class="app">
+  <input type="checkbox" id="navToggle" class="navtoggle" aria-label="Show the menu">
+  {% include "hmi/k/_rail.html" %}
+  {% include "hmi/k/_nav.html" %}
+  <main>
+    {% include "hmi/k/_banner.html" %}
+    <section id="view" class="view" hx-get="/kiosk/v/{{ page }}" hx-trigger="load, suite:changed from:body" hx-swap="innerHTML"></section>
+  </main>
+</div>
+{% include "hmi/k/_prompt.html" with open=False first=True %}
+</div>
+{% endblock %}

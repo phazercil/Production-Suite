@@ -1,0 +1,7 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Type the reason{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/downtimeSet"{% endblock %}
+{% block body %}<input type="hidden" name="id" value="{{ d.id }}"><input type="hidden" name="back" value="{{ back|default:'downPrompt' }}">
+  <p class="sub">Stop at {{ d.start_time|clock }} – {{ d.end_time|clock }} ({{ d.minutes }} min) on {{ d.line }}.</p>
+  <label class="f">Reason<input type="text" name="reason" maxlength="120" autofocus></label>{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Save reason</button>{% endblock %}

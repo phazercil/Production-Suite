@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
 from datakiosk import views as dk
 from labor import views as labor
 from reports import views as reports
+from hmi import kviews as kv
 from hmi import views as hmi
 from scheduler import views as sch
 from suite import thin
@@ -15,6 +16,15 @@ urlpatterns = [
     # Operator Kiosk
     path("operator/", hmi.kiosk, name="operator"),
     path("station/<str:machine>/", hmi.station, name="station"),
+    # Operator Kiosk built on the server (thin client); replaces /operator/ once every page is moved
+    path("kiosk/", kv.page),
+    path("kiosk/v/<str:page>", kv.view),
+    path("kiosk/r/<str:name>", kv.part),
+    path("kiosk/m/<str:name>", kv.dialog),
+    path("kiosk/do/<str:name>", kv.act),
+    path("kiosk/<str:page>/", kv.page),
+    path("kiosk-station/<str:lock>/", kv.page),
+    path("kiosk-station/<str:lock>/<str:page>/", kv.page),
     path("api/hmi/state", hmi.state),
     path("api/hmi/login", hmi.login),
     path("api/hmi/logout", hmi.logout),

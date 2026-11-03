@@ -1,0 +1,4 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}{{ ph.ticket.machine }} · {{ ph.ticket.type }}{% endblock %}
+{% block body %}<img class="photo-big" src="/api/hmi/ticket-photo/{{ ph.id }}" alt="Picture on the maintenance ticket"><p class="note" style="margin-top:6px">Taken by {{ ph.by }} · {{ ph.t|day }} {{ ph.t|clock }}</p>{% endblock %}
+{% block foot %}<a class="btn ghost" href="/api/hmi/ticket-photo/{{ ph.id }}" target="_blank" rel="noopener">Open full size</a>{% endblock %}
