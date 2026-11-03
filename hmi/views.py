@@ -224,6 +224,53 @@ def version(request):
     return JsonResponse({"version": settings.SUITE["VERSION"], "revision": settings.SUITE["REVISION"]})
 
 
+@json_api
+@require_POST
+def ticket_photo_upload(request):
+    """A picture of what is wrong, for a maintenance ticket. Anyone logged in on the screen can add one."""
+    from django.db import transaction
+
+    from . import photos
+    from .models import Ticket
+    me, _ = current_person(request)
+    if not me:
+        return JsonResponse({"ok": False, "error": "Log in to add pictures."}, status=403)
+    touch(request)
+    f = request.FILES.get("photo")
+    if not f:
+        return JsonResponse({"ok": False, "error": "Take or choose a picture."}, status=400)
+    if f.size > photos.MAX_BYTES:
+        return JsonResponse({"ok": False, "error": "That picture is too large (over 3 MB)."}, status=400)
+    with transaction.atomic():
+        t = Ticket.objects.select_for_update().filter(pk=to_int(request.POST.get("ticket"), "ticket")).first()
+        if not t:
+            return JsonResponse({"ok": False, "error": "That ticket is no longer on file."}, status=404)
+        try:
+            ph = photos.add(t, f.read(), me.name, now())
+        except photos.PhotoError as e:
+            return JsonResponse({"ok": False, "error": str(e)}, status=400)
+        engine.event("maintenance_photo", {"id": t.id, "photo": ph.id, "machine": t.machine, "by": me.name})
+    PlantSettings.bump()
+    return JsonResponse({"ok": True, "id": ph.id})
+
+
+@require_GET
+def ticket_photo(request, pk):
+    """One ticket picture, for the screens on the plant network (like the tickets themselves)."""
+    from django.http import HttpResponse, HttpResponseNotFound
+
+    from .models import TicketPhoto
+    ph = TicketPhoto.objects.filter(pk=pk).only("data", "content_type").first()
+    if not ph:
+        return HttpResponseNotFound("No such picture.")
+    r = HttpResponse(bytes(ph.data), content_type=ph.content_type if ph.content_type in ("image/jpeg", "image/png") else "application/octet-stream")
+    r["Cache-Control"] = "private, max-age=86400"
+    r["X-Content-Type-Options"] = "nosniff"
+    r["Content-Disposition"] = f'inline; filename="ticket-photo-{ph.pk}.{"png" if ph.content_type == "image/png" else "jpg"}"'
+    r["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+    return r
+
+
 @require_POST
 def update_upload(request):
     """A shift lead uploads an update file (Admin > Updates). It is checked, then waits in updates/ready."""

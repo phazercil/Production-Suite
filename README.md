@@ -267,6 +267,28 @@ run/stop are understood, and it can be set to running-when-Low. When set, uptime
 follow the signal instead of the speed; a minute where it can't be read falls back to the speed (Admin › Rules ›
 stop speed). Every minute is stored with `run` (1 = running) and `recipe` in `hmi_ppm`, so Grafana uses the same rule.
 
+### Maintenance tickets with pictures
+
+Call maintenance (run screen) or Maintenance › New ticket opens a ticket. **Take a picture** opens the tablet's
+camera; **Choose a picture** picks one already taken. Up to 6 pictures per ticket; more can be added later from the
+Maintenance page. The screen shrinks each picture to 1600 px JPEG before sending (a few hundred KB) and the
+server checks it is a real picture. Pictures are kept in the records database with the ticket (`hmi_ticket_photo`),
+so backups include them. Pictures on tickets closed longer than Admin › Rules › *Keep pictures on closed
+maintenance tickets* (default 365 days, 0 = keep) are removed once a day. Works over plain HTTP.
+
+### Machine errors during downtime
+
+Admin › Connections › Machine data › *Errors and alarms*, per machine:
+- **Fields of the same reading** (or columns of the same table): an error code and optional message. One entry
+  is kept from the minute a code appears until it changes or clears. 0, blank, OK, none and similar mean no error;
+  add your own "no error" values per machine.
+- **The machine's alarm log table**: each new row becomes one entry, with its own time when the table has a time
+  column. Reading starts from the newest row (old history isn't imported).
+
+Each downtime then lists what the machine reported during it (and in the 2 minutes before), on the Downtime page
+and in the "Why did the line stop?" prompt. A code still showing appears in the run screen's alerts and on Status.
+Stored in `hmi_machine_errors` for Grafana (a ready query is under Admin › Connections › Grafana).
+
 ### S2K
 
 Admin › Connections › S2K reads open MOs from one of:

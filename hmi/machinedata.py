@@ -78,6 +78,11 @@ def add_extras(machine, out, get):
         r = get(machine.feed_recipe_field)
         if r is not None:
             out["recipe"] = text(r)
+    e = machine.error_src or {}
+    if e.get("type") == "feed" and e.get("field"):
+        out["error"] = get(e["field"])
+        if e.get("textField"):
+            out["errorText"] = get(e["textField"])
     u = machine.uptime_src or {}
     if u.get("type") == "feed" and u.get("field"):
         out["run"] = is_running(get(u["field"]), u.get("runWhen"))
@@ -172,6 +177,9 @@ def fetch_feed(machine, prev, t_ms):
     u = machine.uptime_src or {}
     if u.get("type") == "feed" and u.get("field"):
         want.append(u["field"])
+    e = machine.error_src or {}
+    if e.get("type") == "feed":
+        want += [c for c in (e.get("field"), e.get("textField")) if c]
     if not s.get("orderCol"):
         raise ConnError("Pick the column that tells which row is newest (a time stamp or an ID).")
     try:
