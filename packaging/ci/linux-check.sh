@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run by the "Linux" check on GitHub, inside a Rocky Linux 9 container with systemd (as root).
+# Run by the "Linux" checks on GitHub, inside a Rocky Linux 9 or Fedora container with systemd (as root).
 # Installs MariaDB, runs install.sh unattended, and checks what a plant screen would see, through Apache.
 set -euo pipefail
 pass() { echo "PASS: $*"; }
@@ -7,7 +7,8 @@ die()  { echo "FAIL: $*"; tail -60 /var/log/production-suite-install.log 2>/dev/
 
 dnf -y -q install mariadb-server tar procps-ng iproute >/dev/null   # curl-minimal is already there
 systemctl enable --now mariadb
-mysql -e "CREATE DATABASE production_suite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+SQL="$(command -v mariadb || command -v mysql)"
+"$SQL" -e "CREATE DATABASE production_suite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
           CREATE USER 'suite'@'localhost' IDENTIFIED BY 'Ci-Pass-12345'; CREATE USER 'suite'@'127.0.0.1' IDENTIFIED BY 'Ci-Pass-12345';
           GRANT ALL PRIVILEGES ON production_suite.* TO 'suite'@'localhost'; GRANT ALL PRIVILEGES ON production_suite.* TO 'suite'@'127.0.0.1';"
 
@@ -28,6 +29,9 @@ pass "services running: web, ticker, httpd, updater.path, network.path"
 ss -ltn | grep -q '127.0.0.1:8008' || die "the suite isn't listening on 127.0.0.1:8008"
 ss -ltn | grep -q '0.0.0.0:8008\|\*:8008' && die "the suite is reachable from the network on 8008"
 pass "the suite listens on 127.0.0.1:8008 only"
+
+v=$(runuser -u psuite -- /opt/production-suite/.venv/bin/python -c 'import sys, PIL; print(sys.version.split()[0], "Pillow", PIL.__version__)') || die "the suite's Python can't load its packages (Pillow)"
+pass "the suite runs on Python $v"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/operator/); [ "$code" = 200 ] || die "Operator Kiosk through Apache: $code"
 curl -sI http://127.0.0.1/static/suite/shell.css | grep -qi '^server: apache' || die "Apache isn't serving the static files itself"
@@ -57,7 +61,7 @@ pass "an update request ran root's own copy of the updater"
 # settings file is private, records are in MariaDB
 [ "$(stat -c %a .env)" = 600 ] || die ".env is $(stat -c %a .env)"
 [ "$(stat -c %U .env)" = psuite ] || die ".env belongs to $(stat -c %U .env)"
-n=$(mysql -N -e "SELECT COUNT(*) FROM production_suite.plant_person WHERE role='admin'"); [ "$n" -ge 1 ] || die "no shift lead in MariaDB"
+n=$("$SQL" -N -e "SELECT COUNT(*) FROM production_suite.plant_person WHERE role='admin'"); [ "$n" -ge 1 ] || die "no shift lead in MariaDB"
 pass ".env is 600 psuite; the shift lead is in MariaDB"
 
 # running install.sh again updates in place and keeps settings

@@ -1,7 +1,7 @@
 """Build the installer zip (and, with --key, the signed update file) from this repository.
 
     python packaging/build.py                       -> dist/ProductionSuite-Setup.zip (Windows) and
-                                                       dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9)
+                                                       dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9, Fedora)
     python packaging/build.py --key KEYFILE         -> also dist/ProductionSuite-Update-<version>-r<revision>.zip
     python packaging/build.py --sign ...            -> code-signs every .exe and PowerShell script first (Windows only):
         --sign                                         the one code-signing certificate in your certificate store

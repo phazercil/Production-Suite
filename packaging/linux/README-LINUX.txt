@@ -1,10 +1,11 @@
-PRODUCTION SUITE - INSTALLING ON ROCKY / ALMALINUX / CENTOS STREAM / RHEL 9
-===========================================================================
+PRODUCTION SUITE - INSTALLING ON ROCKY / ALMALINUX / CENTOS STREAM / RHEL 9 OR FEDORA
+====================================================================================
 
 Before you start
 ----------------
-- A server running Rocky Linux 9, AlmaLinux 9, CentOS Stream 9 or RHEL 9, with its normal package
-  repositories (dnf installs Python 3.12, Apache and the SELinux tools; nothing else comes from the internet).
+- A server running Rocky Linux 9, AlmaLinux 9, CentOS Stream 9, RHEL 9 or Fedora (checked on Fedora 44),
+  with its normal package repositories. dnf installs Python (3.12 on EL9; Fedora's own Python), Apache and
+  the SELinux tools; nothing else comes from the internet.
 - A root (sudo) login.
 - Your MariaDB server: its address and a login that may create tables in the suite's database. Setup can
   use a MariaDB administrator login (e.g. root) once to create the database and user. To put MariaDB on this
