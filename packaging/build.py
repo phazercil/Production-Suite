@@ -1,7 +1,7 @@
 """Build the installer zip (and, with --key, the signed update file) from this repository.
 
     python packaging/build.py                       -> dist/ProductionSuite-Setup.zip (Windows) and
-                                                       dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9)
+                                                       dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9, Fedora)
     python packaging/build.py --key KEYFILE         -> also dist/ProductionSuite-Update-<version>-r<revision>.zip
     python packaging/build.py --sign ...            -> code-signs every .exe and PowerShell script first (Windows only):
         --sign                                         the one code-signing certificate in your certificate store
@@ -97,7 +97,7 @@ def main():
         for w in sorted((PKG / "wheels").glob("*.whl")):
             if "win_amd64" not in w.name:
                 t.add(w, f"{top}/wheels/{w.name}", filter=mode)
-        for f in ("install.sh", "uninstall.sh", "README-LINUX.txt"):
+        for f in ("install.sh", "uninstall.sh", "get.sh", "README-LINUX.txt"):
             t.add(PKG / "linux" / f, f"{top}/{f}", filter=mode)
         t.add(PKG / "linux" / "templates", f"{top}/templates", filter=mode)
     print(f"{lin}  v{version} rev {revision}, {lin.stat().st_size / 1e6:.1f} MB")

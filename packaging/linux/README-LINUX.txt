@@ -1,17 +1,39 @@
-PRODUCTION SUITE - INSTALLING ON ROCKY / ALMALINUX / CENTOS STREAM / RHEL 9
-===========================================================================
+PRODUCTION SUITE - INSTALLING ON ROCKY / ALMALINUX / CENTOS STREAM / RHEL 9 OR FEDORA
+====================================================================================
 
 Before you start
 ----------------
-- A server running Rocky Linux 9, AlmaLinux 9, CentOS Stream 9 or RHEL 9, with its normal package
-  repositories (dnf installs Python 3.12, Apache and the SELinux tools; nothing else comes from the internet).
+- A server running Rocky Linux 9, AlmaLinux 9, CentOS Stream 9, RHEL 9 or Fedora (checked on Fedora 44),
+  with its normal package repositories. dnf installs Python (3.12 on EL9; Fedora's own Python), Apache and
+  the SELinux tools; nothing else comes from the internet.
 - A root (sudo) login.
 - Your MariaDB server: its address and a login that may create tables in the suite's database. Setup can
   use a MariaDB administrator login (e.g. root) once to create the database and user. To put MariaDB on this
   same server instead, add --with-mariadb.
 
-Install (or update)
--------------------
+Install (or update) straight from GitHub
+----------------------------------------
+The server downloads the newest release itself. It needs to reach github.com and api.github.com over HTTPS
+while installing (the suite never uses the internet afterwards), and a GitHub token that can read the
+repository: on GitHub, Settings > Developer settings > Fine-grained tokens > Generate, Repository access
+"Only select repositories" = Production-Suite, Permissions > Contents = Read-only. The token is used for the
+download only; it is not saved.
+
+  curl -fsSL -H "Authorization: Bearer YOUR_TOKEN" -o get.sh \
+       https://raw.githubusercontent.com/phazercil/Production-Suite/main/packaging/linux/get.sh
+  sudo bash get.sh                     (asks for the token again, hidden; or: sudo GITHUB_TOKEN=... bash get.sh)
+
+  sudo bash get.sh --version v1.7.0    a given release instead of the newest
+  sudo bash get.sh --with-mariadb      install.sh options are passed on
+
+It checks the download against the checksum GitHub keeps for it, keeps the last 3 downloads in
+/var/lib/production-suite-installer, and runs install.sh. Run it again to update.
+
+Releases: pushing a tag like v1.7.0 on main builds the Linux package and attaches it to a GitHub release
+(the Release workflow).
+
+Install (or update) from the file
+---------------------------------
   tar xzf ProductionSuite-Linux.tar.gz
   cd ProductionSuite-Linux
   sudo ./install.sh

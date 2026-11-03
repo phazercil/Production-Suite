@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Production Suite installer for Rocky Linux, AlmaLinux, CentOS Stream and RHEL 9.
+# Production Suite installer for Rocky Linux, AlmaLinux, CentOS Stream and RHEL 9, and Fedora.
 #
 #   sudo ./install.sh                          install, or update an existing install (settings and records are kept)
 #   sudo ./install.sh --answers answers.json   unattended (same answer names as the Windows installer)
@@ -111,23 +111,40 @@ echo "Log: $LOG"
 # ---------------------------------------------------------------- 1. this server
 step "1. Checking this server"
 . /etc/os-release
-case " ${ID:-} ${ID_LIKE:-} " in *" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" fedora "*) ;; *) fail "This installer is for Rocky, AlmaLinux, CentOS Stream or RHEL 9 (this is ${PRETTY_NAME:-unknown})." ;; esac
-case "${VERSION_ID:-}" in 9*) ;; *) say "  Note: built and tested for version 9; this is ${PRETTY_NAME:-unknown}. Continuing." ;; esac
+case " ${ID:-} ${ID_LIKE:-} " in *" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*|*" fedora "*) ;; *) fail "This installer is for Rocky, AlmaLinux, CentOS Stream, RHEL 9 or Fedora (this is ${PRETTY_NAME:-unknown})." ;; esac
+FEDORA=0; [ "${ID:-}" = fedora ] && FEDORA=1
+if [ "$FEDORA" = 0 ]; then
+    case "${VERSION_ID:-}" in 9*) ;; *) say "  Note: built and tested for version 9; this is ${PRETTY_NAME:-unknown}. Continuing." ;; esac
+fi
 [ -d "$HERE/app" ] && [ -d "$HERE/wheels" ] || fail "The app and wheels folders are missing. Extract the whole download, then run ./install.sh from it."
 say "  ${PRETTY_NAME}"
 [ -e "$DIR/.env" ] && say "  Updating the existing install in $DIR (settings and records are kept)."
 
 # ---------------------------------------------------------------- 2. packages
-step "2. Installing Python 3.12, Apache and the SELinux tools (dnf)"
-pkgs=(python3.12 python3.12-pip httpd policycoreutils-python-utils)
-[ "$WITH_MARIADB" = 1 ] && pkgs+=(mariadb-server)
-if ! run dnf -y install "${pkgs[@]}"; then
-    pkgs[0]=python3.11; pkgs[1]=python3.11-pip   # older 9.x releases have 3.11 but not 3.12
-    run dnf -y install "${pkgs[@]}" || fail "dnf couldn't install the packages. This server needs its normal Rocky/RHEL package repositories (or a local mirror)."
+step "2. Installing Python, Apache and the SELinux tools (dnf)"
+extra=(httpd policycoreutils-python-utils)
+command -v curl >/dev/null || extra+=(curl)   # curl-minimal counts; asking for curl next to it makes dnf refuse
+[ "$WITH_MARIADB" = 1 ] && extra+=(mariadb-server)
+# Pythons the suite's packages are included for (packaging/wheels): 3.11 to 3.14
+py_ok() { "$1" -c 'import sys, venv, ensurepip; sys.exit(0 if (3, 11) <= sys.version_info[:2] <= (3, 14) else 1)' >/dev/null 2>&1; }
+if [ "$FEDORA" = 1 ]; then
+    # Fedora's own Python (3.13 or 3.14) is used as it is; nothing extra is needed
+    run dnf -y install python3 "${extra[@]}" || fail "dnf couldn't install the packages. This server needs its normal Fedora package repositories (or a local mirror)."
+    if ! py_ok /usr/bin/python3; then   # a newer Fedora: use an older Python that Fedora still offers
+        for v in 3.14 3.13 3.12; do run dnf -y install "python$v" && break; done
+    fi
+else
+    if ! run dnf -y install python3.12 python3.12-pip "${extra[@]}"; then
+        # older 9.x releases have 3.11 but not 3.12
+        run dnf -y install python3.11 python3.11-pip "${extra[@]}" || fail "dnf couldn't install the packages. This server needs its normal Rocky/RHEL package repositories (or a local mirror)."
+    fi
 fi
 PY=""
-for p in python3.12 python3.11; do command -v "$p" >/dev/null && { PY="$(command -v "$p")"; break; }; done
-[ -n "$PY" ] || fail "Python 3.11 or 3.12 isn't available."
+for p in python3.12 python3.11 python3.13 python3.14 python3; do
+    c="$(command -v "$p" 2>/dev/null)" || continue
+    if py_ok "$c"; then PY="$c"; break; fi
+done
+[ -n "$PY" ] || fail "No Python from 3.11 to 3.14 (with venv) is available. Install one with dnf (for example python3.13) and run ./install.sh again."
 command -v /usr/bin/python3 >/dev/null || fail "/usr/bin/python3 is missing (it runs the updater as root)."
 say "  Using $PY ($("$PY" --version 2>&1))"
 if [ "$WITH_MARIADB" = 1 ]; then

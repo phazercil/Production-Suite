@@ -84,9 +84,17 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\ci\windows-check.ps1
 
   linux:
-    name: Linux (Rocky 9 install with Apache)
+    name: Linux (${{ matrix.name }} install with Apache)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Rocky 9
+            os: el9
+          - name: Fedora 44
+            os: fedora
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,13 +102,26 @@ jobs:
           python-version: "3.12"
       - name: Build the Linux package
         run: python packaging/build.py
-      - name: Start Rocky Linux 9 with systemd
+      - name: Start ${{ matrix.name }} with systemd
         run: |
-          for img in docker.io/rockylinux/rockylinux:9-ubi-init docker.io/almalinux/9-init; do
-            if docker pull -q "$img"; then IMG="$img"; break; fi
-          done
+          set -e
+          if [ "${{ matrix.os }}" = fedora ]; then
+            # Fedora's container image has no systemd: add it once, then boot that image
+            for img in docker.io/library/fedora:44 registry.fedoraproject.org/fedora:44; do
+              if docker pull -q "$img"; then BASE="$img"; break; fi
+            done
+            [ -n "$BASE" ] || { echo "No Fedora 44 image"; exit 1; }
+            docker run --name prep "$BASE" bash -c "dnf -y -q install systemd procps-ng && dnf clean all"
+            docker commit prep fedora-init >/dev/null
+            IMG=fedora-init; INIT=/usr/sbin/init
+          else
+            for img in docker.io/rockylinux/rockylinux:9-ubi-init docker.io/almalinux/9-init; do
+              if docker pull -q "$img"; then IMG="$img"; break; fi
+            done
+            INIT=/sbin/init
+          fi
           echo "Using $IMG"
-          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/src:ro" "$IMG" /sbin/init
+          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/src:ro" "$IMG" $INIT
           for i in $(seq 1 30); do docker exec el9 systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break; sleep 2; done
           docker exec el9 cat /etc/os-release | head -3
       - name: Install with install.sh and check it through Apache
