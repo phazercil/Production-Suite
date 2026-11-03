@@ -1,0 +1,15 @@
+<aside class="rail" id="rail" hx-get="/kiosk/r/rail" hx-trigger="suite:changed from:body">
+  <label class="ibtn" for="navToggle" aria-label="Menu">{% icon "menu" %}</label>
+  <button class="ibtn" hx-get="/kiosk/m/alarms" hx-target="#modal" hx-swap="innerHTML" aria-label="Alarms{% if alarms %}: {{ alarms|length }}{% endif %}" {% if not alarms %}style="opacity:.35"{% endif %}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="#E06C5B" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 22 20H2Z"/><path d="M12 10v4M12 17h.01" stroke-linecap="round"/></svg>
+    <span class="alarmcount">{% if alarms %}{{ alarms|length }}{% endif %}</span>
+  </button>
+  <div class="spacer"></div>
+  {% if me %}
+  <button class="login" hx-post="/kiosk/do/logout"><svg viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+    <span>Log out</span><span class="who">{{ me.name }}</span></button>
+  {% else %}
+  <button class="login" hx-get="/kiosk/m/login" hx-target="#modal" hx-swap="innerHTML"><svg viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+    <span>Log in</span></button>
+  {% endif %}
+</aside>

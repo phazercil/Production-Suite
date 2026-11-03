@@ -1,0 +1,9 @@
+<dl class="kv" style="margin-top:10px;font-size:14px">
+  <dt>Database table</dt><dd>The newest row (by the column you pick, usually a time stamp or an auto-number ID) is read each minute, through a read-only login. One table can hold every machine: pick the column that names the machine. If no new row arrives within the minutes you set, it counts as no data.</dd>
+  <dt>Read from URL</dt><dd>The URL returns JSON such as <code>{"ppm":190,"count":48211,"recipe":"MG-24","run":1}</code>. Field names can be paths like <code>data.speed</code>.</dd>
+  <dt>InfluxDB query</dt><dd>The newest values from the query; Flux results by <code>_field</code>, InfluxQL by column. <code>{machine}</code> is replaced with the machine's name. Readings older than 2½ minutes count as no data.</dd>
+  <dt>Pushed to server</dt><dd><code>POST http://&lt;server&gt;/api/feed/&lt;machine&gt;</code> with <code>{"ppm":190,"count":48211,"recipe":"MG-24","run":1}</code> and header <code>X-Feed-Key</code>.</dd>
+  <dt>Filters cut</dt><dd>The machine's counter. The suite counts how much it went up each minute; a reset to zero is handled.</dd>
+  <dt>Errors and alarms</dt><dd>An error code (and message) in the reading, kept from when it appears until it clears; or the machine's alarm log table, one entry per new row. Pushed readings can send <code>"error":"E214","errorText":"Film break"</code>.</dd>
+  <dt>Run signal</dt><dd>High/Low, 1/0, true/false, on/off or run/stop. Without one, the line counts as stopped at or below the stop speed (Admin › Rules).</dd>
+  <dt>No reading</dt><dd>After 2½ minutes without data, the screen shows an alarm and nothing is recorded, so a dropped feed never looks like downtime.</dd></dl>

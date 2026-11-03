@@ -1,0 +1,7 @@
+<div class="sheet" {% block sheet_attrs %}{% endblock %}>
+  <header><h2 class="h1">{% block title %}{% endblock %}</h2><button class="btn ghost" data-close {% block close_attrs %}{% endblock %} aria-label="Close">Close</button></header>
+  <form class="sheetform" {% block form_attrs %}{% endblock %} hx-headers='{"X-In-Modal": "1"}' hx-swap="none" autocomplete="off">
+    <div class="body">{% block body %}{% endblock %}<p class="err" role="alert"></p></div>
+    {% block foot_wrap %}<footer>{% block foot %}{% endblock %}</footer>{% endblock %}
+  </form>
+</div>

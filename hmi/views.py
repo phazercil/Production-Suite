@@ -5,9 +5,8 @@ from django.conf import settings
 from django.core.cache import cache
 import logging
 from django.http import JsonResponse
-from django.shortcuts import render
 from django.utils import timezone
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from plant.models import Machine, Person, PlantSettings
@@ -17,22 +16,6 @@ from . import engine, snapshot
 from .models import LineState
 
 log = logging.getLogger("plant")
-
-
-@ensure_csrf_cookie
-def kiosk(request):
-    return render(request, "hmi/kiosk.html", {"mode": "operator"})
-
-
-@ensure_csrf_cookie
-def station(request, machine):
-    """A machine's own address, e.g. /station/Barbara/. Shows only that machine's operator screens:
-    no mode bar, no switching machines, no Team or Admin pages (shift leads use /operator/ for those)."""
-    m = Machine.objects.filter(name__iexact=machine, stage="s1").first()
-    if not m:
-        names = ", ".join(Machine.objects.filter(stage="s1").values_list("name", flat=True))
-        return render(request, "hmi/no_station.html", {"name": machine, "names": names, "kiosk_lock": True}, status=404)
-    return render(request, "hmi/kiosk.html", {"mode": "operator", "kiosk_lock": True, "station_lock": m.name})
 
 
 def body(request):
@@ -90,11 +73,9 @@ def state(request):
     return state_response(request)
 
 
-@json_api
-@require_POST
-def login(request):
-    p = body(request)
-    # Slow down PIN guessing: after 5 wrong PINs from one screen (or one device address), wait 60 seconds.
+def pin_login(request, pin, user_id=None, admin_only=False):
+    """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not).
+    Slows down PIN guessing: after 5 wrong PINs from one screen (or 20 from one device address), wait 60 seconds."""
     t = timezone.now().timestamp()
     ip_key = "pin_fails:" + (request.META.get("REMOTE_ADDR") or "?")
     fails = [x for x in request.session.get("pin_fails", []) if t - x < 60]
@@ -107,12 +88,12 @@ def login(request):
     for lst, limit in ((fails, 5), (ip_fails, 20)):
         if len(lst) >= limit:
             log.warning("PIN attempts paused for %s", request.META.get("REMOTE_ADDR"))
-            return JsonResponse({"ok": False, "error": f"Too many wrong PINs. Wait {int(60 - (t - lst[-limit])) + 1} seconds and try again."})
-    pin = str(p.get("pin") or "").strip()
+            return None, f"Too many wrong PINs. Wait {int(60 - (t - lst[-limit])) + 1} seconds and try again."
+    pin = str(pin or "").strip()
     qs = Person.objects.filter(active=True, pin=pin).exclude(pin="")
-    if p.get("userId"):
-        qs = qs.filter(pk=to_int(p["userId"], "person"))
-    if p.get("adminOnly"):
+    if user_id:
+        qs = qs.filter(pk=to_int(user_id, "person"))
+    if admin_only:
         qs = qs.filter(role="admin")
     matches = [u for u in qs if u.pin == pin]  # exact match even where the database ignores letter case
     u = matches[0] if pin and matches else None
@@ -122,12 +103,21 @@ def login(request):
             cache.set(ip_key, ip_fails + [t], 120)
         except Exception:
             log.exception("PIN limit store unavailable")
-        return JsonResponse({"ok": False, "error": "That is not a shift lead PIN." if p.get("adminOnly") else
-                             "That PIN does not match. Try again or ask your shift lead."})
+        return None, ("That is not a shift lead PIN." if admin_only else "That PIN does not match. Try again or ask your shift lead.")
     request.session.cycle_key()  # new session id at every login
     request.session["pid"] = u.id
     request.session["pin_fails"] = []
     touch(request)
+    return u, None
+
+
+@json_api
+@require_POST
+def login(request):
+    p = body(request)
+    u, err = pin_login(request, p.get("pin"), p.get("userId"), bool(p.get("adminOnly")))
+    if not u:
+        return JsonResponse({"ok": False, "error": err})
     return state_response(request)
 
 

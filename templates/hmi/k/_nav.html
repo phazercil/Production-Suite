@@ -1,0 +1,5 @@
+<nav class="nav" id="nav" aria-label="Operator pages" hx-get="/kiosk/r/nav?page={{ page }}" hx-trigger="suite:changed from:body">
+  {% for p in nav %}{% if p %}
+  <a href="{{ base }}/{{ p.key }}/" class="{% if p.on %}on{% endif %} {% if p.flag %}flag{% endif %}" {% if p.on %}aria-current="page"{% endif %}>{{ p.label }}{% if p.locked %}<span class="lock" title="Shift lead">●</span>{% endif %}{% if p.badge %}<span class="badge">{{ p.badge }}</span>{% endif %}</a>
+  {% else %}<hr>{% endif %}{% endfor %}
+</nav>

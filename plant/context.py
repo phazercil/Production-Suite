@@ -5,4 +5,4 @@ def suite(request):
         request.session["kiosk_lock"] = kiosk not in ("0", "")
     from django.conf import settings
     return {"kiosk_lock": request.session.get("kiosk_lock", False),
-            "suite_rev": f"v{settings.SUITE['VERSION']} · rev {settings.SUITE['REVISION']}", "suite_revision": settings.SUITE["REVISION"]}
+            "suite_rev": f"v{settings.SUITE['VERSION']} · rev {settings.SUITE['REVISION']}", "suite_revision": settings.SUITE["REVISION"], "suite_version": settings.SUITE["VERSION"]}

@@ -1,0 +1,9 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}End shift{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/endShift"{% endblock %}
+{% block body %}
+  <dl class="kv"><dt>Line</dt><dd>{{ S.shift.line }}</dd><dt>Units</dt><dd class="num">{{ S.shift.count|num }}</dd><dt>Uptime</dt><dd class="num">{{ stats.uptime }}%</dd><dt>Running MO</dt><dd>{% if mo %}{{ mo.number }} · {{ mo.part }} ({{ S.shift.mo_count|num }} this run){% else %}—{% endif %}</dd></dl>
+  {% if need %}<p style="color:var(--warn)">{{ need }} downtime entr{{ need|pluralize:"y,ies" }} still need a reason. You can end the shift, but the report will show them as not entered.</p>{% endif %}
+  <label class="f">Issues for the report<textarea name="issues" placeholder="Optional">{{ S.shift.end_issues }}</textarea></label>
+{% endblock %}
+{% block foot %}{% if need %}<a class="btn" href="{{ base }}/downtime/">Enter downtime first</a>{% endif %}<button class="btn danger" type="submit">End shift and see report</button>{% endblock %}

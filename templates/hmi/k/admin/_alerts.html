@@ -1,0 +1,2 @@
+{% if not S.is_admin %}<div class="panel"><h2 class="h2">Downtime alerts</h2><p class="sub" style="margin-top:6px">Text or email people when a line is down. Log in as a shift lead to set it up.</p></div>
+{% else %}{% include "hmi/k/admin/_alerts_panel.html" with I=A.I edit=None msgs=None forms=None lines=S.line_names %}{% endif %}

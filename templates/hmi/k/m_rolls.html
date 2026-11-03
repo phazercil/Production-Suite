@@ -1,0 +1,9 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Roll tags{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/rollAdd"{% endblock %}
+{% block body %}
+  <div class="grid2"><label class="f">Scan roll tag<input type="text" name="roll" autofocus placeholder="Roll ID"></label><label class="f">Material<input type="text" name="material" value="{{ media }}"></label><label class="f">Lot<input type="text" name="lot"></label><label class="f">Footage on roll<input type="number" name="feet" placeholder="ft"></label></div>
+  <div><h3 class="h2">Roll production report</h3><div class="tblwrap" style="margin-top:8px"><table class="xl"><thead><tr><th>Roll</th><th>Material</th><th>Lot</th><th>MO</th><th>Loaded</th><th>Units on roll</th></tr></thead><tbody>
+  {% for x in rows %}<tr><td>{{ x.r.roll }}</td><td>{{ x.r.material }}</td><td>{{ x.r.lot }}</td><td>{{ x.r.mo }}</td><td>{{ x.r.t|clock }}</td><td>{{ x.units|num }}</td></tr>{% empty %}<tr><td colspan="6">No rolls scanned this shift.</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Add roll</button>{% endblock %}

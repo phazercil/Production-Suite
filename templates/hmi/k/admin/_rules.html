@@ -1,0 +1,5 @@
+<div class="panel"><h2 class="h2">Rules</h2><div class="grid2" style="margin-top:10px">
+  {% for k, label, help, mn, v in A.nums %}<label class="f">{{ label }}<input type="number" min="{{ mn }}" name="v" value="{{ v }}" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "ruleSet", "k": "{{ k }}"}' hx-params="c,k,v"><span class="note">{{ help }}</span></label>{% endfor %}
+  <label class="f">QC check interval (min)<input type="number" min="5" name="v:n" value="{{ S.settings.qcEvery }}" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "qcEvery"}' hx-params="c,k,v:n"><span class="note">How often the QC reminder comes due.</span></label>
+  <label class="chk"><input type="checkbox" name="v:b" value="1" {% if S.settings.autoQC %}checked{% endif %} {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "autoQC"}' hx-params="c,k,v:b"> Auto QC reminder on</label>
+</div></div>

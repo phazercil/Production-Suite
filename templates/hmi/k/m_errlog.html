@@ -1,0 +1,6 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Machine errors · {{ d.line }} {{ d.start_time|clock }} – {{ d.end_time|clock }}{% endblock %}
+{% block body %}<p class="sub">What {{ d.line }} reported during this stop (and in the 2 minutes before it).</p>
+  <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Time</th><th>Code</th><th>Message</th></tr></thead><tbody>
+  {% for x in errors %}<tr><td>{{ x.start|plan:S.t }}{% if x.end and x.end != x.start %} – {{ x.end|plan:S.t }}{% elif not x.end %} – still showing{% endif %}</td><td><b>{{ x.code }}</b></td><td class="l">{{ x.text }}</td></tr>{% endfor %}</tbody></table></div>{% endblock %}
+{% block foot_wrap %}{% endblock %}

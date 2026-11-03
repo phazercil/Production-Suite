@@ -1,0 +1,45 @@
+{% if R.feedWarn %}<div class="panel" style="border-color:var(--bad)"><b>No machine data from {{ station }}.</b> {{ R.feedErr }} Counts and downtime are paused until readings come back.</div>{% endif %}
+<div class="runscreen"><div class="runcol">
+  {% if not R.on %}
+  <div class="panel idlecard"><span class="eyebrow">Line {{ station }}</span><h2>No shift running</h2>
+    <p class="sub">Log in, walk the safety checklist and scan the first MO to start running.{% if R.first %} First up from the planner: MO {{ R.first.m.number }} · {{ R.first.m.part }}.{% endif %}</p>
+    <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>
+  {% else %}
+  <div class="panel order">
+    <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
+    {% if R.mo %}
+    <div class="mo"><b>MO {{ R.mo.number }}</b><span>Part {{ R.mo.part }}</span></div>
+    <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
+    <div class="prog"><div class="lbl"><span>Good parts</span><b class="num">{{ R.good|num }} <small>/ {{ R.mo.qty|num }}</small></b></div><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ R.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ R.pct|floatformat:1 }}%"></i></div></div>
+    <div class="metrics">
+      <div class="metric"><span>Rate (pcs/min)</span><b class="num">{{ R.rate }} <small>{{ R.lastPpm }} P/m</small></b></div>
+      <div class="metric {% if R.mo.scrap %}bad{% endif %}"><span>Scrap</span><b class="num">{{ R.mo.scrap|num }}</b></div>
+      <div class="metric"><span>Est. finish</span><b class="num">{% if R.eta %}{{ R.eta|plan:S.t }}{% else %}—{% endif %}</b></div>
+    </div>
+    {% else %}
+    <div class="mo"><b>{% if R.sh.state == "changeover" %}Setting up{% else %}No MO{% endif %}</b></div><div class="desc">{% if R.sh.state == "changeover" %}Finish the changeover steps to start the next MO.{% else %}Scan an MO from Change Over to start counting parts against it.{% endif %}</div>
+    {% endif %}
+    <div class="shiftline"><span>Shift count <b>{{ R.sh.count|num }}</b></span><span>Uptime <b>{{ R.stats.uptime }}%</b></span><span>Down <b>{{ R.stats.down }} min</b></span>{% if R.recipe %}<span>Recipe <b>{{ R.recipe }}</b></span>{% endif %}<span>{% if R.sh.state == "changeover" %}Changeover{% else %}MO{% endif %} timer <b {% if R.timerSince %}data-since="{{ R.timerSince }}"{% endif %}>0:00:00</b></span></div>
+  </div>
+  {% endif %}
+  <div class="panel chartpanel"><div class="row"><span class="eyebrow">Line rate · this shift</span><span class="small">{% if R.grafana %}Grafana panel{% else %}Pleats per minute{% endif %}</span></div>
+    <div class="chartcard {% if R.alert %}alert{% endif %}">{% if R.grafana %}<iframe src="{{ R.grafana }}" title="Pleater speed (Grafana)" loading="lazy" id="gf-ppm"></iframe><span class="src">Grafana</span>{% else %}{{ R.chart|safe }}{% endif %}</div></div>
+</div>
+<aside class="panel upnext"><div class="row"><span class="eyebrow">Up next</span><span class="small">from planner{% if R.planAt %} · {{ R.planAt|clock }}{% endif %}</span></div>
+  {% for x in R.next %}<div class="job"><div class="t"><b>MO {{ x.m.number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
+    {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>
+  {% empty %}<div class="empty">Nothing else is planned for this line. The scheduler adds runs here.</div>{% endfor %}
+  {% if R.more %}<div class="small">+{{ R.more }} more on the <a href="{{ base }}/schedule/" style="color:var(--accent)">schedule</a></div>{% endif %}
+  <div class="spacer"></div>
+  {% if R.on %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.state == "changeover" %}Continue changeover{% else %}Start changeover{% endif %}</button>{% endif %}
+</aside></div>
+<div class="actions">
+  <button class="act {% if R.qcDue %}due{% endif %}" hx-get="/kiosk/m/qc" hx-target="#modal" hx-swap="innerHTML">{% icon "qc" %}<span>QC check</span></button>
+  <a class="act {% if R.reasonDue %}due{% endif %}" href="{{ base }}/downtime/">{% icon "down" %}<span>Downtime</span></a>
+  <button class="act" hx-get="/kiosk/m/drawing" hx-target="#modal" hx-swap="innerHTML">{% icon "draw" %}<span>Instructions</span></button>
+  <button class="act" hx-get="/kiosk/m/rolls" hx-target="#modal" hx-swap="innerHTML">{% icon "rolls" %}<span>Roll tags</span></button>
+  <button class="act" hx-get="/kiosk/m/notes" hx-target="#modal" hx-swap="innerHTML">{% icon "notes" %}<span>Shift notes</span></button>
+  {% if R.on %}<button class="act" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">{% icon "end" %}<span>End shift</span></button>
+  {% else %}<button class="act due" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}<span>Start shift</span></button>{% endif %}
+  <button class="act bad" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">{% icon "maint" %}<span>Call maintenance</span></button>
+</div>

@@ -1,0 +1,10 @@
+{# Where a table's rows come from: database, table, newest row, which rows are this machine's. pre = field prefix, src = saved settings, T = tables of that database #}
+<div class="grid3" style="margin-top:8px">
+  <label class="f">Database<select name="v" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/mdSet" hx-trigger="change" hx-vals='{"id": "{{ c.m.name|escapejs }}", "f": "{{ pre }}db"}' hx-params="id,f,v" hx-target="#mc-{{ c.m.pk }}" hx-swap="outerHTML"><option value="machines" {% if src.db != "assets" %}selected{% endif %}>Machine data</option><option value="assets" {% if src.db == "assets" %}selected{% endif %}>Asset database</option></select></label>
+  <label class="f">Table{% include "hmi/k/admin/_msel.html" with f=pre|add:"table" val=src.table opts=tbls blank="Pick the table" %}</label>
+  <label class="f">Newest row by{% include "hmi/k/admin/_msel.html" with f=pre|add:"orderCol" val=src.orderCol opts=cols blank="Pick a time stamp or ID column" %}</label>
+  <label class="f">Rows for this machine (if the table has several){% include "hmi/k/admin/_msel.html" with f=pre|add:"keyCol" val=src.keyCol opts=cols blank="Whole table is this machine" %}</label>
+  {% if src.keyCol %}<label class="f">…where {{ src.keyCol }} is{% include "hmi/k/admin/_mtext.html" with f=pre|add:"keyVal" val=src.keyVal ph=c.m.name %}</label>{% endif %}
+  {% if not noAge %}<label class="f">No data after (min without a new row, 0 = never){% include "hmi/k/admin/_mtext.html" with f=pre|add:"maxAge" val=src.maxAge t="number" min="0" %}</label>{% endif %}
+</div>
+{% if not T.ready %}<p class="note" style="color:var(--bad);margin-top:4px">Set up the {% if src.db == "assets" %}asset database{% else %}machine data database{% endif %} under Databases and accounts above first.</p>{% elif T.err %}<p class="note" style="color:var(--bad);margin-top:4px">{{ T.err }}</p>{% endif %}

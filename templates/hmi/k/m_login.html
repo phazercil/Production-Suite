@@ -1,0 +1,14 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}{% if admin_only %}Shift lead approval{% else %}Log in{% endif %}{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/login"{% endblock %}
+{% block body %}
+  {% if admin_only %}<p class="sub">This needs a shift lead PIN.</p>{% endif %}
+  <input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="next_q" value="{{ next_q }}">
+  {% if admin_only %}<input type="hidden" name="admin:b" value="1">{% endif %}
+  <div class="users" role="radiogroup" aria-label="Who are you?">
+    {% for u in people %}<label class="userpick"><input type="radio" name="user" value="{{ u.id }}"><span class="btn">{{ u.name }}<br><span class="note">{% if u.role == "admin" %}shift lead{% else %}{{ u.role }}{% endif %}</span></span></label>{% endfor %}
+  </div>
+  <label class="f">PIN<input type="password" name="pin" inputmode="numeric" autocomplete="off" placeholder="Scan badge or type PIN" autofocus></label>
+  {% if S.st.demo %}<p class="note">Example PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · Shift Lead 9999</p>{% endif %}
+{% endblock %}
+{% block foot %}<button class="btn go" type="submit">{% if admin_only %}Approve{% else %}Log in{% endif %}</button>{% endblock %}

@@ -1,0 +1,21 @@
+<details id="grafana-help" hx-preserve="true" style="margin-top:12px"><summary style="cursor:pointer;font:600 16px var(--f-disp)">How to set up Grafana</summary>
+  <ol style="display:flex;flex-direction:column;gap:8px;padding-left:20px">
+    <li>In Grafana, add a <b>MySQL</b> data source pointing at the suite's database (the <code>DB_*</code> settings in the server's .env). Use a read-only account.</li>
+    <li>Make a dashboard with a <code>line</code> variable: <code>SELECT DISTINCT line FROM hmi_ppm</code>. This screen passes <code>var-line</code> and the shift start time, so one dashboard serves every machine.</li>
+    <li>Speed panel query:<pre>SELECT t AS time, ppm AS "P/m"
+FROM hmi_ppm
+WHERE line = '$line' AND $__timeFilter(t)
+ORDER BY t</pre></li>
+    <li>Downtime as annotations (Dashboard settings › Annotations, same data source):<pre>SELECT start_time AS time, end_time AS timeend,
+       CONCAT(reason, ' · ', minutes, ' min') AS text
+FROM hmi_downtime
+WHERE line = '$line' AND $__timeFilter(start_time)</pre></li>
+    <li>Other ready-made views: <code>hmi_qc</code>, <code>hmi_shifts</code>, <code>hmi_mo_runs</code>, <code>hmi_tickets</code>, <code>hmi_machine_errors</code>.</li>
+    <li>Allow embedding in <code>grafana.ini</code>, then restart Grafana:<pre>[security]
+allow_embedding = true
+
+[auth.anonymous]
+enabled = true
+org_role = Viewer        ; or use your SSO / auth proxy instead</pre></li>
+    <li>Find panel IDs: open a panel › Share › Embed. The link contains <code>panelId=</code>.</li>
+  </ol></details>

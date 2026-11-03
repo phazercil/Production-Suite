@@ -1,0 +1,29 @@
+{% load suite %}<div id="s2k" class="panel" {% if K.msg or K.res or K.show %}data-hold{% endif %}><h2 class="h2">S2K schedule</h2>
+  <div class="grid2" style="margin-top:10px">
+    <label class="f">Read open MOs from<select name="v" hx-post="/kiosk/do/s2k" hx-trigger="change" hx-vals='{"op": "source"}' hx-params="op,v" hx-target="#s2k" hx-swap="outerHTML"><option value="url" {% if st.s2kSource != "db" %}selected{% endif %}>An export URL (JSON)</option><option value="db" {% if st.s2kSource == "db" %}selected{% endif %}>The S2K database (read-only)</option></select></label>
+    <label class="f">Pull automatically every (min, 0 = off)<input type="number" min="0" name="v:n" value="{{ st.s2kEvery }}" hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "s2kEvery"}' hx-params="c,k,v:n"></label>
+    {% if st.s2kSource != "db" %}<label class="f">Open MO export URL (JSON)<input type="url" name="v" value="{{ st.s2kUrl }}" placeholder="http://s2k-bridge.plant.local/open-mos" hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "s2kUrl"}' hx-params="c,k,v"></label>{% endif %}
+  </div>
+  {% if st.s2kSource != "db" %}<p class="note" style="margin-top:8px">Expects a list like <code>[{"mo":309300,"item":"MG4062HP","qty":2400,"due":"2026-04-08","process":"BARB","mfg":"MFGOUT"}]</code>. New MOs land in Unscheduled; existing ones are left alone.</p>
+  {% elif not srv_s2kdb %}<p class="sub" style="margin-top:8px;color:var(--warn-ink)">The S2K database isn't set up on the server yet. Set it up under Databases and accounts above. Only the login is tested; nothing is created in S2K.</p>
+  {% else %}
+  <p class="sub" style="margin-top:8px">The server runs one SELECT against the S2K database and adds MOs it hasn't seen. The connection is read-only: the suite can't change, lock or add anything in S2K. Name the columns <code>mo</code>, <code>item</code>, <code>qty</code>, and optionally <code>due</code>, <code>process</code>, <code>mfg</code>, <code>hot</code> (use AS).</p>
+  <form hx-post="/kiosk/do/s2k" hx-target="#s2k" hx-swap="outerHTML" autocomplete="off">
+    {% if K.show %}<input type="hidden" name="shown" value="1">{% endif %}
+    <label class="f" style="margin-top:10px">SQL<textarea name="sql" spellcheck="false" style="font-family:var(--f-mono);font-size:13px;min-height:110px">{{ K.sql }}</textarea></label>
+    <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/s2k" hx-vals='{"op": "tables"}'>{% if K.show %}Hide tables{% else %}Show tables{% endif %}</button><button type="button" class="btn" hx-post="/kiosk/do/s2k" hx-vals='{"op": "test"}'>Run test</button><button type="button" class="btn primary" hx-post="/kiosk/do/s2k" hx-vals='{"op": "save"}'>Save on server</button>
+      {% if K.saved %}<span class="pill ok">SAVED</span><span class="note">{{ K.saved.saved_by|default:"" }} {{ K.saved.saved_at|plan:S.t }}</span>{% else %}<span class="pill idle">NOT SAVED</span>{% endif %}</div>
+    {% if K.msg %}<p class="note" style="margin-top:6px;{% if K.err %}color:var(--bad){% endif %}">{{ K.msg }}</p>{% endif %}
+    {% if K.show and K.T %}{% if K.T.err %}<p class="note" style="color:var(--bad);margin-top:6px">{{ K.T.err }}</p>{% endif %}
+      <div class="tblwrap" style="margin-top:8px;max-height:260px"><table class="xl"><thead><tr><th>Table</th><th>Columns</th></tr></thead><tbody>{% for t in K.T.tables %}<tr><td class="l"><b>{{ t.name }}</b></td><td class="l note">{% for c in t.columns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</td></tr>{% endfor %}</tbody></table></div>
+      <details style="margin-top:10px" {% if K.bld.table %}open{% endif %}><summary><b>Build the query for me</b> <span class="note">pick a table and the columns; the SQL above is written for you</span></summary>
+        <div class="grid3" style="margin-top:8px">
+          <label class="f">Table *{% include "hmi/k/admin/_bsel.html" with k="table" act="s2k" tgt="s2k" val=K.bld.table opts=K.T.tables|names %}</label>
+          {% for k, l, req in K.roles %}<label class="f">{{ l }}{% if req %} *{% endif %}{% include "hmi/k/admin/_bsel.html" with act="s2k" tgt="s2k" val=K.bld|get:k opts=K.cols %}</label>{% endfor %}
+          <label class="f">Only rows where column{% include "hmi/k/admin/_bsel.html" with k="fcol" act="s2k" tgt="s2k" val=K.bld.fcol opts=K.cols %}</label>
+          <label class="f">equals (e.g. OPEN)<input type="text" name="b_fval" value="{{ K.bld.fval }}" spellcheck="false"></label></div>
+        <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/s2k" hx-vals='{"op": "build"}'>Write the SQL</button><span class="note">Then Run test, and Save on server.</span></div></details>{% endif %}
+    {% if K.res %}{% include "hmi/k/admin/_rows.html" with rows=K.res.rows columns=K.res.columns %}{% endif %}
+  </form>{% endif %}
+  <div class="row" style="margin-top:8px"><button class="btn" hx-post="/kiosk/do/run" hx-vals='{"c": "s2kPull"}'>Pull MOs now</button></div>
+</div>

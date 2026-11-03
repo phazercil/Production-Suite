@@ -27,7 +27,7 @@ class InboundTests(TestCase):
     def test_public_addresses_are_refused_everywhere(self):
         for addr in ("8.8.8.8", "203.1.2.3", "2001:4860:4860::8888", "100.64.0.1", "", "garbage",
                      "10.4.5.6", "172.20.1.9", "192.168.1.50", "192.168.101.7", "fd12:3456::7", "fe80::1"):
-            for path in ("/operator/", "/api/hmi/state", "/scheduler/", "/data/", "/admin/", "/static/hmi/kiosk.js", "/api/feed/Barbara"):
+            for path in ("/operator/", "/api/hmi/state", "/scheduler/", "/data/", "/admin/", "/static/hmi/kiosk.css", "/api/feed/Barbara"):
                 self.assertEqual(self.get(path, addr).status_code, 403, (addr, path))
 
     def test_plant_network_and_the_server_itself_are_served(self):

@@ -1,0 +1,52 @@
+{% load suite %}<div id="sources" class="panel" {% if X.edit or X.key or X.test %}data-hold{% endif %}><div class="row"><h2 class="h2 grow">Incoming data</h2>{% if not X.edit %}<button class="btn primary" hx-post="/kiosk/do/srcEdit" hx-target="#sources" hx-swap="outerHTML">Add data source</button>{% endif %}</div>
+  <p class="sub" style="margin-top:4px">Systems that send data to the suite, such as a machine vision QC system. QC measurements show on the line's QC Log and in Reports; other readings are kept for Reports and Grafana (table hmi_inbound). Sources must be on the plant network.</p>
+  {% if X.list %}<div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Source</th><th>Data</th><th>Line</th><th>How</th><th>Last data</th><th>Received</th><th></th></tr></thead><tbody>
+  {% for x in X.list %}<tr><td class="l"><b>{{ x.name }}</b>{% if not x.enabled %} <span class="pill idle">OFF</span>{% endif %}</td><td>{% if x.kind == "qc" %}QC measurements{% else %}Other readings{% endif %}</td><td>{{ x.line|default:"from the data" }}</td>
+    <td class="l">{% if x.mode == "push" %}Sends to the server{% else %}Collected every {{ x.every }}s<br><span class="note" style="word-break:break-all">{{ x.url }}</span>{% endif %}</td>
+    <td class="l">{% if x.lastAt %}<span class="pill {% if x.lastOk %}ok{% else %}bad{% endif %}">{% if x.lastOk %}OK{% else %}PROBLEM{% endif %}</span> <span class="note">{{ x.lastAt|plan:S.t }} · {{ x.lastMsg }}</span>{% else %}<span class="pill idle">NOTHING YET</span>{% endif %}</td>
+    <td>{{ x.received|num }}</td>
+    <td style="white-space:nowrap"><button class="btn sm" hx-post="/kiosk/do/srcEdit" hx-vals='{"id": "{{ x.id }}"}' hx-target="#sources" hx-swap="outerHTML">Edit</button> <button class="btn sm" hx-post="/kiosk/do/srcTest" hx-vals='{"id": "{{ x.id }}"}' hx-target="#sources" hx-swap="outerHTML">Test</button>{% if x.mode == "push" %} <button class="btn ghost sm" hx-get="/kiosk/m/confirm?a=srcKey&id={{ x.id }}&t=%23sources" hx-target="#modal" hx-swap="innerHTML">New key</button>{% endif %} <button class="btn ghost sm" hx-get="/kiosk/m/confirm?a=srcDelete&id={{ x.id }}&t=%23sources" hx-target="#modal" hx-swap="innerHTML">Remove</button></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="note" style="margin-top:8px">No data sources yet.</p>{% endif %}
+
+  {% if X.key %}<div class="panel" style="border-color:var(--accent);margin-top:10px"><h3 class="h2" style="font-size:18px">Set up {{ X.key.name }} to send its data</h3>
+    <p class="sub" style="margin-top:4px">In the other system, send JSON (one object or a list) by HTTP POST to:</p>
+    <p class="num" style="margin-top:6px;user-select:all;word-break:break-all"><b>{{ X.origin }}/api/ingest/{{ X.key.name }}</b></p>
+    <p class="sub" style="margin-top:6px">with these headers (the key is shown only now; copy it):</p>
+    <p class="num" style="margin-top:4px;user-select:all;word-break:break-all">Content-Type: application/json<br>X-Source-Key: <b id="srckey">{{ X.key.key }}</b></p>
+    <div class="row" style="margin-top:8px"><button class="btn sm" data-copy="#srckey">Copy key</button><button class="btn ghost sm" hx-post="/kiosk/do/srcCancel" hx-target="#sources" hx-swap="outerHTML">Done</button></div></div>{% endif %}
+
+  {% if X.test %}<div class="panel" style="margin-top:10px"><h3 class="h2" style="font-size:18px">Test: {{ X.test.name }}</h3><p class="note">{{ X.test.count }} record(s) found; nothing was stored. How the first ones would be read:</p>
+    {% for r in X.test.preview %}{% if r.ok %}<div class="note" style="margin-top:4px">✓ {{ r.line }} · {{ r.t|plan:S.t }} · {% if r.kind == "qc" %}{{ r.part|default:"(part from the line)" }}{% for k in "len,wid,ph,sbl,sbr"|split %}{% with v=r.vals|get:k %}{% if v is not None and v != "" %} {{ k }} {{ v }}{% endif %}{% endwith %}{% endfor %}{% if r.passed is None %} · pass/fail from the specs{% elif r.passed %} · PASS{% else %} · FAIL{% endif %}{% else %}{{ r.data }}{% endif %}</div>
+    {% else %}<div class="note" style="margin-top:4px;color:var(--bad)">✕ {{ r.error }}</div>{% endif %}{% endfor %}
+    <div class="row" style="margin-top:8px"><button class="btn ghost sm" hx-post="/kiosk/do/srcCancel" hx-target="#sources" hx-swap="outerHTML">Close</button></div></div>{% endif %}
+
+  {% with E=X.edit %}{% if E %}<form class="panel" style="background:var(--well-3);margin-top:10px" hx-post="/kiosk/do/srcSave" hx-target="#sources" hx-swap="outerHTML" autocomplete="off">
+    <datalist id="srcFields">{% for f in E.fields %}<option value="{{ f }}">{% endfor %}</datalist>
+    <input type="hidden" name="id" value="{{ E.id|default_if_none:'' }}"><input type="hidden" name="seen" value="{{ E.fields|jsonlist }}">
+    <h3 class="h2" style="font-size:18px">{% if E.id %}Edit data source{% else %}New data source{% endif %}</h3>
+    <div class="grid3" style="margin-top:8px">
+      <label class="f">Name (part of its address)<input type="text" name="name" value="{{ E.name }}" placeholder="vision-barbara" spellcheck="false"></label>
+      <label class="f">What it sends<select name="kind" hx-post="/kiosk/do/srcEdit" hx-trigger="change" hx-vals='{"redraw": "1"}' hx-target="#sources" hx-swap="outerHTML"><option value="qc" {% if E.kind == "qc" %}selected{% endif %}>QC measurements (machine vision)</option><option value="readings" {% if E.kind == "readings" %}selected{% endif %}>Other readings</option></select></label>
+      <label class="f">Line<select name="line" hx-post="/kiosk/do/srcEdit" hx-trigger="change" hx-vals='{"redraw": "1"}' hx-target="#sources" hx-swap="outerHTML"><option value="">Named in the data</option>{% for l in lines %}<option {% if E.line == l %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="f">How the data arrives<select name="mode" hx-post="/kiosk/do/srcEdit" hx-trigger="change" hx-vals='{"redraw": "1"}' hx-target="#sources" hx-swap="outerHTML"><option value="push" {% if E.mode == "push" %}selected{% endif %}>It sends to the server</option><option value="poll" {% if E.mode == "poll" %}selected{% endif %}>The server collects it from an address</option></select></label>
+      {% if E.mode == "poll" %}<label class="f">Address to collect from (JSON)<input type="url" name="url" value="{{ E.url }}" placeholder="http://192.168.100.60/api/measurements"></label>
+      <label class="f">Collect every (seconds)<input type="number" min="10" name="every" value="{{ E.every }}"></label>{% endif %}
+      <label class="chk"><input type="checkbox" name="enabled" value="1" {% if E.enabled is not False %}checked{% endif %}> Turned on</label>
+    </div>
+    <h3 class="h2" style="font-size:16px;margin-top:12px">Which field holds what</h3>
+    <p class="note">Type the field name from the system's JSON (dots for nested fields). {% if E.fields %}Fields seen in the last data received are suggested as you type.{% else %}After the first data arrives (or a Test), its fields are suggested here.{% endif %} Leave blank what it doesn't send.</p>
+    <div class="grid3" style="margin-top:6px">
+      {% include "hmi/k/admin/_srcmap.html" with k="time" label="Time" ph="e.g. timestamp (blank = time received)" %}
+      {% if not E.line %}{% include "hmi/k/admin/_srcmap.html" with k="line" label="Line name" ph="e.g. station" %}{% endif %}
+      {% if E.kind == "qc" %}
+        {% include "hmi/k/admin/_srcmap.html" with k="part" label="Part number" ph="blank = the part running on the line" %}
+        {% include "hmi/k/admin/_srcmap.html" with k="mo" label="MO" ph="blank = the MO running on the line" %}
+        {% include "hmi/k/admin/_srcmap.html" with k="len" label="Length" %}{% include "hmi/k/admin/_srcmap.html" with k="wid" label="Width" %}{% include "hmi/k/admin/_srcmap.html" with k="ph" label="Pleat height" %}
+        {% include "hmi/k/admin/_srcmap.html" with k="sbl" label="Side band height L" %}{% include "hmi/k/admin/_srcmap.html" with k="sbr" label="Side band height R" %}
+        {% include "hmi/k/admin/_srcmap.html" with k="passed" label="Pass / fail" ph="blank = checked against the drawing specs" %}
+        <label class="f">Measurements are in<select name="map_units"><option value="in" {% if E.mapping.units != "mm" %}selected{% endif %}>inches</option><option value="mm" {% if E.mapping.units == "mm" %}selected{% endif %}>millimetres (converted to inches)</option></select></label>
+      {% else %}<label class="f">Number fields to keep (comma separated, blank = all)<input type="text" name="map_fields" value="{{ E.mapping.fields|join:', ' }}" autocomplete="off" spellcheck="false"></label>{% endif %}
+      {% if E.mode == "poll" %}{% include "hmi/k/admin/_srcmap.html" with k="id" label="Record id or sequence (so nothing is read twice)" ph="blank = use the time" %}{% endif %}
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn primary">Save</button><button type="button" class="btn ghost" hx-post="/kiosk/do/srcCancel" hx-params="none" hx-target="#sources" hx-swap="outerHTML">Cancel</button>{% if X.err %}<span class="note" style="color:var(--bad)">{{ X.err }}</span>{% endif %}</div></form>{% endif %}{% endwith %}
+</div>

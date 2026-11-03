@@ -1,0 +1,5 @@
+<div class="row"><h1 class="h1 grow">Admin</h1>{% if S.is_admin %}<span class="pill bad">Admin mode · {{ me.name }}</span><button class="btn ghost" hx-post="/kiosk/do/logout">Exit admin mode</button>{% endif %}</div>
+{% if not S.is_admin %}<div class="panel row" style="border-color:var(--warn)"><span class="grow">View only. Log in as a shift lead to make changes.</span><button class="btn primary" hx-get="/kiosk/m/login?admin=1" hx-target="#modal" hx-swap="innerHTML">Enter admin mode</button></div>{% endif %}
+<div class="tabs" role="tablist">{% for k, l in tabs %}<button role="tab" aria-selected="{% if tab == k %}true{% else %}false{% endif %}" class="{% if tab == k %}on{% endif %}" hx-get="/kiosk/v/admin?tab={{ k }}" hx-target="#view">{{ l }}</button>{% endfor %}</div>
+{% include "hmi/k/admin/_"|add:tab|add:".html" with C=A %}
+{% if audit %}<div class="panel"><h2 class="h2">Recent changes</h2><div class="auditlog">{% for a in audit %}<div><span class="num note">{{ a.t|day }} {{ a.t|clock }}</span> · {{ a.by }} · {{ a.what }}</div>{% endfor %}</div></div>{% endif %}

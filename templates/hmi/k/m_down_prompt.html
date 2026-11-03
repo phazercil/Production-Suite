@@ -1,0 +1,12 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Why did the line stop?{% endblock %}
+{% block close_attrs %}hx-post="/kiosk/do/snooze"{% endblock %}
+{% block body %}
+  <p class="sub">{{ station }} has {{ rows|length }} stop{{ rows|length|pluralize }} adding up to <b>{{ total }} min</b> without a reason. Pick a reason for each one{% if S.can_override %}, or choose Other to type your own{% endif %}.</p>
+  {% if not me %}<p class="note" style="color:var(--warn)">Log in to enter reasons.</p>{% endif %}
+  <div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Time</th><th>Min</th><th>MO</th><th>Machine errors</th><th>Reason</th></tr></thead><tbody>
+  {% for x in rows %}<tr><td>{{ x.d.start_time|clock }} – {{ x.d.end_time|clock }}</td><td>{{ x.d.minutes }}</td><td>{{ x.d.mo }}</td><td class="l">{% if x.errors %}{% include "hmi/k/_err_chips.html" with errs=x.errors max="3" max_n=3 neg_max=-3 %}{% else %}<span class="note">—</span>{% endif %}</td><td>{% include "hmi/k/_reason_cell.html" with back="downPrompt" %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="note" style="margin-top:8px">The reasons list is kept in Admin › Downtime reasons. {% if not S.can_override %}If the right reason isn't listed, ask maintenance or your shift lead.{% endif %}</p>
+{% endblock %}
+{% block foot %}{% if not me %}<button type="button" class="btn primary" hx-get="/kiosk/m/login?next=downPrompt" hx-target="#modal" hx-swap="innerHTML">Log in</button>{% endif %}{% if S.can_override %}<button type="button" class="btn ghost" hx-post="/kiosk/do/snooze">Later</button>{% endif %}{% endblock %}
