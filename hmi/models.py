@@ -146,12 +146,13 @@ class Ticket(models.Model):
 
 class TicketPhoto(models.Model):
     """A picture of what is wrong, taken on a tablet or phone when the ticket is opened (or added later).
-    Kept in the records database, so it is backed up with everything else. Re-saved as JPEG by the screen."""
+    Kept in the records database, so it is backed up with everything else. The server keeps a 1600 px JPEG and a thumbnail."""
     ticket = models.ForeignKey(Ticket, related_name="photos", on_delete=models.CASCADE)
     t = models.DateTimeField()
     by = models.CharField(max_length=120)
     content_type = models.CharField(max_length=20, default="image/jpeg")
     data = models.BinaryField()
+    thumb = models.BinaryField(default=b"", blank=True)
     size = models.IntegerField(default=0)
     width = models.IntegerField(default=0)
     height = models.IntegerField(default=0)

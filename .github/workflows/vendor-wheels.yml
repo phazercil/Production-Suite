@@ -1,0 +1,53 @@
+# Downloads htmx (npm) and the compiled wheels listed in packaging/wheels-binary.txt for every Python the installers can use
+# (Windows: 3.10 to 3.14, 64-bit; Linux: 3.11 to 3.13 - EL9 uses 3.11 or 3.12, the checks also run 3.13) and keeps them as a build artifact to commit into
+# packaging/wheels (htmx into static/vendor/htmx), committing them to the branch. Runs when that list changes,
+# or by hand.
+name: Vendor wheels
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - packaging/wheels-binary.txt
+      - .github/workflows/vendor-wheels.yml
+permissions:
+  contents: write   # commits the downloaded files back to the branch that asked for them
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download
+        run: |
+          set -e
+          mkdir -p out
+          reqs=$(grep -v '^\s*#' packaging/wheels-binary.txt | grep -v '^\s*$')
+          for v in 310 311 312 313 314; do
+            pip download $reqs --only-binary :all: --no-deps --platform win_amd64 --python-version $v --implementation cp -d out
+          done
+          for v in 311 312 313; do
+            pip download $reqs --only-binary :all: --no-deps --platform manylinux_2_28_x86_64 --python-version $v --implementation cp -d out
+          done
+          ls -la out
+          # htmx: the small script the thin-client screens use to swap in server-rendered HTML
+          mkdir -p hx && (cd hx && npm pack htmx.org@2.0.4 && tar xzf htmx.org-2.0.4.tgz)
+          cp hx/package/dist/htmx.min.js out/htmx-2.0.4.min.js
+          cp hx/package/LICENSE out/htmx-LICENSE.txt
+          sha256sum out/* > out/SHA256SUMS
+      - name: Commit them to this branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -e
+          mkdir -p static/vendor/htmx
+          mv out/htmx-2.0.4.min.js static/vendor/htmx/htmx.min.js
+          mv out/htmx-LICENSE.txt static/vendor/htmx/LICENSE.txt
+          cp out/*.whl packaging/wheels/
+          (cd packaging/wheels && sha256sum pillow-*.whl > ../wheels-binary.sha256)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add static/vendor/htmx packaging/wheels packaging/wheels-binary.sha256
+          if git diff --cached --quiet; then echo "Nothing new."; exit 0; fi
+          git commit -m "Vendor compiled wheels and htmx (from packaging/wheels-binary.txt)"
+          git push origin HEAD:${GITHUB_REF_NAME}

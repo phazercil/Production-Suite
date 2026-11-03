@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "datakiosk",
     "labor",
     "reports",
+    "suite",   # display helpers for the server-built screens (suite/templatetags)
 ]
 
 MIDDLEWARE = [
@@ -111,6 +112,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "plant.context.suite",
             ],
+            "builtins": ["suite.templatetags.suite"],
         },
     },
 ]

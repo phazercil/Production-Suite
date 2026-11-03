@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="{% static 'suite/shell.css' %}">
 {% block head %}{% endblock %}
 </head>
-<body class="suite {% block body_class %}{% endblock %}">
+<body class="suite {% block body_class %}{% endblock %}" {% block body_attrs %}{% endblock %}>
 {% if not kiosk_lock %}
 <header class="suitebar">
   <a class="suitebrand" href="/" aria-label="Production Suite home">
@@ -27,6 +27,9 @@
 <div class="mode">{% block content %}{% endblock %}</div>
 <div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>
 <script src="{% static 'suite/rev.js' %}" data-rev="{{ suite_revision }}" defer></script>
+{% if thin %}<div id="modal" class="modal" hidden role="dialog" aria-modal="true"></div>
+<script src="{% static 'vendor/htmx/htmx.min.js' %}"></script>
+<script src="{% static 'suite/thin.js' %}"></script>{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

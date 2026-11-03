@@ -1,64 +1,69 @@
 """Pictures on maintenance tickets: what is wrong, taken with the tablet or phone camera.
 
-The screen shrinks each picture to at most 1600 px and re-saves it as JPEG before sending (a few hundred KB),
-so the server only has to check it really is a picture of sensible size. Pictures are kept in the records
+The screen sends the picture as the camera took it. The server checks it is a picture, turns it upright, drops
+the camera's metadata and keeps a 1600 px JPEG (a few hundred KB) plus a small thumbnail for lists. Pictures are kept in the records
 database with the ticket, so backups include them; closed tickets' pictures are removed after the days set in
 Admin > Rules (photoDays, 0 = keep).
 """
-import struct
+import io
 from datetime import timedelta
 
-MAX_BYTES = 3 * 1024 * 1024
+MAX_BYTES = 25 * 1024 * 1024          # a picture as the tablet's camera took it
 MAX_PER_TICKET = 6
-MAX_SIDE = 8000
+MAX_SIDE = 1600                        # the copy that is kept
+THUMB_SIDE = 320                       # the copy shown in lists
+MAX_PIXELS = 60_000_000                # refuse "decompression bomb" files before decoding them
 
 
 class PhotoError(Exception):
     pass
 
 
-def _jpeg_size(b):
-    i = 2
-    while i + 9 < len(b):
-        if b[i] != 0xFF:
-            i += 1
-            continue
-        marker = b[i + 1]
-        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
-            i += 2
-            continue
-        seg = struct.unpack(">H", b[i + 2:i + 4])[0]
-        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-            h, w = struct.unpack(">HH", b[i + 5:i + 9])
-            return w, h
-        i += 2 + seg
-    return None
+def process(data):
+    """The kept copy and a thumbnail of an uploaded picture, both JPEG, turned upright per the camera's EXIF
+    orientation, with the camera's metadata (GPS position, serial numbers) left out.
+    Returns (jpeg, thumb_jpeg, width, height)."""
+    import warnings
 
-
-def check(data):
-    """(content type, width, height) for a JPEG or PNG picture; PhotoError for anything else."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
     if not data:
         raise PhotoError("The picture is empty.")
     if len(data) > MAX_BYTES:
-        raise PhotoError("That picture is too large (over 3 MB).")
-    if data[:3] == b"\xff\xd8\xff":
-        size, ctype = _jpeg_size(data), "image/jpeg"
-    elif data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR":
-        size, ctype = struct.unpack(">II", data[16:24]), "image/png"
-    else:
-        raise PhotoError("Send a JPEG or PNG picture.")
-    if not size or not (0 < size[0] <= MAX_SIDE and 0 < size[1] <= MAX_SIDE):
-        raise PhotoError("That picture couldn't be read.")
-    return ctype, size[0], size[1]
+        raise PhotoError("That picture is too large (over 25 MB).")
+    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            im = Image.open(io.BytesIO(data))
+            if im.format not in ("JPEG", "PNG", "WEBP", "HEIF", "MPO", "GIF", "BMP", "TIFF"):
+                raise PhotoError("Send a picture (JPEG, PNG or WebP).")
+            im.load()
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise PhotoError("That file isn't a picture the server can read.")
+    im = ImageOps.exif_transpose(im)
+    if im.mode not in ("RGB", "L"):
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        im = im.convert("RGBA")
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+    im = im.convert("RGB")
+    im.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=82, optimize=True)
+    th = im.copy()
+    th.thumbnail((THUMB_SIDE, THUMB_SIDE), Image.LANCZOS)
+    tout = io.BytesIO()
+    th.save(tout, "JPEG", quality=75, optimize=True)
+    return out.getvalue(), tout.getvalue(), im.width, im.height
 
 
 def add(ticket, data, by, when):
     from .models import TicketPhoto
-    ctype, w, h = check(data)
     if ticket.photos.count() >= MAX_PER_TICKET:
         raise PhotoError(f"A ticket can have up to {MAX_PER_TICKET} pictures.")
-    return TicketPhoto.objects.create(ticket=ticket, t=when, by=str(by)[:120], content_type=ctype, data=bytes(data),
-                                      size=len(data), width=w, height=h)
+    jpeg, thumb, w, h = process(data)
+    return TicketPhoto.objects.create(ticket=ticket, t=when, by=str(by)[:120], content_type="image/jpeg", data=jpeg, thumb=thumb,
+                                      size=len(jpeg), width=w, height=h)
 
 
 def purge(now, days):

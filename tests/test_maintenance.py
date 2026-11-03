@@ -1,6 +1,6 @@
 """Maintenance tickets with pictures of what is wrong, and the errors machines report during downtime."""
+import io
 import json
-import struct
 from datetime import timedelta
 from unittest import mock
 
@@ -19,20 +19,52 @@ from plant.util import now
 from .test_machinedata import fake_table
 from .test_suite import no_planned_time
 
-JPEG = (b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-        b"\xff\xc0\x00\x11\x08\x00\x10\x00\x20\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01" + b"\x00" * 40 + b"\xff\xd9")
-PNG = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 40, 30) + b"\x08\x02\x00\x00\x00" + b"\x00" * 20
+def picture(w=2000, h=1500, fmt="JPEG", orientation=None, color=(200, 120, 40)):
+    """A real picture, as a tablet camera would send it."""
+    from PIL import Image
+    im = Image.new("RGB", (w, h), color)
+    im.paste((20, 20, 20), (0, 0, w // 4, h // 4))   # dark corner, top-left as taken
+    out = io.BytesIO()
+    kw = {}
+    if orientation:
+        ex = Image.Exif()
+        ex[0x0112] = orientation              # EXIF orientation
+        ex[0x8825] = {2: (40.0, 26.0, 1.0)}  # a GPS position the camera added
+        kw["exif"] = ex.tobytes()
+    im.save(out, fmt, **kw)
+    return out.getvalue()
+
+
+JPEG = picture()
 
 
 class PhotoCheckTests(TestCase):
+    def test_kept_copy_is_upright_small_and_has_no_camera_metadata(self):
+        from PIL import Image
+        data, thumb, w, h = photos.process(picture(4000, 3000, orientation=6))   # taken sideways
+        self.assertEqual((w, h), (1200, 1600))                                  # turned upright, 1600 px long side
+        im = Image.open(io.BytesIO(data))
+        self.assertEqual((im.format, im.size), ("JPEG", (1200, 1600)))
+        self.assertFalse(im.getexif())                                         # no GPS, no orientation left
+        self.assertLessEqual(max(Image.open(io.BytesIO(thumb)).size), photos.THUMB_SIDE)
+        self.assertLess(len(data), 400_000)
+
+    def test_png_with_transparency_and_small_pictures(self):
+        from PIL import Image
+        im = Image.new("RGBA", (300, 200), (0, 0, 0, 0))
+        out = io.BytesIO()
+        im.save(out, "PNG")
+        data, _, w, h = photos.process(out.getvalue())
+        self.assertEqual((w, h), (300, 200))   # never enlarged
+        self.assertEqual(Image.open(io.BytesIO(data)).getpixel((5, 5)), (255, 255, 255))
+
     def test_pictures_only(self):
-        self.assertEqual(photos.check(JPEG), ("image/jpeg", 32, 16))
-        self.assertEqual(photos.check(PNG), ("image/png", 40, 30))
-        for bad in (b"", b"<html><script>alert(1)</script>", b"GIF89a....", b"\xff\xd8\xff" + b"\x00" * 10):
+        for bad in (b"", b"<html><script>alert(1)</script>", b"\xff\xd8\xff" + b"\x00" * 10, b"%PDF-1.4 ..."):
             with self.assertRaises(photos.PhotoError):
-                photos.check(bad)
-        with self.assertRaises(photos.PhotoError):
-            photos.check(JPEG + b"\x00" * photos.MAX_BYTES)
+                photos.process(bad)
+        with mock.patch.object(photos, "MAX_PIXELS", 1000):
+            with self.assertRaises(photos.PhotoError):   # a "decompression bomb" is refused before it is decoded
+                photos.process(picture(200, 200))
 
 
 class TicketPhotoTests(TestCase):
@@ -67,7 +99,9 @@ class TicketPhotoTests(TestCase):
         self.assertEqual(got.status_code, 200)
         self.assertEqual(got["Content-Type"], "image/jpeg")
         self.assertEqual(got["X-Content-Type-Options"], "nosniff")
-        self.assertEqual(got.content, JPEG)
+        self.assertEqual(got.content[:3], b"\xff\xd8\xff")
+        thumb = Client().get(f"/api/hmi/ticket-photo/{t['photos'][0]['id']}?size=thumb")
+        self.assertLess(len(thumb.content), len(got.content))
         self.assertEqual(Client().get("/api/hmi/ticket-photo/99999").status_code, 404)
         for _ in range(photos.MAX_PER_TICKET - 1):
             self.assertTrue(self.upload(tid).json()["ok"])

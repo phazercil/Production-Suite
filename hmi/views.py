@@ -240,7 +240,7 @@ def ticket_photo_upload(request):
     if not f:
         return JsonResponse({"ok": False, "error": "Take or choose a picture."}, status=400)
     if f.size > photos.MAX_BYTES:
-        return JsonResponse({"ok": False, "error": "That picture is too large (over 3 MB)."}, status=400)
+        return JsonResponse({"ok": False, "error": "That picture is too large (over 25 MB)."}, status=400)
     with transaction.atomic():
         t = Ticket.objects.select_for_update().filter(pk=to_int(request.POST.get("ticket"), "ticket")).first()
         if not t:
@@ -260,10 +260,12 @@ def ticket_photo(request, pk):
     from django.http import HttpResponse, HttpResponseNotFound
 
     from .models import TicketPhoto
-    ph = TicketPhoto.objects.filter(pk=pk).only("data", "content_type").first()
+    thumb = request.GET.get("size") == "thumb"
+    ph = TicketPhoto.objects.filter(pk=pk).only("thumb" if thumb else "data", "content_type").first()
     if not ph:
         return HttpResponseNotFound("No such picture.")
-    r = HttpResponse(bytes(ph.data), content_type=ph.content_type if ph.content_type in ("image/jpeg", "image/png") else "application/octet-stream")
+    data = bytes(ph.thumb) if thumb and ph.thumb else bytes(ph.data)
+    r = HttpResponse(data, content_type=ph.content_type if ph.content_type in ("image/jpeg", "image/png") else "application/octet-stream")
     r["Cache-Control"] = "private, max-age=86400"
     r["X-Content-Type-Options"] = "nosniff"
     r["Content-Disposition"] = f'inline; filename="ticket-photo-{ph.pk}.{"png" if ph.content_type == "image/png" else "jpg"}"'

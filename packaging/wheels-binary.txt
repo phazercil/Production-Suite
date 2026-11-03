@@ -1,0 +1,3 @@
+# Compiled packages the suite needs, one wheel per Python version and system. Fetched by
+# .github/workflows/vendor-wheels.yml into packaging/wheels (the build server has PyPI; plant servers don't).
+pillow==12.3.0

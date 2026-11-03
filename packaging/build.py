@@ -55,7 +55,8 @@ def main():
         t.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, t)
     shutil.copytree(PKG / "installer", stage / "installer")
-    shutil.copytree(PKG / "wheels", stage / "wheels")
+    # compiled wheels: Windows ones in the Windows package, Linux ones in the Linux package
+    shutil.copytree(PKG / "wheels", stage / "wheels", ignore=lambda d, names: [n for n in names if "manylinux" in n])
     for f in ("Setup.exe", "README-INSTALL.txt", "Install Production Suite.bat", "Uninstall Production Suite.bat"):
         shutil.copy2(PKG / f, stage / f)
     if a.sign:
@@ -93,7 +94,9 @@ def main():
     with tarfile.open(lin, "w:gz") as t:
         top = "ProductionSuite-Linux"
         t.add(stage / "app", f"{top}/app", filter=mode)
-        t.add(PKG / "wheels", f"{top}/wheels", filter=mode)
+        for w in sorted((PKG / "wheels").glob("*.whl")):
+            if "win_amd64" not in w.name:
+                t.add(w, f"{top}/wheels/{w.name}", filter=mode)
         for f in ("install.sh", "uninstall.sh", "README-LINUX.txt"):
             t.add(PKG / "linux" / f, f"{top}/{f}", filter=mode)
         t.add(PKG / "linux" / "templates", f"{top}/templates", filter=mode)

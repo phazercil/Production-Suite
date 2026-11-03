@@ -1,0 +1,16 @@
+<div class="live" id="live-{{ c.name|slugify }}" hx-get="/data/r/live?line={{ c.name|urlencode }}" hx-trigger="suite:changed from:body">
+  <div class="nm"><i style="background:{{ c.color }}"></i>{{ c.name }}<span style="flex:1"></span><span class="pill {{ c.pill.0 }}">{{ c.pill.1|upper }}</span></div>
+  <div class="speed"><b>{% if c.on %}{{ c.speed }}{% else %}—{% endif %}</b><span>pleats / min · rated {{ c.rated }}</span></div>
+  {% if c.mo %}
+    <div class="mo">MO <b>{{ c.mo.number }}</b> · {{ c.mo.item }} · {{ c.mo.good|num }} of {{ c.mo.qty|num }} good</div>
+    <div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ c.mo.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ c.mo.pct|floatformat:1 }}%"></i></div>
+  {% else %}
+    <div class="mo">{% if c.changeover %}Changing over{% else %}No MO running{% endif %}{% if c.next %} · next <b>{{ c.next.number }}</b> {{ c.next.item }}{% endif %}</div>
+  {% endif %}
+  <div class="stats">
+    <div><span>Shift count</span><b>{% if c.on %}{{ c.count|num }}{% else %}—{% endif %}</b></div>
+    <div class="{% if c.uptimeBad %}bad{% endif %}"><span>Uptime</span><b>{% if c.on %}{{ c.uptime }}%{% else %}—{% endif %}</b></div>
+    <div class="{% if c.downBad %}bad{% endif %}"><span>Down</span><b>{% if c.on %}{{ c.down }} min{% else %}—{% endif %}</b></div>
+  </div>
+  <div class="who">{% if c.on %}{{ c.who }} · since {{ c.since|clock }}{% if c.noData %} · <span style="color:var(--bad)">No machine data</span>{% endif %}{% else %}No shift running{% endif %}</div>
+</div>
