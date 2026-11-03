@@ -1,4 +1,4 @@
-# Downloads the compiled wheels listed in packaging/wheels-binary.txt for every Python the installers can use
+# Downloads htmx (npm) and the compiled wheels listed in packaging/wheels-binary.txt for every Python the installers can use
 # (Windows: 3.10 to 3.14, 64-bit; Linux EL9: 3.11 and 3.12) and keeps them as a build artifact to commit into
 # packaging/wheels. Runs when that list changes, or by hand.
 name: Vendor wheels
@@ -30,6 +30,10 @@ jobs:
             pip download $reqs --only-binary :all: --no-deps --platform manylinux_2_28_x86_64 --python-version $v --implementation cp -d out
           done
           ls -la out
+          # htmx: the small script the thin-client screens use to swap in server-rendered HTML
+          mkdir -p hx && (cd hx && npm pack htmx.org@2.0.4 && tar xzf htmx.org-2.0.4.tgz)
+          cp hx/package/dist/htmx.min.js out/htmx-2.0.4.min.js
+          cp hx/package/LICENSE out/htmx-LICENSE.txt
           sha256sum out/* > out/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
