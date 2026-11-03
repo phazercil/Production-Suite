@@ -5,7 +5,7 @@ set -euo pipefail
 pass() { echo "PASS: $*"; }
 die()  { echo "FAIL: $*"; tail -60 /var/log/production-suite-install.log 2>/dev/null || true; journalctl -u production-suite-web -u httpd --no-pager -n 60 2>/dev/null || true; exit 1; }
 
-dnf -y -q install mariadb-server tar procps-ng iproute >/dev/null   # curl-minimal is already there
+dnf -y -q install mariadb-server tar procps-ng iproute python3 >/dev/null   # curl-minimal is already there
 systemctl enable --now mariadb
 SQL="$(command -v mariadb || command -v mysql)"
 "$SQL" -e "CREATE DATABASE production_suite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -18,8 +18,25 @@ cat > /tmp/answers.json <<'JSON'
  "db_user": "suite", "db_password": "Ci-Pass-12345", "use_asset_db": "n", "use_s2k_db": "n", "web_port": "80",
  "time_zone": "America/New_York", "scheduler_lead": "y", "station_key": "", "lead_name": "CI Lead", "lead_pin": "864213", "demo": "n"}
 JSON
-./install.sh --answers /tmp/answers.json || die "install.sh failed"
-pass "install.sh finished"
+# install the way a server does from GitHub: get.sh finds the release, downloads the package, checks its
+# checksum and runs install.sh. A small local stand-in for api.github.com serves the release this package is in.
+F=/tmp/fakegh/repos/phazercil/Production-Suite/releases; mkdir -p "$F/assets" "$F/tags"
+cp /src/dist/ProductionSuite-Linux.tar.gz "$F/assets/42"
+sum=$(sha256sum "$F/assets/42" | awk '{print $1}')
+printf '{"tag_name":"v0.0.0-ci","assets":[{"id":42,"name":"ProductionSuite-Linux.tar.gz","digest":"sha256:%s"}]}' "$sum" > "$F/latest"
+cp "$F/latest" "$F/tags/v0.0.0-ci"
+(cd /tmp/fakegh && exec python3 -m http.server 8099 --bind 127.0.0.1 >/dev/null 2>&1) &
+sleep 2
+cp "$F/assets/42" /tmp/good.tgz; echo tampered >> "$F/assets/42"
+PS_GITHUB_API=http://127.0.0.1:8099 GITHUB_TOKEN=ci-token bash /src/packaging/linux/get.sh --answers /tmp/answers.json \
+    > /tmp/get-bad.log 2>&1 && die "get.sh installed a package that doesn't match its checksum"
+grep -q "doesn't match its checksum" /tmp/get-bad.log || die "get.sh with a bad download: $(tail -5 /tmp/get-bad.log)"
+pass "get.sh refuses a download that doesn't match its checksum"
+cp /tmp/good.tgz "$F/assets/42"
+PS_GITHUB_API=http://127.0.0.1:8099 GITHUB_TOKEN=ci-token bash /src/packaging/linux/get.sh --version v0.0.0-ci --answers /tmp/answers.json \
+    || die "get.sh (install from the release) failed"
+[ -x /var/lib/production-suite-installer/v0.0.0-ci/ProductionSuite-Linux/install.sh ] || die "get.sh didn't keep the package"
+pass "get.sh downloaded the release, checked it and installed the suite"
 
 for u in production-suite-web production-suite-ticker httpd production-suite-updater.path production-suite-network.path; do
     systemctl is-active --quiet "$u" || die "$u is not running"
