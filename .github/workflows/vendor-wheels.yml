@@ -1,6 +1,7 @@
 # Downloads htmx (npm) and the compiled wheels listed in packaging/wheels-binary.txt for every Python the installers can use
 # (Windows: 3.10 to 3.14, 64-bit; Linux EL9: 3.11 and 3.12) and keeps them as a build artifact to commit into
-# packaging/wheels. Runs when that list changes, or by hand.
+# packaging/wheels (htmx into static/vendor/htmx), committing them to the branch. Runs when that list changes,
+# or by hand.
 name: Vendor wheels
 on:
   workflow_dispatch:
@@ -9,7 +10,7 @@ on:
       - packaging/wheels-binary.txt
       - .github/workflows/vendor-wheels.yml
 permissions:
-  contents: read
+  contents: write   # commits the downloaded files back to the branch that asked for them
 jobs:
   download:
     runs-on: ubuntu-latest
@@ -35,7 +36,18 @@ jobs:
           cp hx/package/dist/htmx.min.js out/htmx-2.0.4.min.js
           cp hx/package/LICENSE out/htmx-LICENSE.txt
           sha256sum out/* > out/SHA256SUMS
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binary-wheels
-          path: out/
+      - name: Commit them to this branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -e
+          mkdir -p static/vendor/htmx
+          mv out/htmx-2.0.4.min.js static/vendor/htmx/htmx.min.js
+          mv out/htmx-LICENSE.txt static/vendor/htmx/LICENSE.txt
+          cp out/*.whl packaging/wheels/
+          (cd packaging/wheels && sha256sum pillow-*.whl > ../wheels-binary.sha256)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add static/vendor/htmx packaging/wheels packaging/wheels-binary.sha256
+          if git diff --cached --quiet; then echo "Nothing new."; exit 0; fi
+          git commit -m "Vendor compiled wheels and htmx (from packaging/wheels-binary.txt)"
+          git push origin HEAD:${GITHUB_REF_NAME}
