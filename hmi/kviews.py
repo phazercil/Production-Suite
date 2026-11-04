@@ -201,7 +201,7 @@ def view_data(s, page, request):
     if page == "downtime":
         return {"P": kscreen.downtime_page(s)}
     if page == "maintenance":
-        return {"P": kscreen.maintenance_page(s)}
+        return {"P": kscreen.maintenance_page(s, page_option(request, "show", {"open", "done", "all"}, "open"))}
     if page == "status":
         return {"P": kscreen.status_page(s)}
     if page == "end-of-shift":
@@ -372,6 +372,17 @@ def m_qc_disapprove(request, s):
     return modal_response(request, "hmi/k/m_qc_disapprove.html", **ctx_for(s, q=q))
 
 
+@modal("ticketDone")
+def m_ticket_done(request, s):
+    if not s.can("tickets.work"):
+        return login_needed(request, s, {"perm": "tickets.work"})
+    from .models import Ticket
+    t = Ticket.objects.filter(pk=request.GET.get("id")).first()
+    if not t or t.status == "Closed":
+        return thin.refused("That request is already completed.")
+    return modal_response(request, "hmi/k/m_ticket_done.html", **ctx_for(s, t=t))
+
+
 @modal("rolls", login=True)
 def m_rolls(request, s):
     if not s.shift_on:
@@ -468,11 +479,39 @@ def m_paycom_fields(request, s):
                                                                           columns=["code", "name", "status", "active", "department", "position", "badge"]))
 
 
+@modal("paycomPositions")
+def m_paycom_positions(request, s):
+    """Pick the Paycom position titles whose people are imported to the Team list."""
+    from . import kadmin
+    r = kadmin.run(request, s, "paycomPositions", {})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") or r.get("login") else thin.refused(r["error"])
+    P = s.settings.get("paycom") or {}
+    cur = [x.strip().lower() for x in str(P.get("position") or "").split(",") if x.strip()]
+    exact = bool(P.get("positionExact"))
+    rows = [{"name": n, "n": c, "on": bool(cur) and ((n.lower() in cur) if exact else any(x in n.lower() for x in cur))} for n, c in r["data"]]
+    return modal_response(request, "hmi/k/m_paycom_positions.html", **ctx_for(s, rows=rows, dept=P.get("dept") or ""))
+
+
 @modal("addPerson")
 def m_add_person(request, s):
     if not s.can("team.manage"):
         return login_needed(request, s, {"perm": "team.manage"}, "addPerson")
     return modal_response(request, "hmi/k/m_add_person.html", **ctx_for(s))
+
+
+@modal("editPerson")
+def m_edit_person(request, s):
+    if not s.can("team.manage"):
+        return login_needed(request, s, {"perm": "team.manage"})
+    u = Person.objects.filter(pk=request.GET.get("id")).prefetch_related("trained").first()
+    if not u:
+        return thin.refused("That person is no longer on the list.")
+    if u.role == "admin" and not s.can("permissions.manage"):
+        return thin.refused("Only someone who manages permissions can change an Admin's login.")
+    tr = {m.name for m in u.trained.all()}
+    return modal_response(request, "hmi/k/m_edit_person.html",
+                          **ctx_for(s, u=u, lines=[(m.name, m.name in tr) for m in s.active_lines], you=bool(s.me and u.pk == s.me.pk)))
 
 
 @modal("confirm")
@@ -641,11 +680,14 @@ ACTIONS["rollAdd"] = simple("rollAdd", toast=False, then=lambda request, s, r: m
 ACTIONS["noteAdd"] = simple("noteAdd", toast=False, then=lambda request, s, r: m_notes(request, s))
 ACTIONS["overrideSet"] = simple("overrideSet", close=True)
 ACTIONS["overrideClear"] = simple("overrideClear", toast=False, close=True)
-ACTIONS["ticketStatus"] = simple("ticketStatus", toast=False)
+ACTIONS["ticketStatus"] = simple("ticketStatus")
+ACTIONS["ticketDone"] = simple("ticketStatus", close=True)
+ACTIONS["ticketNote"] = simple("ticketNote")
 ACTIONS["ackNotices"] = simple("ackNotices", toast=False)
 ACTIONS["settingSet"] = simple("settingSet", toast=False)
 ACTIONS["userSet"] = simple("userSet", toast=False)
 ACTIONS["paycomImport"] = simple("paycomImport")
+ACTIONS["paycomPositionsSet"] = simple("paycomPositionsSet", close=True)
 
 
 @action("userAdd")
@@ -654,6 +696,20 @@ def a_user_add(request, s, p):
     if not r["ok"]:
         return login_needed(request, s, r) if r.get("admin") or r.get("login") else err_in_modal(r["error"])
     return thin.done(toast=r.get("msg") or "Added", close=True)
+
+
+@action("personSave")
+def a_person_save(request, s, p):
+    q = {"id": p.get("id"), "name": p.get("name", ""), "role": p.get("role", ""), "pin": p.get("pin", ""),
+         "trained": (p.get("trained") or []) if p.get("hasTrained") else None}
+    if p.get("hasActive"):
+        q["active"] = bool(p.get("active"))
+    if not p.get("role"):
+        q.pop("role")
+    r = run(request, s, "personSave", q)
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") or r.get("login") else err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg"), close=True)
 
 
 @action("train")

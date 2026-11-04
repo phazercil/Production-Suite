@@ -530,20 +530,50 @@ def downtime_page(s):
     rows = downtime_rows(s, mine)
     for i, x in enumerate(rows):
         x["letter"] = chr(65 + i % 26)
-    return {"rows": rows, "older": downtime_rows(s, older), "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
+    stopped_mins = round((s.t - sh.stop_start).total_seconds() / 60) if sh and sh.stop_start else 0
+    head = None
+    if sh:
+        st = shift_stats(sh)
+        logged = sum(d.minutes or 0 for d in mine)
+        head = {"run": st["run"], "down": logged + stopped_mins, "stops": len(mine) + (1 if sh.stop_start else 0), "uptime": st["uptime"],
+                "since": sh.start}
+    return {"head": head, "rows": rows, "older": downtime_rows(s, older), "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
             "stopped": sh.stop_start if sh else None, "stoppedMins": round((s.t - sh.stop_start).total_seconds() / 60) if sh and sh.stop_start else 0,
             "errorsNow": s.current_errors() if sh and sh.stop_start else []}
 
 
-def maintenance_page(s):
+def maintenance_page(s, show="open"):
+    """Maintenance requests with their repair notes: open and in progress, completed, or all of the last 30 days."""
     from django.db.models import Q
 
-    from .models import TicketPhoto
-    tickets = list(Ticket.objects.filter(Q(t__gte=s.t - timedelta(days=3)) | ~Q(status="Closed")).order_by("-t"))
-    pics = {}
+    from .models import TicketNote, TicketPhoto
+    month = s.t - timedelta(days=30)
+    qs = Ticket.objects.all()
+    if show == "open":
+        qs = qs.exclude(status="Closed")
+    elif show == "done":
+        qs = qs.filter(status="Closed", updated__gte=month)
+    else:
+        qs = qs.filter(Q(t__gte=month) | ~Q(status="Closed"))
+    tickets = list(qs.order_by("-t")[:200])
+    pics, notes = {}, {}
     for p in TicketPhoto.objects.filter(ticket__in=tickets).values("id", "ticket_id"):
         pics.setdefault(p["ticket_id"], []).append(p["id"])
-    return {"tickets": [{"t": t, "photos": pics.get(t.id, [])} for t in tickets], "limit": PHOTO_LIMIT}
+    for n in TicketNote.objects.filter(ticket__in=tickets):
+        notes.setdefault(n.ticket_id, []).append(n)
+    week = s.t - timedelta(days=7)
+    rows = []
+    for t in tickets:
+        took = round((t.updated - t.t).total_seconds() / 60) if t.status == "Closed" and t.updated else None
+        rows.append({"t": t, "photos": pics.get(t.id, []), "notes": notes.get(t.id, []), "took": took,
+                     "age": round((s.t - t.t).total_seconds() / 60)})
+    if show == "open":
+        order = {"High": 0, "Medium": 1, "Low": 2}
+        rows.sort(key=lambda r: (order.get(r["t"].priority, 1), r["t"].t))
+    return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
+            "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status="In progress").count(),
+                       "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
+            "canWork": s.can("tickets.work")}
 
 
 def status_page(s):

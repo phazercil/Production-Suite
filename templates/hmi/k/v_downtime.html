@@ -1,4 +1,9 @@
 <div class="row"><h1 class="h1 grow">Downtime · {{ station }}</h1><span class="sub">Stops of {{ S.rules.minDown }} minutes or more are logged automatically; breaks, lunch and the first {{ S.rules.startGrace|default:0 }} minutes of a shift are not downtime. A reason is required once stops without one add up to {{ S.rules.reasonAfter|default:0 }} minutes.{% if S.can_override %} As maintenance or a shift lead you can type your own reason or change one already entered.{% endif %}</span></div>
+{% if P.head %}<div class="grid3 downhead">
+  <div class="panel stat"><span>Shift running time</span><b class="num">{{ P.head.run|dur }}</b><small>machine running since {{ P.head.since|clock }}</small></div>
+  <div class="panel stat {% if P.head.down %}bad{% endif %}"><span>Overall shift downtime</span><b class="num">{{ P.head.down|dur }}</b><small>{{ P.head.stops }} stop{{ P.head.stops|pluralize }}{% if P.stopped %}, one still going{% endif %}</small></div>
+  <div class="panel stat"><span>Uptime</span><b class="num">{{ P.head.uptime }}%</b><small>breaks and lunch left out</small></div>
+</div>{% endif %}
 {% if P.stopped %}<div class="panel" style="border-color:var(--bad)"><b>Line stopped since {{ P.stopped|clock }}</b> · {{ P.stoppedMins }} min so far. It will appear below when the line restarts.</div>{% endif %}
 {% if P.errorsNow %}<div class="panel" style="border-color:var(--warn)"><b>The machine is reporting:</b>{% include "hmi/k/_err_chips.html" with errs=P.errorsNow max="6" max_n=6 neg_max=-6 %}</div>{% endif %}
 <div class="tblwrap"><table class="xl"><thead><tr><th></th><th>Time</th><th>Min</th><th>Line</th><th>MO</th><th>Machine errors</th><th>Reason</th><th>Notes</th></tr></thead><tbody>

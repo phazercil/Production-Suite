@@ -144,7 +144,7 @@ class KioskTests(TestCase):
         from plant.models import Person
         self.login_lead()
         lead = Person.objects.get(pin="9999")
-        self.assertContains(self.c.get("/kiosk/v/team"), 'aria-label="Name"')
+        self.assertContains(self.c.get(f"/kiosk/m/editPerson?id={lead.id}"), 'name="name"')
         self.do("userSet", id=lead.id, f="name", v="  Caleb   Smith ")
         self.assertEqual(Person.objects.get(pk=lead.pk).name, "Caleb Smith")
         r = self.do("userSet", id=lead.id, f="name", v="   ")

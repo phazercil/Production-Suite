@@ -278,6 +278,8 @@ table.xl select,table.xl input{min-height:36px;padding:4px 6px;font-size:14px}
 .stat{display:flex;flex-direction:column;gap:2px}
 .stat b{font:600 26px var(--f-mono)}
 .stat span{font-size:13px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em}
+.stat small{font-size:12px;color:var(--ink-2)}
+.panel.stat.bad b{color:var(--bad)}
 .gpanels{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
 .gpanels iframe{width:100%;height:240px;border:0;border-radius:6px;background:#111}
 .linecard{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:start}
@@ -370,3 +372,24 @@ a.thsort{color:inherit;text-decoration:none;cursor:pointer}
 .rail .login.sup{margin-bottom:6px}
 .rail .login.sup.on{background:#B4412F;color:#fff;border-radius:10px}
 .rail .login.sup.on .who{color:#fff}
+.tickets{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
+@media (max-width:700px){.tickets{grid-template-columns:1fr}}
+.ticket{display:flex;flex-direction:column;gap:10px;border-left:4px solid var(--warn)}
+.ticket.high{border-left-color:var(--bad)}
+.ticket.done{border-left-color:var(--ok)}
+.ticket .th{display:flex;align-items:flex-start;gap:10px;font-size:17px}
+.ticket .th .pill{margin-left:6px;vertical-align:middle}
+.ticket .tm{font-size:13px;color:var(--ink-2)}
+.ticket .tn{margin:0;font-size:15px;white-space:pre-wrap;overflow-wrap:anywhere}
+.repairs{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--rule);padding-top:10px}
+.rn{background:var(--ground);border-radius:6px;padding:7px 10px;display:flex;flex-direction:column;gap:2px}
+.rn .m{font-size:12px;color:var(--ink-2)}
+.rn .m b{color:var(--ink)}
+.rn .x{font-size:14px;overflow-wrap:anywhere}
+.rn.closed{border-left:3px solid var(--ok)}
+.rn.started{border-left:3px solid var(--warn)}
+.rnadd{display:flex;gap:8px;align-items:flex-end}
+.rnadd textarea{min-height:44px;flex:1}
+.trainpick{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:4px}
+.tick{color:var(--ok);font-weight:700;font-size:18px}
+.poslist{display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow:auto;margin-top:8px}.poslist .chk{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:var(--ground)}

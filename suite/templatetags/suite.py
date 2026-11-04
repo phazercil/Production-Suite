@@ -52,6 +52,18 @@ def hm(minutes):
 
 
 @register.filter
+def dur(minutes):
+    """130 -> 2 h 10 min, 45 -> 45 min"""
+    try:
+        m = max(0, int(round(float(minutes))))
+    except (TypeError, ValueError):
+        return ""
+    if m < 60:
+        return f"{m} min"
+    return f"{m // 60} h {m % 60:02d} min" if m % 60 else f"{m // 60} h"
+
+
+@register.filter
 def day(dt):
     """11/3/2026 (plant date)."""
     if not dt:
