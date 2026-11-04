@@ -61,8 +61,12 @@ def page(request):
     if html is None:
         html = PAGE.read_text(encoding="utf-8")
         _page_cache["html"] = html
+    from .sync import merge
     plan = LaborPlan.load()
-    boot = {"version": plan.version, "data": plan.data if plan.version else None, "user": me.name,
+    data, notes = merge(plan.data) if plan.version else (None, [])
+    # a plant with no plan yet starts from its own lines and shifts
+    starter = None if plan.version else merge({"lines": [], "schedules": [], "slotAssignments": {}})[0]
+    boot = {"version": plan.version, "data": data, "starter": starter, "syncNotes": notes, "user": me.name,
             "updatedBy": plan.updated_by, "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
             "timeoutMin": PlantSettings.load().config["rules"].get("adminTimeout", 10)}
     out = (html.replace("__LABOR_CSS__", static("labor/labor.css"))
@@ -94,8 +98,9 @@ def state(request):
     me, denied = _need_lead(request)
     if denied:
         return denied
+    from .sync import merge
     plan = LaborPlan.load()
-    return JsonResponse({"ok": True, "version": plan.version, "data": plan.data if plan.version else None,
+    return JsonResponse({"ok": True, "version": plan.version, "data": merge(plan.data)[0] if plan.version else None,
                          "updatedBy": plan.updated_by, "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None})
 
 
@@ -117,7 +122,9 @@ def save(request):
     if denied:
         return denied
     p = body(request)
+    from .sync import merge, save_line_shifts
     data = validate_plan(p.get("data"))
+    sent = json.dumps({k: v for k, v in data.items() if k != "suite"}, sort_keys=True, default=str)
     base = to_int(p.get("version"), "plan version")
     force = bool(p.get("force"))
     with transaction.atomic():
@@ -127,6 +134,11 @@ def save(request):
             return JsonResponse({"ok": False, "conflict": True, "version": plan.version, "updatedBy": plan.updated_by,
                                  "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
                                  "error": f"{plan.updated_by or 'Someone'} changed the labor plan on another screen."}, status=409)
+        for what in save_line_shifts(data):   # shifts turned on/off for a line here are the machine's shifts too
+            from hmi.engine import Ctx, audit
+            audit(Ctx(user=me), f"Labor Budget: {what}")
+        data, _ = merge(data)   # lines, speeds, shifts and the work week always come from the suite
+        changed = json.dumps({k: v for k, v in data.items() if k != "suite"}, sort_keys=True, default=str) != sent
         plan.data, plan.version = data, plan.version + 1
         plan.updated_by, plan.updated_at = me.name[:120], timezone.now()
         plan.save()
@@ -135,7 +147,7 @@ def save(request):
         if old:
             LaborPlanVersion.objects.filter(id__in=old).delete()
     PlantSettings.bump()  # the Scheduler uses the plan: let its screens refresh
-    return JsonResponse({"ok": True, "version": plan.version, "updatedAt": plan.updated_at.isoformat()})
+    return JsonResponse({"ok": True, "version": plan.version, "updatedAt": plan.updated_at.isoformat(), "suiteChanged": changed})
 
 
 @json_api
@@ -159,9 +171,10 @@ def restore(request):
     old = LaborPlanVersion.objects.filter(pk=vid).first()
     if not old:
         raise BadRequest("That saved version no longer exists.")
+    from .sync import merge
     with transaction.atomic():
         plan = LaborPlan.objects.select_for_update().get(pk=1)
-        plan.data, plan.version = old.data, plan.version + 1
+        plan.data, plan.version = merge(old.data)[0], plan.version + 1
         plan.updated_by, plan.updated_at = f"{me.name} (restored v{old.version})"[:120], timezone.now()
         plan.save()
         LaborPlanVersion.objects.create(version=plan.version, data=old.data, saved_by=plan.updated_by, saved_at=plan.updated_at)

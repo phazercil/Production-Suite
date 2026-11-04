@@ -224,6 +224,15 @@ show on the kiosk's QC Log and in Reports, and land in `hmi_qc_auto` for Grafana
 
 ### Labor Budget and the Scheduler
 
+The Labor Budget is kept in step with the rest of the suite. Every machine in Scheduler › Lines & Shifts is a
+line in the plan: its name, stage, color and speed (filters per hour: rated PPM × 60 ÷ the pleat count of the
+parts queued on it, or the line's rate) come from the suite and can't be changed in the plan. Which shifts a line
+runs is one setting: change it in either place and both follow. The suite's shifts are the plan's shifts, each
+with its main crew schedule (times, work days and lunch from the shift's breaks named "lunch"), and the plan's
+normal work week is the days those shifts run. Crews, positions, wages, extra crew schedules, holidays and pay
+rules stay the plan's own, and lines it adds itself are labor-only (Packaging, Non Production, Backup). Crew
+names are offered from the Team list; a name that isn't on it is outlined in red.
+
 The Labor Budget (shift leads only) holds crews, wage rates and the work calendar. The Scheduler plans
 only on work days and staffed shifts from it (holidays and days off are shaded on the board) and shows
 labor cost per run to shift leads. Turn this off in Scheduler › Planner if you need to.

@@ -35,6 +35,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source", nargs="?", default=str(LABOR / "source" / "Labor_Calculator.html"))
     ap.add_argument("--tailwind", default="tailwindcss")
+    ap.add_argument("--no-css", action="store_true", help="keep labor.css as it is (the suite's additions use inline styles)")
     a = ap.parse_args()
     src = Path(a.source)
     html = src.read_text(encoding="utf-8")
@@ -42,6 +43,17 @@ def main():
         shutil.copyfile(src, LABOR / "source" / "Labor_Calculator.html")
 
     # ---- stylesheet (Tailwind v3, the same version the CDN script served)
+    if a.no_css:
+        pass
+    else:
+        build_css(src, a.tailwind)
+    html = build_page(html)
+    (LABOR / "page").mkdir(exist_ok=True)
+    (LABOR / "page" / "labor.html").write_text(html, encoding="utf-8")
+    print("Built labor/page/labor.html" + ("" if a.no_css else " and labor/static/labor/labor.css"))
+
+
+def build_css(src, tailwind):
     accents = ["amber", "blue", "indigo", "slate", "violet", "emerald", "rose", "sky", "teal", "orange", "red", "green"]
     safelist = [f"{p}-{c}-{n}" for c in accents for p, ns in (("bg", (50, 100)), ("text", (700, 800))) for n in ns]
     safelist += [f"sm:grid-cols-{n}" for n in range(1, 7)]
@@ -52,10 +64,11 @@ def main():
         inp = Path(tmp) / "in.css"
         inp.write_text("@tailwind base;\n@tailwind components;\n@tailwind utilities;\n")
         out = LABOR / "static" / "labor" / "labor.css"
-        subprocess.run([a.tailwind, "-c", str(cfg), "-i", str(inp), "-o", str(out), "--minify"], check=True,
+        subprocess.run([tailwind, "-c", str(cfg), "-i", str(inp), "-o", str(out), "--minify"], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # ---- page
+
+def build_page(html):
     html = patch(html, '<script src="https://cdn.tailwindcss.com"></script>',
                  '<link rel="stylesheet" href="__LABOR_CSS__">\n  <link rel="stylesheet" href="__SUITEBAR_CSS__">', "the Tailwind CDN script")
     html = re.sub(r'\s*<link href="https://fonts\.googleapis\.com/[^"]*" rel="stylesheet">', "", html, count=1)
@@ -101,9 +114,10 @@ def main():
     html = patch(html, '<script id="app-script">',
                  '<script type="application/json" id="labor-boot">__LABOR_BOOT__</script>\n'
                  '<script src="__LABOR_SYNC_JS__"></script>\n<script id="app-script">', "the app script")
-    (LABOR / "page").mkdir(exist_ok=True)
-    (LABOR / "page" / "labor.html").write_text(html, encoding="utf-8")
-    print("Built labor/page/labor.html and labor/static/labor/labor.css")
+    # in step with the rest of the suite: lines, speeds and shifts come from it (tools/labor_suite_sync.py)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import labor_suite_sync
+    return labor_suite_sync.apply(html, patch)
 
 
 if __name__ == "__main__":

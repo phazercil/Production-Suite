@@ -61,6 +61,18 @@
     });
   }
 
+  // ---- the Team list, offered for the names on crew slots
+  function peopleList(suite) {
+    var people = (suite && suite.people) || [];
+    var add = function () {
+      var dl = document.getElementById('suite-people') || document.createElement('datalist');
+      dl.id = 'suite-people'; dl.innerHTML = '';
+      people.forEach(function (n) { var o = document.createElement('option'); o.value = n; dl.appendChild(o); });
+      document.body.appendChild(dl);
+    };
+    if (document.body) add(); else document.addEventListener('DOMContentLoaded', add);
+  }
+
   // ---- saving
   function send(force) {
     if (S.inflight) return S.inflight.then(function () { return send(force); });
@@ -72,6 +84,10 @@
       S.inflight = null;
       if (r.ok) {
         S.version = r.version;
+        if (r.suiteChanged && !S.pending) {   // the server put the suite's lines / shifts back in: show them
+          toast('Lines, speeds and shifts come from the suite (Scheduler › Lines & Shifts). Showing the current ones.', 'info');
+          window.onbeforeunload = null; setTimeout(function () { location.reload(); }, 1500);
+        }
         clearBar('labor-conflict'); clearBar('labor-offline');
         status('saved', 'Saved ' + fmt(r.updatedAt));
         if (S.migrateKey) { try { localStorage.removeItem(S.migrateKey); } catch (e) {} S.migrateKey = null; }
@@ -105,6 +121,8 @@
     boot: function (oldKey) {
       var b = JSON.parse(document.getElementById('labor-boot').textContent || '{}');
       S.version = b.version || 0; S.user = b.user || '';
+      peopleList((b.data || b.starter || {}).suite);
+      (b.syncNotes || []).forEach(function (n) { setTimeout(function () { toast(n, 'info'); }, 800); });
       if (b.data) { status('saved', 'Saved ' + (b.updatedAt ? fmt(b.updatedAt) : '') + (b.updatedBy ? ' by ' + b.updatedBy : '')); return b.data; }
       // Nothing on the server yet: bring over a plan the stand-alone calculator saved in this browser, if any.
       try {
@@ -119,7 +137,7 @@
         }
       } catch (e) { }
       status('saved', 'Not saved yet');
-      return null;
+      return b.starter || null;
     },
     save: function (state) {
       S.pending = state;
