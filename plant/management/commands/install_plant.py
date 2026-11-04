@@ -128,6 +128,7 @@ class Command(BaseCommand):
             if not err:
                 return val
             self.stdout.write(self.style.WARNING(f"  {err}"))
+            self.stdout.flush()
             if self.unattended:
                 raise CommandError(f"Answer for {key!r} is not usable: {err}")
         raise CommandError("Too many tries.")
@@ -614,7 +615,7 @@ class Command(BaseCommand):
                 def pin_check(v):
                     return pin_problem(v, existing)
                 for _ in range(5):
-                    pin = self.ask("lead_pin", "Shift lead PIN (6-12 digits, typing is hidden)", "", secret=True, check=pin_check)
+                    pin = self.ask("lead_pin", "Shift lead PIN (6-12 digits, not a run like 123456 or 111111; typing is hidden)", "", secret=True, check=pin_check)
                     again = self.answers.get("lead_pin") if "lead_pin" in self.answers else self.ask("lead_pin_again", "Type the PIN again", "", secret=True)
                     if pin == again:
                         break

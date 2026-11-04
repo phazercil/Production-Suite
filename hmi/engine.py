@@ -911,7 +911,14 @@ def user_set(p, ctx):
     u = Person.objects.filter(pk=p.get("id")).first()
     need(u, "Person not found.")
     f, v = p.get("f"), p.get("v")
-    if f == "role":
+    if f == "name":
+        v = " ".join(str(v or "").split())
+        need(v, "Type a name.")
+        need(len(v) <= 120, "Names can be up to 120 characters.")
+        if v != u.name:
+            audit(ctx, f"Renamed {u.name} to {v}")
+            u.name = v
+    elif f == "role":
         need(v in ("operator", "maintenance", "admin"), "Unknown role.")
         need(not (u.pk == ctx.user.pk and v != "admin" and Person.objects.filter(role="admin", active=True).count() < 2),
              "You are the only shift lead. Make someone else a shift lead first.")

@@ -187,6 +187,7 @@ runuser -u "$USER_NAME" -- "$DIR/.venv/bin/python" -m pip install --no-index --n
 say "  Done."
 
 # ---------------------------------------------------------------- 5. settings, records database, first login
+# (unbuffered: its output goes through tee, and a message like "That PIN is too easy to guess" must show before the next question)
 step "5. Settings, records database and first shift lead"
 args=(manage.py install_plant --behind-apache)
 tmpans=""
@@ -195,7 +196,7 @@ if [ -n "$ANSWERS" ]; then
     args+=(--answers "$tmpans")
 fi
 set +e
-( cd "$DIR" && runuser -u "$USER_NAME" -- env HOME="$DIR" PYTHONUTF8=1 "$DIR/.venv/bin/python" "${args[@]}" ) 2>&1 | tee -a "$LOG"
+( cd "$DIR" && runuser -u "$USER_NAME" -- env HOME="$DIR" PYTHONUTF8=1 PYTHONUNBUFFERED=1 "$DIR/.venv/bin/python" "${args[@]}" ) 2>&1 | tee -a "$LOG"
 code=${PIPESTATUS[0]}
 set -e
 [ -n "$tmpans" ] && rm -f "$tmpans"
@@ -234,7 +235,9 @@ if command -v getenforce >/dev/null && [ "$(getenforce)" != Disabled ]; then
     if [ "$PUBLIC_PORT" != 80 ] && [ "$PUBLIC_PORT" != 443 ]; then
         run semanage port -a -t http_port_t -p tcp "$PUBLIC_PORT" || run semanage port -m -t http_port_t -p tcp "$PUBLIC_PORT" || true
     fi
-    # Apache may connect to 8008 (an http_port_t port); if this server's policy says otherwise, allow it.
+    # Apache passes requests on to the suite at 127.0.0.1:8008, an http_port_t port. Newer policies (Fedora) only
+    # let Apache connect to http ports as a proxy with httpd_can_network_relay on; it allows nothing else.
+    run setsebool -P httpd_can_network_relay 1 || true
     if ! semanage port -l 2>/dev/null | grep -E '^http_port_t\s' | grep -qw 8008; then run setsebool -P httpd_can_network_connect 1 || true; fi
     say "  SELinux: $(getenforce), Apache allowed to reach the suite."
 fi
@@ -251,6 +254,16 @@ for i in $(seq 1 45); do
     if curl -fsk -o /dev/null "$proto://127.0.0.1:$PUBLIC_PORT/api/version"; then ok=1; break; fi
     sleep 2
 done
+if [ "$ok" = 0 ] && grep -q "Permission denied: AH00957" /var/log/httpd/production-suite-error.log 2>/dev/null \
+   && command -v getenforce >/dev/null && [ "$(getenforce)" = Enforcing ]; then
+    # SELinux still stops Apache reaching the suite: allow Apache's outgoing connections, then check again
+    say "  SELinux is stopping Apache from reaching the suite; allowing Apache's network connections (httpd_can_network_connect)."
+    run setsebool -P httpd_can_network_connect 1 || true
+    for i in $(seq 1 10); do
+        if curl -fsk -o /dev/null "$proto://127.0.0.1:$PUBLIC_PORT/api/version"; then ok=1; break; fi
+        sleep 2
+    done
+fi
 [ "$ok" = 1 ] || fail "The suite isn't answering through Apache yet. Check: systemctl status production-suite-web httpd, and $DIR/logs/web.log"
 v="$(curl -fsk "$proto://127.0.0.1:$PUBLIC_PORT/api/version")"
 host="$(hostn)"

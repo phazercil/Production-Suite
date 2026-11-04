@@ -133,3 +133,13 @@ class KioskTests(TestCase):
         self.assertContains(r, 'hx-target="#sources"')
         r = self.c.get("/kiosk/m/confirm?a=srcDelete&id=3&t=body%3Ex")
         self.assertNotContains(r, "hx-target=")
+
+    def test_a_shift_lead_can_rename_someone(self):
+        from plant.models import Person
+        self.login_lead()
+        lead = Person.objects.get(pin="9999")
+        self.assertContains(self.c.get("/kiosk/v/team"), 'aria-label="Name"')
+        self.do("userSet", id=lead.id, f="name", v="  Caleb   Smith ")
+        self.assertEqual(Person.objects.get(pk=lead.pk).name, "Caleb Smith")
+        r = self.do("userSet", id=lead.id, f="name", v="   ")
+        self.assertIn("Type a name", self.toast(r)["text"])
