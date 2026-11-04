@@ -173,3 +173,11 @@ class KioskTests(TestCase):
         self.do("logout"); self.do("login", pin="9999")
         r = self.do("userSet", id=admin.id, f="role", v="lead")
         self.assertIn("only Admin", self.toast(r)["text"])
+
+    def test_admin_is_its_own_section(self):
+        r = self.c.get("/admin/")
+        self.assertContains(r, 'href="/admin/" aria-current="page"')
+        self.assertContains(r, 'hx-get="/kiosk/v/admin"')
+        self.assertRedirects(self.c.get("/operator/admin/?tab=alerts"), "/admin/?tab=alerts", fetch_redirect_response=False)
+        self.assertNotContains(self.c.get("/operator/"), 'href="/operator/admin/"')
+        self.assertEqual(self.c.get("/db-admin/").status_code, 302)     # Django's own table editor moved here

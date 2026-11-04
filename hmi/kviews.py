@@ -26,6 +26,7 @@ from . import engine, kscreen
 from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
+VIEWS = PAGES | {"admin"}   # Admin is its own section (/admin/) but its view is built the same way
 BUILT = {"controls", "schedule", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
@@ -122,8 +123,11 @@ def page(request, page="controls", lock=None):
         request.session.pop("lock", None)
         if request.GET.get("line"):
             request.session["station"] = request.GET["line"]
+    if page == "admin" and lock is None:   # Admin is its own section of the suite now
+        q = request.GET.urlencode()
+        return redirect("/admin/" + (f"?{q}" if q else ""))
     page = page if page in PAGES else "controls"
-    for k in ("tab", "view", "status", "sort", "inactive"):   # a link straight to a page's option (/operator/admin/?tab=alerts)
+    for k in ("tab", "view", "status", "sort", "inactive"):   # a link straight to a page's option (/operator/schedule/?view=calendar)
         if request.GET.get(k) is not None:
             request.session[f"k.{k}"] = request.GET[k][:40]
     s = screen(request)
@@ -133,9 +137,20 @@ def page(request, page="controls", lock=None):
                                                       B=s.banner(), alarms=s.alarms()))
 
 
+@ensure_csrf_cookie
+@require_GET
+def admin_page(request):
+    """Admin, its own section in the top bar: the suite's settings, for shift leads (day-to-day lists) and Admins."""
+    if request.GET.get("tab") is not None:
+        request.session["k.tab"] = request.GET["tab"][:40]
+    request.session.pop("lock", None)   # never a machine's own screen
+    s = screen(request)
+    return render(request, "hmi/k/admin_page.html", ctx_for(s, page="admin", thin=True, mode="admin"))
+
+
 @require_GET
 def view(request, page):
-    if page not in PAGES:
+    if page not in VIEWS:
         raise Http404("No such page")
     s = screen(request)
     if page not in BUILT:

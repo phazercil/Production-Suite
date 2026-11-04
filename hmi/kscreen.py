@@ -19,7 +19,7 @@ from .engine import shift_stats
 from .models import Downtime, LineState, MachineError, Notice, PpmReading, ShiftRun, Ticket
 
 PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
-         ("status", "Status"), ("end-of-shift", "End of Shift"), None, ("team", "Team"), ("admin", "Admin")]
+         ("status", "Status"), ("end-of-shift", "End of Shift"), None, ("team", "Team")]
 LOCKED_OUT = {"team", "admin"}           # not on a machine's own screen (/station/<machine>/)
 ADMIN_PAGES = {"admin"}
 STATE_PILL = {"running": ("ok", "Running"), "changeover": ("warn", "Changeover"), "stopped": ("bad", "Stopped")}
@@ -160,7 +160,7 @@ class Screen:
         a = []
         srv = server_info()
         if not srv["storeOk"]:
-            a.append({"sev": "bad", "text": f"The server cannot save records: {srv['storeErr']}", "go": "admin"})
+            a.append({"sev": "bad", "text": f"The server cannot save records: {srv['storeErr']}", "go": "admin", "href": "/admin/"})
         if self.shift_on and self.feed.get("type") and not self.feed.get("ok", True):
             a.append({"sev": "bad", "text": f"No machine data from {self.station}: {self.feed.get('err') or 'feed offline'}", "go": "status"})
         if self.shift_on and self.feed.get("error"):
