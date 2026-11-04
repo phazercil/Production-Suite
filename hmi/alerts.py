@@ -106,11 +106,16 @@ def send_sms(to, body):
         with _PUBLIC_OPENER.open(req, timeout=15) as r:
             json.loads(r.read().decode() or "{}")
     except urllib.error.HTTPError as e:
-        detail = ""
+        detail, code = "", None
         try:
-            detail = json.loads(e.read().decode()).get("message", "")
+            body = json.loads(e.read().decode())
+            detail, code = body.get("message", ""), body.get("code")
         except Exception:
             pass
+        if code in (572006, 21608) or "trial account" in detail.lower():
+            raise AlertError("Twilio refused the text because the Twilio account is still a free trial. Trial accounts can only send "
+                             "Twilio's own sample messages (and only to numbers verified in Twilio), not the suite's alerts. "
+                             "Upgrade the account in the Twilio Console (Billing › Upgrade), then send the test again.")
         raise AlertError(f"Twilio refused the text ({e.code}{': ' + detail if detail else ''}).")
     except (urllib.error.URLError, OSError) as e:
         raise AlertError(f"Couldn't reach Twilio: {getattr(e, 'reason', e)}")
