@@ -295,6 +295,48 @@ class ReadOnlyDatabaseTests(TestCase):
         self.assertEqual((mo.part, mo.qty, str(mo.due)), ("MG4062HP", 2400, "2026-11-20"))
 
 
+class OutsideDatabaseTests(TestCase):
+    """A database outside the plant network is refused unless that database's 'outside the plant network' box is ticked."""
+
+    def setUp(self):
+        from plant.demo import seed_demo
+        seed_demo(reset=True)
+        self.c = Client()
+        self.c.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+
+    def cmd(self, name, p):
+        return self.c.post("/api/hmi/cmd", json.dumps({"name": name, "p": p, "line": "Barbara"}), content_type="application/json").json()
+
+    def test_refused_unless_ticked(self):
+        from plant import dbcheck
+        fields = {"host": "8.8.8.8", "port": "3306", "name": "dashboard", "user": "reader", "password": "pw"}
+        r = self.cmd("connTest", {"group": "machines", "fields": fields})
+        self.assertFalse(r["data"]["ok"])
+        self.assertIn("outside the plant network", r["data"]["msg"])
+        ok = {"ok": True, "msg": "Connected.", "tables": [], "writable": False}
+        with mock.patch.object(dbcheck, "driver") as drv, mock.patch("plant.netsafety.check_host") as ch:
+            drv.side_effect = dbcheck.NoDriver("no driver here")
+            r = self.cmd("connTest", {"group": "machines", "fields": {**fields, "internet": True}})
+            ch.assert_not_called()                  # the address check is skipped only for this ticked database
+            self.assertEqual(r["data"]["msg"], "no driver here")
+
+    def test_saved_opt_in_lets_the_runtime_connect(self):
+        from django.db import connections
+        from plant import liveconfig
+        cfg = {"ENGINE": "django.db.backends.mysql", "HOST": "8.8.8.8", "PORT": "3306", "NAME": "d", "USER": "u", "PASSWORD": "p",
+               "OPTIONS": {}, "SUITE_INTERNET": False}
+        with mock.patch.dict(connections.settings, {"machines": cfg}), mock.patch.object(liveconfig, "refresh"), \
+                mock.patch.object(liveconfig, "connection", return_value="conn"):
+            with self.assertRaises(integrations.ConnError):
+                integrations._db("machines")
+            cfg["SUITE_INTERNET"] = True
+            self.assertEqual(integrations._db("machines"), "conn")
+
+    def test_env_flag_reaches_the_connection_settings(self):
+        from plant.dbconf import read_only_mysql
+        env = {"MACHINE_DB_HOST": "aps.example", "MACHINE_DB_INTERNET": "1"}
+        self.assertTrue(read_only_mysql(lambda k, d=None: env.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
+        self.assertFalse(read_only_mysql(lambda k, d=None: {"MACHINE_DB_HOST": "x"}.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
 class TwilioErrorTests(TestCase):
     def test_a_trial_account_gets_a_plain_explanation(self):
         import io

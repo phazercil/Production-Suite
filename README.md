@@ -73,7 +73,10 @@ would lock out the screen making it is refused. The setting is kept in the datab
 `python manage.py network --set 192.168.100.0/24` (`python manage.py network` shows the current setting).
 
 **Exceptions you choose to set up:** Paycom (operator import), Twilio (text alerts) and, only if you tick
-"the mail server is on the internet" in Admin › Alerts, an internet mail server. Each is used only when set up;
+"the mail server is on the internet" in Admin › Alerts, an internet mail server; GitHub updates (Admin › Updates);
+and, only if you tick "This database is outside the plant network" for it in Admin › Connections, an asset, S2K or
+machine data database on a cloud server or at another site (each database has its own tick box, saved as
+`ASSET_DB_INTERNET`, `S2K_DB_INTERNET` or `MACHINE_DB_INTERNET` in `.env`). Each is used only when set up;
 leave them out to keep the server fully offline.
 
 ## Installing on a Windows server

@@ -225,7 +225,7 @@ def connections_data(s, request):
 
 def db_box(info, g, title, help_, form=None, msg=None):
     d = info[g]
-    f = form or {"host": d["host"], "port": d["port"] or "3306", "name": d["name"], "user": d["user"]}
+    f = form or {"host": d["host"], "port": d["port"] or "3306", "name": d["name"], "user": d["user"], "internet": d.get("internet")}
     return {"g": g, "title": title, "help": help_, "d": d, "f": f, "msg": msg}
 
 
@@ -484,7 +484,7 @@ def _conn_fields(p, g):
         return {k: p.get(k, "") for k in ("sid", "token")}
     if g == "grafana":
         return {"token": p.get("token", "")}
-    return {k: p.get(k, "") for k in ("host", "port", "name", "user", "password")}
+    return {k: p.get(k, "") for k in ("host", "port", "name", "user", "password")} | {"internet": bool(p.get("internet"))}
 
 
 @action("connTest")

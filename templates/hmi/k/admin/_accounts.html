@@ -14,6 +14,8 @@
       <label class="f">Read-only user<input type="text" name="user" value="{{ b.f.user }}" spellcheck="false"></label>
       <label class="f">Password<input type="password" name="password" autocomplete="new-password" placeholder="{% if b.d.hasPassword %}Leave blank to keep the saved one{% endif %}"></label>
     </div>
+    <label class="chk" style="margin-top:8px"><input type="checkbox" name="internet" value="1" {% if b.f.internet %}checked{% endif %}> This database is outside the plant network (a cloud server or another site)</label>
+    {% if b.f.internet %}<p class="note" style="color:var(--warn);margin-top:4px">The suite will connect to this server over the internet. Use a read-only login, and if you can, reach it over the VPN or a server that requires encrypted (TLS) connections, since the password and data otherwise travel unencrypted.</p>{% endif %}
     <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/connTest" hx-target="#accounts" hx-swap="outerHTML">Test connection</button><button class="btn primary">Save</button>{% if b.d.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/connRemove" hx-vals='{"group": "{{ b.g }}"}' hx-params="group" hx-target="#accounts" hx-swap="outerHTML" hx-confirm="Remove the {{ b.title }} login from the server?">Remove</button>{% endif %}</div>
     {% include "hmi/k/admin/_msg.html" with m=b.msg %}</form>{% endfor %}
 
