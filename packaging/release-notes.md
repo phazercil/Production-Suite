@@ -1,3 +1,27 @@
+## What's new in 1.8.0
+
+**Operator Kiosk**
+- **Supervisor button** (bottom left): a shift lead, Admin or maintenance person takes over the screen for 10 minutes to fix finished entries such as downtime reasons or QC checks.
+- **QC checks** set per stage in Admin › QC checks. The first check is due as soon as the machine runs after a changeover. A check more than 10 minutes late needs a reason. Out-of-spec checks wait for a supervisor to Approve or Disapprove; disapproving takes the scrapped filters off the count.
+- **Run screen:** the next changeover within a day with its screws, helix, media and side bands; the current MO's tooling and how the part has run before (scrap rate, pieces/hr, speed, downtime) on this machine and on any machine; the last 24 hours of shift reports.
+- **Schedule:** a checkered-flag finish time on every MO. A live changeover shows "Currently Changing Over" and turns red when it runs over. Lunch shows whether each line runs through it.
+- **Scheduled extra breaks** (e.g. 2:00 pm for 15 min on a hot day): the schedule pauses for them and stops during them aren't downtime.
+- **Notification bar:** each machine's screen shows what changed for that machine (its queue, breaks, maintenance, QC).
+- **Maintenance:** repair notes, Start work / Mark complete, and open / in progress / completed counts.
+- **Downtime:** shift running time and overall shift downtime at the top.
+- **Team:** an Edit dialog that saves only on Save.
+
+**Admin**
+- **Permission manager:** allow or deny each feature by role or by person.
+- **Connector builder:** drag database columns onto what the suite needs (machine speed, counts, run signal, S2K MOs, changeover data, tooling).
+- Databases outside the plant network can be allowed one at a time (Connections).
+- Paycom: import only the position titles you pick.
+- Supervisor and Maintenance sections in the top bar (Maintenance to be built out later).
+
+**Labor Budget:** the new calculator with A/B budgets, and its own address (/budget/) for people who only have labor permission.
+
+**Scheduler:** per-line "Runs through lunch" setting.
+
 **Windows server:** ProductionSuite-Setup.zip (extract, run Setup.exe). An existing install can upload ProductionSuite-Update-….zip in Operator Kiosk › Admin › Updates.
 
 **Linux server** (Fedora, Rocky / Alma / CentOS Stream / RHEL 9): install or update straight from this release with `packaging/linux/get.sh`. See README-LINUX.txt, or download ProductionSuite-Linux.tar.gz and run `sudo ./install.sh`.
