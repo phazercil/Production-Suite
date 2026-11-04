@@ -87,8 +87,8 @@ def state(request):
             work[m["id"]] = sch["cal"].between(m, a, b)
     cat = world["catalog"]
     me, _ = current_person(request)
-    lead = bool(me and me.role == "admin")
-    return ok(me={"name": me.name, "lead": me.role == "admin"} if me else None, editLocked=settings.SUITE["SCHEDULER_REQUIRE_LEAD"] and not (me and me.role == "admin"),
+    lead = bool(me and me.is_lead)
+    return ok(me={"name": me.name, "lead": me.is_lead} if me else None, editLocked=settings.SUITE["SCHEDULER_REQUIRE_LEAD"] and not (me and me.is_lead),
               cfg=world["cfg"], cfgSig=config_sig(world["cfg"]), modes=SPEED_MODES, mos=[mo_json(m, cat) for m in world["mos"].values()],
               jobs=world["jobs"], res={k: result_json(r, lead) for k, r in sch["res"].items()}, byM=sch["byM"], work=work,
               labor=labor_json(world, lead, *( (a, b) if work else (None, None))),
@@ -100,7 +100,7 @@ def mutate(fn):
     def wrap(request, *a, **kw):
         if settings.SUITE["SCHEDULER_REQUIRE_LEAD"]:
             me, note = current_person(request)
-            if not me or me.role != "admin":
+            if not me or not me.is_lead:
                 return JsonResponse({"ok": False, "login": True, "error": note or "Log in with a shift lead PIN to change the schedule."}, status=403)
             touch(request)
         with transaction.atomic():
@@ -164,7 +164,7 @@ def preview(request):
     r = sch["res"].get(key)
     s1 = sch["res"].get(f"{p.get('moId')}__s1")
     me, _ = current_person(request)
-    return ok(res=result_json(r, bool(me and me.role == "admin")) if r else None, s1End=s1["end"] if s1 else None)
+    return ok(res=result_json(r, bool(me and me.is_lead)) if r else None, s1End=s1["end"] if s1 else None)
 
 
 def _mo_fields(mo, p):

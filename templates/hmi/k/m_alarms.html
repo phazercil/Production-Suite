@@ -4,6 +4,6 @@
   <div class="panel row" style="border-color:var(--{{ x.sev }})"><span class="grow">{{ x.text }}</span>
     {% if x.notice %}<button type="button" class="btn ghost" hx-post="/kiosk/do/ackNotices" hx-vals='{"id": "{{ x.notice }}"}'>Acknowledge</button>{% endif %}
     {% if x.modal %}<button type="button" class="btn" hx-get="/kiosk/m/{{ x.modal }}" hx-target="#modal" hx-swap="innerHTML">Open</button>
-    {% else %}<a class="btn" href="{{ base }}/{{ x.go }}/">Open</a>{% endif %}</div>{% endfor %}</div>
+    {% else %}<a class="btn" href="{% if x.href %}{{ x.href }}{% else %}{{ base }}/{{ x.go }}/{% endif %}">Open</a>{% endif %}</div>{% endfor %}</div>
   {% else %}<div class="empty">No active alarms.</div>{% endif %}{% endblock %}
 {% block foot_wrap %}{% endblock %}

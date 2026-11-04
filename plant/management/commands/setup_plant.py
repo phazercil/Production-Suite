@@ -15,7 +15,7 @@ class Command(BaseCommand):
         if not Shift.objects.exists():
             Shift.objects.create(name="1st shift", start="06:00", end="14:30", days=[1, 2, 3, 4, 5])
         if not Person.objects.filter(role="admin", active=True).exists():
-            p = Person.objects.create(name="Shift Lead", pin=opts["lead_pin"], role="admin")
+            p = Person.objects.create(name="Plant Admin", pin=opts["lead_pin"], role="admin")
             p.trained.set(Machine.objects.all())
-            self.stdout.write(f"Created 'Shift Lead' with PIN {opts['lead_pin']}. Change it on the Team page.")
+            self.stdout.write(f"Created 'Plant Admin' with PIN {opts['lead_pin']}. Change it on the Team page.")
         self.stdout.write(self.style.SUCCESS("Plant ready. Add machines in Scheduler › Lines & Shifts."))

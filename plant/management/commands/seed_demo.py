@@ -14,4 +14,4 @@ class Command(BaseCommand):
             self.stdout.write("Nothing changed.")
             return
         seed_demo(reset=True)
-        self.stdout.write(self.style.SUCCESS("Demo plant loaded. PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · Shift Lead 9999"))
+        self.stdout.write(self.style.SUCCESS("Demo plant loaded. PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · S. Lead 4444 · Plant Admin 9999"))

@@ -1,4 +1,4 @@
-{% if not S.is_admin %}<div class="panel"><h2 class="h2">Updates</h2><p class="sub" style="margin-top:6px">This screen runs Production Suite v{{ suite_version }} rev {{ suite_revision }}. Log in as a shift lead to install updates.</p></div>
+{% if not S.is_admin %}<div class="panel"><h2 class="h2">Updates</h2><p class="sub" style="margin-top:6px">This screen runs Production Suite v{{ suite_version }} rev {{ suite_revision }}. Log in as an Admin to install updates.</p></div>
 {% elif not A.U %}<div class="panel" style="border-color:var(--bad)"><h2 class="h2">Updates</h2><p class="sub">{{ A.err }}</p></div>
 {% else %}{% with U=A.U st=A.U.state %}
 <div class="panel" {% if st.status == "starting" or st.status == "installing" or st.status == "ready" and st.when == "now" %}hx-get="/kiosk/v/admin?tab=updates" hx-trigger="every 3s" hx-target="#view"{% endif %}>

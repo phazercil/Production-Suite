@@ -55,7 +55,7 @@
     w.querySelector('form').addEventListener('submit', function (e) {
       e.preventDefault();
       post('/api/hmi/login', { pin: inp.value, adminOnly: true }).then(function (r) {
-        if (r.ok && r.me && r.me.role === 'admin') { w.remove(); S.blocked = false; send(); }
+        if (r.ok && r.me && (r.me.role === 'lead' || r.me.role === 'admin')) { w.remove(); S.blocked = false; send(); }
         else { w.querySelector('#labor-pin-err').textContent = r.error || 'That PIN is not a shift lead PIN.'; inp.select(); }
       }).catch(function () { w.querySelector('#labor-pin-err').textContent = 'The server is not answering. Try again.'; });
     });

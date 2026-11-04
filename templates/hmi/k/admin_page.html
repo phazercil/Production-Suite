@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% load static %}
+{% block title %}Admin · Production Suite{% endblock %}
+{% block body_attrs %}data-watch="/thin/watch?scope=kiosk" data-every="3000" data-now="{{ now_ms }}" data-ping="/api/hmi/ping"{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'hmi/kiosk.css' %}">{% endblock %}
+{% block content %}
+<div class="mbody adminpage">
+  <section id="view" class="view" hx-get="/kiosk/v/admin" hx-trigger="load, suite:changed from:body" hx-swap="innerHTML"></section>
+</div>
+{% endblock %}

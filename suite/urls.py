@@ -12,7 +12,8 @@ from suite import thin
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/operator/", permanent=False)),
-    path("admin/", admin.site.urls),
+    path("admin/", kv.admin_page, name="admin"),                 # Admin: the suite's settings, its own section
+    path("db-admin/", admin.site.urls),                          # Django's raw table editor (superusers only)
     # Operator Kiosk
     path("operator/", kv.page, name="operator"),
     path("operator/<str:page>/", kv.page),

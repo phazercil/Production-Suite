@@ -316,3 +316,7 @@ a.act{text-decoration:none;color:inherit}
 }
 .reporttext{white-space:pre-wrap;user-select:text;background:var(--ground);border:1px solid var(--rule);border-radius:8px;padding:12px;font:13px/1.5 var(--f-mono);margin:0}
 a.thsort{color:inherit;text-decoration:none;cursor:pointer}
+
+/* Admin, its own section of the suite (/admin/) */
+.adminpage { overflow: auto; }
+.adminpage > .view { max-width: 1320px; margin: 0 auto; padding: 18px 22px 40px; }

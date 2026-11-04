@@ -134,7 +134,7 @@ def build(me=None, station=None, light=False):
         views[m.name] = {"eta": round(fin) if fin else None}
     users = [{"id": u.id, "name": u.name, "role": u.role, "trained": [x.name for x in u.trained.all()], "active": u.active, "source": u.source,
               "eecode": u.eecode, "dept": u.dept, "position": u.position, "leftList": u.left_list, "hasPin": bool(u.pin),
-              **({"pin": u.pin} if me and me.role == "admin" else {})}
+              **({"pin": u.pin} if me and me.is_lead and (u.role != "admin" or me.is_admin) else {})}
              for u in Person.objects.prefetch_related("trained")]
     shifts = []
     for sh in Shift.objects.prefetch_related("breaks"):
@@ -153,7 +153,7 @@ def build(me=None, station=None, light=False):
         "notices": [{"id": n.id, "t": ms(n.t), "text": n.text, "kind": n.kind, "read": n.read} for n in Notice.objects.all()[:30]],
     }
     snap["autoqc"] = autoqc_summary(t)
-    if me and me.role == "admin":
+    if me and me.is_admin:
         snap["network"] = network_info(st)
     if light:
         return snap

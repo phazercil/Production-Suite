@@ -18,7 +18,7 @@ def board(request):
 
 def _lead(request):
     me, _ = current_person(request)
-    return bool(me and me.role == "admin")
+    return bool(me and me.is_lead)
 
 
 @json_api

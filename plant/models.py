@@ -148,7 +148,10 @@ class CostItem(models.Model):
 
 
 class Person(models.Model):
-    ROLES = [("operator", "Operator"), ("maintenance", "Maintenance"), ("admin", "Shift lead")]
+    # admin: everything, including system settings (Admin › Connections, Network, Alerts, Updates, Backup, Machines).
+    # lead (shift lead): floor approvals, Team, Scheduler, Labor Budget and the day-to-day lists, not system settings.
+    ROLES = [("operator", "Operator"), ("maintenance", "Maintenance"), ("lead", "Shift lead"), ("admin", "Admin")]
+    LEADS = ("lead", "admin")
     name = models.CharField(max_length=120)
     pin = models.CharField(max_length=12, blank=True)
     role = models.CharField(max_length=12, choices=ROLES, default="operator")
@@ -170,6 +173,12 @@ class Person(models.Model):
 
     @property
     def is_lead(self):
+        """A shift lead or an Admin: floor approvals, Team, Scheduler, Labor Budget."""
+        return self.role in self.LEADS
+
+    @property
+    def is_admin(self):
+        """System settings."""
         return self.role == "admin"
 
 

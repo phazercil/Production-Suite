@@ -25,7 +25,7 @@ _page_cache = {}
 
 def _lead(request):
     me, note = current_person(request)
-    if me and me.role == "admin":
+    if me and me.is_lead:
         return me, None
     return None, note
 

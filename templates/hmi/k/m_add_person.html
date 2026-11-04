@@ -2,5 +2,5 @@
 {% block title %}Add person{% endblock %}
 {% block form_attrs %}hx-post="/kiosk/do/userAdd"{% endblock %}
 {% block body %}<div class="grid2"><label class="f">Name<input type="text" name="name" autofocus></label><label class="f">PIN<input type="text" name="pin" inputmode="numeric"></label>
-  <label class="f">Role<select name="role"><option value="operator">operator</option><option value="maintenance">maintenance</option><option value="admin">shift lead</option></select></label></div>{% endblock %}
+  <label class="f">Role<select name="role"><option value="operator">operator</option><option value="maintenance">maintenance</option><option value="lead">shift lead</option>{% if S.is_admin %}<option value="admin">Admin</option>{% endif %}</select></label></div>{% endblock %}
 {% block foot %}<button class="btn go" type="submit">Add</button>{% endblock %}
