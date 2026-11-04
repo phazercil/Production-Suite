@@ -25,6 +25,8 @@ def read_only_mysql(env, prefix):
         "OPTIONS": {"charset": "utf8mb4", "connect_timeout": 5, "read_timeout": 15 if prefix == "MACHINE_DB" else 60,
                     "init_command": "SET SESSION TRANSACTION READ ONLY"},
         "CONN_MAX_AGE": 0,
+        # opt-in: this database is outside the plant network (Admin > Connections tick box)
+        "SUITE_INTERNET": str(env(f"{prefix}_INTERNET", "") or "") == "1",
         "TEST": {"MIRROR": "default"},  # tests never touch the real outside databases
     }
 

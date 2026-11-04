@@ -180,10 +180,11 @@ def _db(db):
     liveconfig.refresh()
     if db not in connections.databases:
         raise ConnError(f"{DB_NAMES[db]} is not set up yet. Add it in Operator Kiosk > Admin > Connections.")
-    try:
-        netsafety.check_host(connections.databases[db]["HOST"], DB_NAMES[db])
-    except netsafety.NotPrivate as e:
-        raise ConnError(str(e))
+    if not connections.databases[db].get("SUITE_INTERNET"):   # opted in on the Admin page: may be outside the plant network
+        try:
+            netsafety.check_host(connections.databases[db]["HOST"], DB_NAMES[db])
+        except netsafety.NotPrivate as e:
+            raise ConnError(str(e))
     return liveconfig.connection(db)
 
 

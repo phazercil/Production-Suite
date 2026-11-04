@@ -85,7 +85,8 @@ def info():
     out = {}
     for group, (prefix, what) in DB_GROUPS.items():
         out[group] = {"on": bool(v.get(f"{prefix}_HOST")), "host": v.get(f"{prefix}_HOST", ""), "port": v.get(f"{prefix}_PORT", "3306") or "3306",
-                      "name": v.get(f"{prefix}_NAME", ""), "user": v.get(f"{prefix}_USER", ""), "hasPassword": bool(v.get(f"{prefix}_PASSWORD"))}
+                      "name": v.get(f"{prefix}_NAME", ""), "user": v.get(f"{prefix}_USER", ""), "hasPassword": bool(v.get(f"{prefix}_PASSWORD")),
+                      "internet": v.get(f"{prefix}_INTERNET") == "1"}
     out["paycom"] = {"on": bool(v.get("PAYCOM_SID") and v.get("PAYCOM_TOKEN")), "sid": v.get("PAYCOM_SID", ""), "hasToken": bool(v.get("PAYCOM_TOKEN"))}
     out["feed"] = {"on": bool(v.get("FEED_KEY"))}
     out["smtp"] = {"on": bool(v.get("ALERT_SMTP_HOST")), "host": v.get("ALERT_SMTP_HOST", ""), "port": v.get("ALERT_SMTP_PORT", "") or "25",
