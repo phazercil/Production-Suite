@@ -46,17 +46,19 @@ def check_fields(host, port, name, user):
     return None
 
 
-def test_read_only(host, port, name, user, password, what, nets=None, records=None):
+def test_read_only(host, port, name, user, password, what, nets=None, records=None, internet=False):
     """Sign in read-only and read the table list. Nothing is created or changed.
     Returns {"ok", "msg", "tables", "writable"}; records = (host, port, name) of the suite's own database."""
     from plant.netsafety import NotPrivate, check_host
     bad = check_fields(host, port, name, user)
     if bad:
         return {"ok": False, "msg": bad}
-    try:
-        check_host(host, what, nets)
-    except NotPrivate as e:
-        return {"ok": False, "msg": str(e)}
+    if not internet:
+        try:
+            check_host(host, what, nets)
+        except NotPrivate as e:
+            return {"ok": False, "msg": f"{e} If this database really is outside the plant (a cloud or other site's server), "
+                                       "tick \"This database is outside the plant network\"."}
     if records and (str(host).lower(), str(port), str(name).lower()) == tuple(str(x).lower() for x in records):
         return {"ok": False, "msg": f"That is the suite's own records database. {what} must be a different database; "
                                     "the suite creates its tables only in its own database."}
