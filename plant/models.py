@@ -235,7 +235,7 @@ DEFAULT_CONFIG = {
                    "Guarding / safety", "Other"],
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
     "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
-              "photoDays": 365},
+              "photoDays": 365, "qcLate": 10},
 }
 DEFAULT_SETTINGS = {
     "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "webhook": "", "useDb": False,

@@ -49,6 +49,7 @@ main{min-width:0;display:flex;flex-direction:column;overflow-y:auto}
 .banner .msg{flex:1 1 120px;min-width:0;font-size:14px;color:var(--ink-2)}
 .banner .msg a{color:var(--warn-ink);text-decoration:underline;cursor:pointer}
 .banner .msg.alert{color:var(--warn-ink)}
+.banner.crowd .conn .when-on,.banner.crowd .conn .when-off{font-size:0;gap:0}
 .banner .who{display:flex;align-items:center;gap:10px;padding:6px 12px;background:var(--ground);border:1px solid var(--rule);border-radius:8px}
 .banner .who small{display:block;font-size:11px;color:var(--ink-2)}
 .banner .who b{font-size:14px;font-weight:600}

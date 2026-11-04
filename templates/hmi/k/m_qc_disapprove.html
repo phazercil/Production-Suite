@@ -1,0 +1,8 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Disapprove QC check · {{ q.t|clock }}{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/qcReview"{% endblock %}
+{% block body %}<input type="hidden" name="id" value="{{ q.id }}"><input type="hidden" name="decision" value="disapproved">
+  <p class="sub">{{ q.item }} · MO {{ q.mo }} · checked by {{ q.by }}. Disapproving takes the filters you scrap off the shift's and the MO's good count and adds them to scrap.</p>
+  <label class="f" style="margin-top:8px">How many filters to scrap out of the count?<input type="number" name="scrap" min="0" value="{{ q.scrapped|default:0 }}" required autofocus></label>
+{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button class="btn danger" type="submit">Disapprove and scrap</button>{% endblock %}

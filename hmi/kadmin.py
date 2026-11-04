@@ -20,7 +20,7 @@ from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
-        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
+        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("qc", "QC checks"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
@@ -41,7 +41,7 @@ S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
                "breakSet", "breakDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
                "s2kPull", "peoplePull", "paycomImport", "networkFirewallSync", "srcDelete", "alertContactDelete", "updCancel", "updGoBack",
-               "updFolder", "updWhen", "permRole", "permPerson", "permReset"}
+               "updFolder", "updWhen", "permRole", "permPerson", "permReset", "qcItemAdd", "qcItemDel", "qcItemMove"}
 _tables_cache = {}
 
 
@@ -114,7 +114,8 @@ def tab_data(s, tab, request):
                 ("startGrace", "Start-up time at the start of each shift (min)", "Stops in this many minutes after the shift's scheduled start are not downtime. Breaks and lunches from the Scheduler's shifts never count as downtime.", 0),
                 ("coMins", "Changeover allowance (min)", "Time reserved on the schedule between different parts.", 0),
                 ("adminTimeout", "Log out shift lead after idle (min)", "0 keeps admin mode on until someone logs out.", 0),
-                ("photoDays", "Keep pictures on closed maintenance tickets (days)", "Pictures are kept in the records database. 0 keeps them for good.", 0)]
+                ("photoDays", "Keep pictures on closed maintenance tickets (days)", "Pictures are kept in the records database. 0 keeps them for good.", 0),
+                ("qcLate", "QC check late after (min)", "A QC check saved this many minutes after it was due needs a reason (the first check after a changeover is due as soon as the machine runs).", 0)]
         return {"nums": [(k, label, help_, mn, r.get(k)) for k, label, help_, mn in nums]}
     if tab == "backup":
         from .snapshot import build
@@ -138,6 +139,13 @@ def tab_data(s, tab, request):
         return connections_data(s, request)
     if tab == "permissions":
         return permissions_data(s, request)
+    if tab == "qc":
+        from plant.models import STAGES
+
+        from . import qc
+        return {"stages": [{"k": k, "label": lbl, "items": qc.items_for(k, cfg),
+                            "free": [(b, d["label"]) for b, d in qc.BUILTIN.items() if b not in {i["key"] for i in qc.items_for(k, cfg)}]}
+                           for k, lbl in STAGES], "types": qc.TYPES}
     if tab == "codata":
         return codata_data(s, request)
     return {}

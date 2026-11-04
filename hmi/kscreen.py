@@ -139,21 +139,35 @@ class Screen:
         snooze = self.request.session.get("down_snooze", 0)
         return self.reason_due() and ms(self.t) > snooze
 
+    def qc_due_at(self):
+        from . import qc
+        return qc.due_at(self.shift, self.settings, self.t) if self.shift_on else None
+
     def qc_due(self):
-        if not self.shift_on or not self.settings.get("autoQC"):
-            return False
-        last = self.shift.qc_last
-        return last is None or (self.t - last).total_seconds() >= (self.settings.get("qcEvery") or 30) * 60
+        d = self.qc_due_at()
+        return d is not None and self.t >= d
+
+    def qc_late(self):
+        """Minutes a due QC check is past its allowance (Rules › QC late after); 0 if it isn't late."""
+        from . import qc
+        return qc.late_by(self.shift, self.settings, self.rules, self.t) if self.shift_on else 0
 
     def qc_next(self):
         if not self.settings.get("autoQC"):
             return "Auto QC off"
         if not self.shift_on:
             return "—"
-        last = self.shift.qc_last
-        left = (self.settings.get("qcEvery") or 30) - ((self.t - last).total_seconds() / 60 if last else 1e9)
+        d = self.qc_due_at()
+        if d is None:
+            return "When the machine runs"   # after a changeover
+        left = (d - self.t).total_seconds() / 60
         m = int(round(abs(left)))
         return f"Overdue {m // 60}:{m % 60:02d}" if left <= 0 else f"in {m // 60}:{m % 60:02d}"
+
+    def qc_pending(self):
+        """Out-of-spec QC checks on this line waiting for a supervisor (approve, or disapprove and scrap)."""
+        from .models import QCCheck
+        return list(QCCheck.objects.filter(line=self.station, review="pending").order_by("-t")[:20]) if self.station else []
 
     def unread_notices(self):
         return list(Notice.objects.filter(read=False).exclude(kind="team").order_by("-t")[:30])
@@ -186,7 +200,14 @@ class Screen:
             n = len(self.need_reason())
             a.append({"sev": "bad", "text": f"{n} downtime {'entries need' if n > 1 else 'entry needs'} a reason", "go": "downtime"})
         if self.qc_due():
-            a.append({"sev": "warn", "text": f"QC check due (every {self.settings.get('qcEvery')} min)", "go": "qc", "modal": "qc"})
+            late = self.qc_late()
+            first = self.shift.qc_after_co
+            a.append({"sev": "bad" if late else "warn", "go": "qc", "modal": "qc",
+                      "text": ("QC check after the changeover" if first else f"QC check due (every {self.settings.get('qcEvery')} min)")
+                      + (f" · {late} min late: a reason is needed" if late else "")})
+        n = len(self.qc_pending())
+        if n:
+            a.append({"sev": "bad", "text": f"{n} QC check{'s' if n > 1 else ''} out of spec: a supervisor needs to approve or disapprove", "go": "qc-log"})
         for n in self.unread_notices():
             a.append({"sev": "warn", "text": n.text, "go": "schedule", "notice": n.id})
         for tk in self.open_tickets():
@@ -429,24 +450,25 @@ def line_blocks(s, m, sh, t_ms):
 
 
 def qc_log_page(s):
+    from . import qc
     from .models import QCCheck
+    items = qc.items_for(s.machine.stage if s.machine else "s1", s.cfg)
     since = s.t - timedelta(days=3)
     checks = list(QCCheck.objects.filter(line=s.station, t__gte=since).order_by("-t"))
     rows = []
     for q in checks:
         p = s.part(q.item)
-        target = {"len": p["len"], "wid": p["wid"], "ph": p["ph"], "sbl": p["sb"], "sbr": p["sb"]}
-        cells = []
-        for k in ("len", "wid", "ph", "sbl", "sbr"):
-            v = getattr(q, k)
-            cells.append({"v": v, "ok": v is None or abs(v - target[k]) <= p["tol"]})
+        vals = q.values or {k: getattr(q, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
+        fails = q.fails if q.values else qc.judge(items, vals, p)[1]   # checks saved before QC items were set per stage
+        cells = [{"v": vals.get(it["key"]), "type": it["type"], "ok": it["key"] not in fails, "target": qc.target(it, p)} for it in items]
         rows.append({"q": q, "cells": cells})
     from .snapshot import autoqc_summary
     auto = autoqc_summary(s.t).get(s.station)
     if auto:
         auto["pct"] = round(100 * (auto["n"] - auto["fails"]) / auto["n"]) if auto["n"] else 100
-    return {"rows": rows, "fails": sum(1 for q in checks if not q.passed), "scrap": sum(q.scrap for q in checks), "next": s.qc_next(),
-            "auto": auto, "autoQC": s.settings.get("autoQC"), "every": s.settings.get("qcEvery")}
+    return {"items": items, "rows": rows, "fails": sum(1 for q in checks if not q.passed), "scrap": sum(q.scrap for q in checks), "next": s.qc_next(),
+            "pending": sum(1 for q in checks if q.review == "pending"), "scrapped": sum(q.scrapped for q in checks),
+            "auto": auto, "autoQC": s.settings.get("autoQC"), "every": s.settings.get("qcEvery"), "late": s.rules.get("qcLate", 10)}
 
 
 def downtime_page(s):

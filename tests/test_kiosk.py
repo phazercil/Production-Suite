@@ -261,3 +261,77 @@ class KioskTests(TestCase):
         self.assertContains(self.c.get("/kiosk/r/rail"), ">Supervisor<")
         r = self.do("downtimeSet", id=d.id, reason="Another")
         self.assertIn("Pick a reason", json.dumps(self.toast(r)))
+
+    def qc_shift(self):
+        from hmi.models import ShiftRun
+        sh = ShiftRun.objects.filter(line="Barbara", active=True).select_related("mo").first()
+        self.assertIsNotNone(sh, "the demo has a shift running on Barbara")
+        return sh
+
+    def test_qc_items_per_stage(self):
+        from hmi import qc
+        self.do("login", pin="4444")
+        self.do("run", c="qcItemDel", stage="s1", i="6")                 # Cut
+        self.do("run", c="qcItemAdd", stage="s1", label="Frame square", type="check")
+        self.do("run", c="qcItemAdd", stage="s1", label="Glue temp", type="number", min="340", max="360")
+        keys = [i["key"] for i in qc.items_for("s1")]
+        self.assertNotIn("cut", keys)
+        self.assertEqual(keys[-2:], ["c1", "c2"])
+        self.assertEqual([i["key"] for i in qc.items_for("eb")], ["glue", "scrap"])   # each stage its own
+        self.assertContains(self.c.get("/kiosk/v/admin?tab=qc"), "Frame square")
+        r = self.c.get("/kiosk/m/qc")
+        self.assertContains(r, "Frame square")
+        self.assertContains(r, "Glue temp")
+        self.assertNotContains(r, ">Cut<")
+
+    def test_qc_after_changeover_late_and_supervisor_review(self):
+        from django.utils import timezone
+
+        from hmi import engine
+        from hmi.models import QCCheck, ShiftRun
+        from plant.models import MO
+        sh = self.qc_shift()
+        PlantSettings.objects.filter(pk=1)   # autoQC on in the demo?
+        st = PlantSettings.load(); st.settings = {**st.settings, "autoQC": True, "qcEvery": 30}; st.save()
+        # right after a changeover: due as soon as the machine runs
+        ShiftRun.objects.filter(pk=sh.pk).update(qc_after_co=True, qc_due_at=None, state="running")
+        engine.tick(Machine.objects.get(name="Barbara"), {"ppm": 200}, timezone.now())
+        sh.refresh_from_db()
+        self.assertIsNotNone(sh.qc_due_at)
+        self.do("login", pin="1111")
+        self.assertContains(self.c.get("/kiosk/m/qc"), "first check after the changeover")
+        # 25 minutes later it is late: a reason is needed
+        ShiftRun.objects.filter(pk=sh.pk).update(qc_due_at=timezone.now() - timezone.timedelta(minutes=25))
+        self.assertContains(self.c.get("/kiosk/m/qc"), "min late")
+        spec = engine.spec_for(sh.mo.part)
+        good = {"len": spec["len"], "wid": spec["wid"], "ph": spec["ph"], "sbl": spec["sb"], "sbr": spec["sb"], "glue": "Pass", "cut": "Pass", "scrap": "0"}
+        before = QCCheck.objects.count()
+        r = self.do("qcSave", **good)
+        self.assertContains(r, "late")
+        self.assertEqual(QCCheck.objects.count(), before)
+        r = self.do("qcSave", lateReason="Jam right after start-up", **{**good, "len": spec["len"] + 1})
+        q = QCCheck.objects.filter(shift=sh).latest("id")
+        self.assertEqual((q.passed, q.review, q.fails, q.late_reason), (False, "pending", ["len"], "Jam right after start-up"))
+        sh.refresh_from_db()
+        self.assertFalse(sh.qc_after_co)
+        self.assertContains(self.c.get("/kiosk/v/qc-log"), "OUT OF SPEC")
+        self.assertNotContains(self.c.get("/kiosk/v/qc-log"), ">Disapprove<")   # an operator can't
+        r = self.do("qcReview", id=q.id, decision="approved")
+        self.assertContains(r, "Approval")
+        # the supervisor takes over the screen and disapproves, scrapping 12
+        self.do("supStart", pin="4444")
+        self.assertContains(self.c.get("/kiosk/v/qc-log"), ">Disapprove<")
+        ShiftRun.objects.filter(pk=sh.pk).update(count=100, mo_count=50)
+        MO.objects.filter(pk=sh.mo_id).update(produced=500, scrap=0)
+        r = self.do("qcReview", id=q.id, decision="disapproved", scrap="12")
+        q.refresh_from_db(); sh.refresh_from_db()
+        self.assertEqual((q.review, q.scrapped, q.reviewed_by), ("disapproved", 12, "S. Lead"))
+        self.assertEqual((sh.count, sh.mo_count), (88, 38))
+        mo = MO.objects.get(pk=sh.mo_id)
+        self.assertEqual((mo.produced, mo.scrap), (488, 12))
+        # and corrects the check
+        self.assertContains(self.c.get(f"/kiosk/m/qc?edit={q.id}"), "Save changes")
+        self.do("qcSave", id=q.id, **good)
+        q.refresh_from_db()
+        self.assertTrue(q.passed)
+        self.assertEqual(q.edited_by, "S. Lead")

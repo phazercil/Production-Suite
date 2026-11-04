@@ -336,12 +336,40 @@ def changeover_modal(request, s):
 
 @modal("qc", login=True)
 def m_qc(request, s):
-    if not s.shift_on:
-        return thin.refused("Start a shift before logging QC.")
-    p = s.part(s.current_item())
-    fields = [("len", "Length", p["len"]), ("wid", "Width", p["wid"]), ("ph", "Pleat height", p["ph"]), ("sbl", "Side band height L", p["sb"]),
-              ("sbr", "Side band height R", p["sb"])]
-    return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, fields=fields))
+    """A QC check: the items this machine's stage checks (Admin › QC checks). ?edit=id corrects a finished one."""
+    from . import qc
+    from .models import QCCheck
+    edit = None
+    if request.GET.get("edit"):
+        if not s.can("qc.edit"):
+            return login_needed(request, s, {"perm": "qc.edit"})
+        edit = QCCheck.objects.filter(pk=request.GET["edit"]).select_related("shift__machine").first()
+        if not edit:
+            return thin.refused("That QC check is no longer on file.")
+        stage = edit.shift.machine.stage if edit.shift and edit.shift.machine else "s1"
+        p = s.part(edit.item)
+        vals = edit.values or {k: getattr(edit, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
+    else:
+        if not s.shift_on:
+            return thin.refused("Start a shift before logging QC.")
+        stage = s.machine.stage if s.machine else "s1"
+        p = s.part(s.current_item())
+        vals = {}
+    items = [{**it, "target": qc.target(it, p), "v": vals.get(it["key"])} for it in qc.items_for(stage, s.cfg)]
+    late = 0 if edit else s.qc_late()
+    return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, items=items, edit=edit, late=late,
+                                                                 afterCo=bool(not edit and s.shift and s.shift.qc_after_co)))
+
+
+@modal("qcDisapprove")
+def m_qc_disapprove(request, s):
+    from .models import QCCheck
+    if not s.can("qc.approve"):
+        return login_needed(request, s, {"perm": "qc.approve"})
+    q = QCCheck.objects.filter(pk=request.GET.get("id")).first()
+    if not q:
+        return thin.refused("That QC check is no longer on file.")
+    return modal_response(request, "hmi/k/m_qc_disapprove.html", **ctx_for(s, q=q))
 
 
 @modal("rolls", login=True)
@@ -636,17 +664,28 @@ def a_train(request, s, p):
 
 @action("qcSave")
 def a_qc(request, s, p):
-    p = {k: p.get(k, "") for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut")} | {"scrap": int(p.get("scrap") or 0)}
-    r = run(request, s, "qcSave", p)
-    return err_in_modal(r["error"]) if not r["ok"] else thin.done(toast=r.get("msg"), close=True)
+    r = run(request, s, "qcEdit" if p.get("id") else "qcSave", p)
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") else err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg"), close=True)
+
+
+@action("qcReview")
+def a_qc_review(request, s, p):
+    r = run(request, s, "qcReview", {k: p.get(k, "") for k in ("id", "decision", "scrap")})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") else (err_in_modal(r["error"]) if request.headers.get("X-In-Modal") else thin.refused(r["error"]))
+    return thin.done(toast=r.get("msg"), close=True)
 
 
 @action("qcField")
 def a_qc_field(request, s, p):
     """As a measurement is typed: in or out of tolerance (the part's spec), shown on the field."""
+    from . import qc
     k = p.get("k", "")
-    pp = s.part(s.current_item())
-    target = {"len": pp["len"], "wid": pp["wid"], "ph": pp["ph"], "sbl": pp["sb"], "sbr": pp["sb"]}.get(k)
+    pp = s.part(p.get("item") or s.current_item())
+    it = next((x for x in qc.items_for(s.machine.stage if s.machine else "s1", s.cfg) if x["key"] == k), None)
+    target = qc.target(it, pp) if it else None
     try:
         v = float(p.get(k) or "")
     except ValueError:

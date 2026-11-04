@@ -1,4 +1,4 @@
-<div class="banner" id="banner" hx-get="/kiosk/r/banner?page={{ page }}" hx-trigger="suite:changed from:body">
+<div class="banner{% if S.sup %} crowd{% endif %}" id="banner" hx-get="/kiosk/r/banner?page={{ page }}" hx-trigger="suite:changed from:body">
   <div class="lineid">
     <span class="ln">Line {% if B.choose %}<select class="stationsel" name="line" hx-post="/kiosk/do/station" hx-trigger="change" aria-label="This screen's machine">{% for l in B.choose %}<option {% if l == station %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>{% else %}{{ station }}{% endif %}</span>
     <span class="sh">{{ B.shiftName }} · {{ B.state }}</span>
@@ -8,7 +8,7 @@
   {% if not B.storeOk %}<span class="demo bad" title="{{ B.storeErr }}">Not saving</span>{% endif %}
   {% if B.demo %}<span class="demo">Demo data</span>{% endif %}
   {% if S.sup %}<button class="demo bad" hx-post="/kiosk/do/supEnd" title="End the supervisor override">Supervisor: {{ S.sup.name }} ✕</button>{% endif %}
-  {% if B.admin %}<button class="demo bad" hx-post="/kiosk/do/logout" title="Log out">{% if B.sysadmin %}Admin mode{% else %}Shift lead{% endif %} ✕</button>{% endif %}
+  {% if B.admin and not S.sup %}<button class="demo bad" hx-post="/kiosk/do/logout" title="Log out">{% if B.sysadmin %}Admin mode{% else %}Shift lead{% endif %} ✕</button>{% endif %}
   {% if B.operator %}<div class="who"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><div><small>Operator</small><b>{{ B.operator }}</b></div></div>{% endif %}
   <div class="conn"><span class="when-on"><span class="dot ok"></span>Server connected</span><span class="when-off"><span class="dot bad"></span>Server offline</span></div>
   <div class="clock num" data-clock></div>
