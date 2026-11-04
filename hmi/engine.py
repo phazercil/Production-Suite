@@ -12,6 +12,7 @@ from datetime import timedelta
 from django.conf import settings as dj_settings
 from django.db import transaction
 from django.db.models import F
+from django.db.models.functions import Greatest
 
 from plant import netsafety
 from plant import perms
@@ -287,7 +288,9 @@ def tick(machine, sample, t):
                     add_down(sh, sh.stop_start, end)
                 sh.stop_start = None
             sh.state = "running"
-    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state"])
+            if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
+                sh.qc_due_at = t - timedelta(minutes=1)
+    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at"])
 
 
 def close_stop(sh, t):
@@ -554,37 +557,105 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     add_down(sh, from_ms(co["start"]), ctx.now, "Changeover")
-    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co, sh.qc_last = m, ctx.now, 0, "running", None, ctx.now
+    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, 0, "running", None
+    sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()
     event("mo_start", {"line": sh.line, "mo": m.number, "item": m.part, "steps_from": co.get("src", "admin")})
     return {"msg": f"Running MO {m.number} · {m.part}"}
 
 
-@cmd("qcSave")
-def qc_save(p, ctx):
-    sh = shift_of(p, ctx)
+def _qc_values(sh, p):
+    """The stage's QC items (Admin › QC checks), the values submitted for them, and the part's spec."""
+    from . import qc
     item = sh.mo.part if sh.mo else (MO.objects.get(pk=sh.co["newMo"]).part if sh.co and sh.co.get("newMo") else "")
     P = spec_for(item)
-    vals = {}
-    for k in ("len", "wid", "ph", "sbl", "sbr"):
-        v = to_number(p.get(k)) if str(p.get(k) or "").strip() else None
-        need(v is not None and 0 <= v < 1000, "Enter all five measurements in inches.")
-        vals[k] = v
-    tgt = {"len": P["len"], "wid": P["wid"], "ph": P["ph"], "sbl": P["sb"], "sbr": P["sb"]}
-    glue = "Fail" if p.get("glue") == "Fail" else "Pass"
-    cut = "Fail" if p.get("cut") == "Fail" else "Pass"
-    scrap = to_number(p.get("scrap") or 0)
-    need(scrap is not None and 0 <= scrap <= 1_000_000, "Enter scrap as a whole number (0 if none).")
-    scrap = int(scrap)
-    ok = all(abs(vals[k] - tgt[k]) <= P["tol"] + 1e-9 for k in vals) and glue == "Pass" and cut == "Pass"
-    QCCheck.objects.create(shift=sh, t=ctx.now, line=sh.line, mo=sh.mo.number if sh.mo else "", item=P["key"], by=ctx.by, glue=glue, cut=cut,
-                           scrap=scrap, passed=ok, **vals)
-    if sh.mo and scrap:
-        MO.objects.filter(pk=sh.mo_id).update(scrap=F("scrap") + scrap)
-    sh.qc_last = ctx.now
-    sh.save(update_fields=["qc_last"])
+    items = qc.items_for(sh.machine.stage if sh.machine else "s1")
+    try:
+        vals = qc.parse(items, p)
+    except ValueError as e:
+        raise Need(str(e))
+    ok, fails = qc.judge(items, vals, P)
+    cols = {k: vals.get(k) for k in ("len", "wid", "ph", "sbl", "sbr")}
+    cols.update(glue=vals.get("glue", ""), cut=vals.get("cut", ""), scrap=int(vals.get("scrap") or 0))
+    return P, vals, ok, fails, cols
+
+
+@cmd("qcSave")
+def qc_save(p, ctx):
+    from . import qc
+    sh = shift_of(p, ctx)
+    P, vals, ok, fails, cols = _qc_values(sh, p)
+    due = qc.due_at(sh, settings_obj().settings, ctx.now)
+    late = qc.late_by(sh, settings_obj().settings, rules(), ctx.now)
+    reason = str(p.get("lateReason") or "").strip()
+    need(not late or reason, f"This check is {late} min late. Say why it wasn't done on time.")
+    q = QCCheck.objects.create(shift=sh, t=ctx.now, line=sh.line, mo=sh.mo.number if sh.mo else "", item=P["key"], by=ctx.by, passed=ok,
+                               values=vals, fails=fails, due_at=due, late_reason=reason[:500] if late else "", review="" if ok else "pending", **cols)
+    if sh.mo and cols["scrap"]:
+        MO.objects.filter(pk=sh.mo_id).update(scrap=F("scrap") + cols["scrap"])
+    sh.qc_last, sh.qc_after_co, sh.qc_due_at = ctx.now, False, None
+    sh.save(update_fields=["qc_last", "qc_after_co", "qc_due_at"])
     event("qc", {"line": sh.line, "item": P["key"], "pass": ok, **vals})
-    return {"msg": "QC passed and saved" if ok else "QC FAIL saved — tell your shift lead", "data": {"pass": ok}}
+    return {"msg": "QC passed and saved" if ok else "QC out of spec — a supervisor needs to approve or disapprove it",
+            "data": {"pass": ok, "id": q.id}}
+
+
+@cmd("qcEdit", "qc.edit")
+def qc_edit(p, ctx):
+    """A supervisor corrects a finished QC check (Supervisor override)."""
+    q = QCCheck.objects.filter(pk=p.get("id")).select_related("shift", "shift__machine", "shift__mo").first()
+    need(q and q.shift, "That QC check is no longer on file.")
+    from . import qc
+    items = qc.items_for(q.shift.machine.stage if q.shift.machine else "s1")
+    try:
+        vals = qc.parse(items, p)
+    except ValueError as e:
+        raise Need(str(e))
+    P = spec_for(q.item)
+    ok, fails = qc.judge(items, vals, P)
+    old_scrap = q.scrap
+    for k in ("len", "wid", "ph", "sbl", "sbr"):
+        setattr(q, k, vals.get(k))
+    q.glue, q.cut, q.scrap = vals.get("glue", ""), vals.get("cut", ""), int(vals.get("scrap") or 0)
+    q.values, q.fails, q.passed = vals, fails, ok
+    if ok and q.review == "pending":
+        q.review = ""
+    elif not ok and not q.review:
+        q.review = "pending"
+    q.edited_by, q.edited_at = ctx.by, ctx.now
+    q.save()
+    if q.mo and q.scrap != old_scrap:
+        MO.objects.filter(number=q.mo).update(scrap=F("scrap") + (q.scrap - old_scrap))
+    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} changed ({'pass' if ok else 'out of spec'})")
+    return {"msg": "QC check changed"}
+
+
+@cmd("qcReview", "qc.approve")
+def qc_review(p, ctx):
+    """A supervisor approves an out-of-spec QC check, or disapproves it and takes scrapped filters off the count."""
+    q = QCCheck.objects.select_for_update().filter(pk=p.get("id")).first()
+    need(q, "That QC check is no longer on file.")
+    need(not q.passed, "That check passed; there's nothing to approve.")
+    d = p.get("decision")
+    need(d in ("approved", "disapproved"), "Approve or disapprove.")
+    n = 0
+    if d == "disapproved":
+        n = to_number(p.get("scrap"))
+        need(n is not None and n >= 0 and n == int(n) and n <= 1_000_000, "How many filters to scrap? (a whole number, 0 for none)")
+        n = int(n) - q.scrapped   # a second decision only scraps the difference
+    sh = q.shift
+    if n:
+        if sh:
+            sh.count = max(0, sh.count - n)
+            if sh.mo and sh.mo.number == q.mo:
+                sh.mo_count = max(0, sh.mo_count - n)
+            sh.save(update_fields=["count", "mo_count"])
+        MO.objects.filter(number=q.mo).update(produced=Greatest(F("produced") - n, 0), scrap=F("scrap") + n)
+    q.review, q.reviewed_by, q.reviewed_at = d, ctx.by, ctx.now
+    q.scrapped = q.scrapped + n
+    q.save(update_fields=["review", "reviewed_by", "reviewed_at", "scrapped"])
+    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else ""))
+    return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"}
 
 
 @cmd("rollAdd")
@@ -1558,6 +1629,71 @@ def conn_remove(p, ctx):
         st.save(update_fields=["conn"])
     audit(ctx, f"Removed the {group} connection")
     return {"msg": "Connection removed.", "data": liveconfig.info()}
+
+
+# ------------------------------------------------------------------ QC items per stage (Admin > QC checks)
+def _qc_list(st, stage):
+    from plant.models import STAGES
+
+    from . import qc
+    need(stage in dict(STAGES), "Unknown stage.")
+    cur = [{"key": i["key"]} if i["builtin"] else {k: i[k] for k in ("key", "label", "type", "min", "max")} for i in qc.items_for(stage, st.config)]
+    return cur
+
+
+def _qc_store(st, stage, items, ctx, what):
+    cfg = dict(st.config)
+    cfg["qcItems"] = {**(cfg.get("qcItems") or {}), stage: items}
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"QC checks ({stage}): {what}")
+
+
+@cmd("qcItemAdd", "lists.edit")
+def qc_item_add(p, ctx):
+    from . import qc
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    key = p.get("key") or ""
+    if key in qc.BUILTIN:
+        need(all(i["key"] != key for i in items), "That item is already on the list.")
+        items.append({"key": key})
+        what = qc.BUILTIN[key]["label"]
+    else:
+        label = str(p.get("label") or "").strip()[:60]
+        need(label, "Name the check.")
+        typ = p.get("type")
+        need(typ in qc.TYPES, "Pick what kind of check it is.")
+        lo, hi = (to_number(p.get(k)) if str(p.get(k) or "").strip() else None for k in ("min", "max"))
+        need(lo is None or hi is None or lo <= hi, "The lowest allowed value is above the highest.")
+        n = 1 + max([int(i["key"][1:]) for i in items if i["key"][1:].isdigit()] + [0])
+        items.append({"key": f"c{n}", "label": label, "type": typ, "min": lo if typ == "number" else None, "max": hi if typ == "number" else None})
+        what = label
+    _qc_store(st, stage, items, ctx, f"added {what}")
+
+
+@cmd("qcItemDel", "lists.edit")
+def qc_item_del(p, ctx):
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    i = int(p.get("i") or -1)
+    need(0 <= i < len(items), "That item is no longer on the list.")
+    gone = items.pop(i)
+    _qc_store(st, stage, items, ctx, f"removed {gone.get('label') or gone['key']}")
+
+
+@cmd("qcItemMove", "lists.edit")
+def qc_item_move(p, ctx):
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    i, d = int(p.get("i") or 0), int(p.get("d") or 0)
+    j = i + d
+    need(0 <= i < len(items) and 0 <= j < len(items), "Can't move that item further.")
+    items[i], items[j] = items[j], items[i]
+    _qc_store(st, stage, items, ctx, "reordered")
 
 
 # ------------------------------------------------------------------ permissions (Admin > Permissions)

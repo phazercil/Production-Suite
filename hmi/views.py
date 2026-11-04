@@ -74,7 +74,19 @@ def state(request):
 
 
 def pin_login(request, pin, user_id=None, perm=""):
-    """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not).
+    """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not)."""
+    u, err = check_pin(request, pin, user_id, perm)
+    if not u:
+        return None, err
+    request.session.cycle_key()  # new session id at every login
+    request.session["pid"] = u.id
+    request.session.pop("sup", None)
+    touch(request)
+    return u, None
+
+
+def check_pin(request, pin, user_id=None, perm=""):
+    """Whose PIN this is (and that they have permission `perm`), without logging them in.
     Slows down PIN guessing: after 5 wrong PINs from one screen (or 20 from one device address), wait 60 seconds."""
     t = timezone.now().timestamp()
     ip_key = "pin_fails:" + (request.META.get("REMOTE_ADDR") or "?")
@@ -106,10 +118,7 @@ def pin_login(request, pin, user_id=None, perm=""):
             log.exception("PIN limit store unavailable")
         return None, (f"That PIN can't do this ({perms.PERMS[perm]['label']})." if perm in perms.PERMS
                       else "That PIN does not match. Try again or ask your shift lead.")
-    request.session.cycle_key()  # new session id at every login
-    request.session["pid"] = u.id
     request.session["pin_fails"] = []
-    touch(request)
     return u, None
 
 
@@ -129,6 +138,7 @@ def login(request):
 @require_POST
 def logout(request):
     request.session.pop("pid", None)
+    request.session.pop("sup", None)
     return state_response(request)
 
 

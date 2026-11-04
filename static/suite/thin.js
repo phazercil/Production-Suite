@@ -86,6 +86,14 @@
   // a form someone has typed into but not sent yet, or a panel showing a result someone asked for ([data-hold]: a test,
   // a new key, an open editor), is never replaced by an automatic refresh
   document.addEventListener("input", e => { const f = e.target.closest && e.target.closest("form"); if (f && !f.hasAttribute("data-autosave")) f.dataset.dirty = "1"; });
+  // a form the server took (not one it refused) has nothing unsaved any more, so refreshes may replace it again
+  body.addEventListener("htmx:afterRequest", e => {
+    const d = e.detail, f = d.elt && d.elt.closest && d.elt.closest("form");
+    if (!f || !d.successful || (d.requestConfig && d.requestConfig.verb === "get")) return;
+    if (/"kind":\s*"bad"/.test(d.xhr.getResponseHeader("HX-Trigger") || "")) return;
+    delete f.dataset.dirty;
+    if (f.matches("[data-reset]")) f.reset();
+  });
   document.addEventListener("focusout", () => setTimeout(() => {
     if (!held.size || typing(document.activeElement)) return;
     held.clear();

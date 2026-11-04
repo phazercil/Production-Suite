@@ -5,6 +5,10 @@
     <span class="alarmcount">{% if alarms %}{{ alarms|length }}{% endif %}</span>
   </button>
   <div class="spacer"></div>
+  {% if S.sup %}<button class="login sup on" hx-post="/kiosk/do/supEnd" title="Supervisor override by {{ S.sup.name }}"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
+    <span>End override</span><span class="who">{{ S.sup.name }}</span></button>
+  {% else %}<button class="login sup" hx-get="/kiosk/m/login?sup=1" hx-target="#modal" hx-swap="innerHTML" title="A supervisor can take over this screen to change finished entries"><svg viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"/></svg>
+    <span>Supervisor</span></button>{% endif %}
   {% if me %}
   <button class="login" hx-post="/kiosk/do/logout"><svg viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
     <span>Log out</span><span class="who">{{ me.name }}</span></button>

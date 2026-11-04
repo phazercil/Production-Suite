@@ -31,6 +31,8 @@ class ShiftRun(models.Model):
     last_count = models.BigIntegerField(null=True, blank=True)
     draw_checked = models.DateTimeField(null=True, blank=True)
     qc_last = models.DateTimeField(null=True, blank=True)
+    qc_after_co = models.BooleanField(default=False)   # a QC check is due as soon as the machine runs after a changeover
+    qc_due_at = models.DateTimeField(null=True, blank=True)   # when that check became due
     uptime = models.IntegerField(null=True, blank=True)
     down_mins = models.IntegerField(null=True, blank=True)
 
@@ -94,15 +96,27 @@ class QCCheck(models.Model):
     mo = models.CharField(max_length=40, blank=True)
     item = models.CharField(max_length=40)
     by = models.CharField(max_length=120)
-    len = models.FloatField()
-    wid = models.FloatField()
-    ph = models.FloatField()
-    sbl = models.FloatField()
-    sbr = models.FloatField()
-    glue = models.CharField(max_length=4)
-    cut = models.CharField(max_length=4)
+    # the drawing measurements and standard checks have their own columns (Grafana and Reports read them);
+    # every item the stage checks (Admin › QC checks) is in `values`
+    len = models.FloatField(null=True, blank=True)
+    wid = models.FloatField(null=True, blank=True)
+    ph = models.FloatField(null=True, blank=True)
+    sbl = models.FloatField(null=True, blank=True)
+    sbr = models.FloatField(null=True, blank=True)
+    glue = models.CharField(max_length=4, blank=True)
+    cut = models.CharField(max_length=4, blank=True)
     scrap = models.IntegerField(default=0)
     passed = models.BooleanField()
+    values = models.JSONField(default=dict, blank=True)
+    fails = models.JSONField(default=list, blank=True)        # keys of the items out of spec
+    due_at = models.DateTimeField(null=True, blank=True)
+    late_reason = models.TextField(blank=True)
+    review = models.CharField(max_length=12, blank=True)      # "" | pending | approved | disapproved (out-of-spec checks)
+    reviewed_by = models.CharField(max_length=120, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    scrapped = models.IntegerField(default=0)                 # filters taken off the count when disapproved
+    edited_by = models.CharField(max_length=120, blank=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "hmi_qc"

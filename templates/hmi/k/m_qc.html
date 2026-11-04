@@ -1,15 +1,17 @@
 {% extends "hmi/k/m_base.html" %}
-{% block title %}QC check{% endblock %}
+{% block title %}{% if edit %}Change QC check · {{ edit.t|clock }}{% else %}QC check{% endif %}{% endblock %}
 {% block form_attrs %}hx-post="/kiosk/do/qcSave"{% endblock %}
 {% block body %}
-  <p class="sub">{{ p.key|default:"No MO" }} · drawing rev {{ p.rev }} · inches</p>
-  <div class="spec">{% for k, label, target in fields %}
-    <label class="f">{{ label }} <span class="num">{{ target|floatformat:2 }} ±{{ p.tol }}</span><input type="number" step="0.01" name="{{ k }}" id="q-{{ k }}" placeholder="{{ target|floatformat:2 }}"
-      hx-post="/kiosk/do/qcField" hx-trigger="input changed delay:300ms" hx-vals='{"k": "{{ k }}"}' hx-params="k,{{ k }}"></label>{% endfor %}</div>
-  <div class="grid2">
-    <div class="f"><span class="note">Glue QC</span><div class="seg"><label><input type="radio" name="glue" value="Pass" checked><span>Pass</span></label><label><input type="radio" name="glue" value="Fail"><span>Fail</span></label></div></div>
-    <div class="f"><span class="note">Cut QC</span><div class="seg"><label><input type="radio" name="cut" value="Pass" checked><span>Pass</span></label><label><input type="radio" name="cut" value="Fail"><span>Fail</span></label></div></div>
-    <label class="f">Scrap count, past 30 min<input type="number" name="scrap" value="0" min="0"></label>
+  {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}"><p class="sub">Checked by {{ edit.by }} · {{ edit.item }} · MO {{ edit.mo }}. Changes are recorded with your name.</p>
+  {% else %}<p class="sub">{{ p.key|default:"No MO" }} · drawing rev {{ p.rev }} · inches{% if afterCo %} · <b>first check after the changeover</b>{% endif %}</p>{% endif %}
+  {% if late %}<div class="panel" style="border-color:var(--bad);margin:8px 0"><label class="f"><span>This check is <b>{{ late }} min late</b>. Why wasn't it done on time?</span><textarea name="lateReason" required style="min-height:60px" placeholder="e.g. machine jammed right after the changeover"></textarea></label></div>{% endif %}
+  <div class="spec">{% for it in items %}{% if it.type == "measure" or it.type == "number" %}
+    <label class="f">{{ it.label }} {% if it.target is not None %}<span class="num">{{ it.target|floatformat:2 }} ±{{ p.tol }}</span>{% elif it.min or it.max %}<span class="num">{% if it.min %}≥ {{ it.min }}{% endif %} {% if it.max %}≤ {{ it.max }}{% endif %}</span>{% endif %}
+      <input type="number" step="0.01" name="{{ it.key }}" id="q-{{ it.key }}" {% if it.v is not None %}value="{{ it.v }}"{% endif %} placeholder="{% if it.target is not None %}{{ it.target|floatformat:2 }}{% endif %}"
+        {% if it.type == "measure" %}hx-post="/kiosk/do/qcField" hx-trigger="input changed delay:300ms" hx-vals='{"k": "{{ it.key }}"{% if edit %}, "item": "{{ edit.item|escapejs }}"{% endif %}}' hx-params="k,item,{{ it.key }}"{% endif %}></label>{% endif %}{% endfor %}</div>
+  <div class="grid2">{% for it in items %}{% if it.type == "check" %}
+    <div class="f"><span class="note">{{ it.label }}</span><div class="seg"><label><input type="radio" name="{{ it.key }}" value="Pass" {% if it.v != "Fail" %}checked{% endif %}><span>Pass</span></label><label><input type="radio" name="{{ it.key }}" value="Fail" {% if it.v == "Fail" %}checked{% endif %}><span>Fail</span></label></div></div>
+    {% elif it.type == "count" %}<label class="f">{{ it.label }}<input type="number" name="{{ it.key }}" value="{{ it.v|default_if_none:0 }}" min="0"></label>{% endif %}{% endfor %}
   </div>
 {% endblock %}
-{% block foot %}<button class="btn go" type="submit">Save QC check</button>{% endblock %}
+{% block foot %}<button class="btn go" type="submit">{% if edit %}Save changes{% else %}Save QC check{% endif %}</button>{% endblock %}

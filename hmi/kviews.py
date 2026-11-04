@@ -31,11 +31,28 @@ BUILT = {"controls", "schedule", "qc-log", "downtime", "maintenance", "status", 
 
 
 # ------------------------------------------------------------------ helpers
+SUP_MINUTES = 10   # a supervisor override ends after this long without a tap
+
+
 def screen(request):
     me, note = current_person(request)
-    s = kscreen.Screen(request, me=me, lock=request.session.get("lock", ""))
+    s = kscreen.Screen(request, me=me, lock=request.session.get("lock", ""), sup=supervisor(request))
     s.note = note
     return s
+
+
+def supervisor(request):
+    """The supervisor who has taken over this screen (Supervisor button), while it lasts."""
+    from plant import perms
+    sup = request.session.get("sup") or {}
+    if not sup or sup.get("until", 0) < now().timestamp():
+        request.session.pop("sup", None)
+        return None
+    p = Person.objects.filter(pk=sup.get("id"), active=True).first()
+    if not perms.can(p, "floor.override"):
+        request.session.pop("sup", None)
+        return None
+    return p
 
 
 def ctx_for(s, **kw):
@@ -99,7 +116,7 @@ def form_params(request):
 
 def run(request, s, name, p):
     """Run one plant command for this screen (the same rules every screen uses)."""
-    return engine.execute(name, p, engine.Ctx(user=s.me, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
+    return engine.execute(name, p, engine.Ctx(user=s.actor, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
 
 
 def _perm_label(perm):
@@ -241,6 +258,9 @@ def dialog(request, name):
 
 @modal("login")
 def m_login(request, s):
+    if request.GET.get("sup"):   # the Supervisor button
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm="floor.override", perm_label=_perm_label("floor.override"),
+                                                                       sup=True, people=kscreen.people_for_login("floor.override")))
     from plant import perms
     perm = request.GET.get("perm") if request.GET.get("perm") in perms.PERMS else ("section.admin" if request.GET.get("admin") else "")
     return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm=perm, perm_label=_perm_label(perm), people=kscreen.people_for_login(perm),
@@ -316,12 +336,40 @@ def changeover_modal(request, s):
 
 @modal("qc", login=True)
 def m_qc(request, s):
-    if not s.shift_on:
-        return thin.refused("Start a shift before logging QC.")
-    p = s.part(s.current_item())
-    fields = [("len", "Length", p["len"]), ("wid", "Width", p["wid"]), ("ph", "Pleat height", p["ph"]), ("sbl", "Side band height L", p["sb"]),
-              ("sbr", "Side band height R", p["sb"])]
-    return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, fields=fields))
+    """A QC check: the items this machine's stage checks (Admin › QC checks). ?edit=id corrects a finished one."""
+    from . import qc
+    from .models import QCCheck
+    edit = None
+    if request.GET.get("edit"):
+        if not s.can("qc.edit"):
+            return login_needed(request, s, {"perm": "qc.edit"})
+        edit = QCCheck.objects.filter(pk=request.GET["edit"]).select_related("shift__machine").first()
+        if not edit:
+            return thin.refused("That QC check is no longer on file.")
+        stage = edit.shift.machine.stage if edit.shift and edit.shift.machine else "s1"
+        p = s.part(edit.item)
+        vals = edit.values or {k: getattr(edit, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
+    else:
+        if not s.shift_on:
+            return thin.refused("Start a shift before logging QC.")
+        stage = s.machine.stage if s.machine else "s1"
+        p = s.part(s.current_item())
+        vals = {}
+    items = [{**it, "target": qc.target(it, p), "v": vals.get(it["key"])} for it in qc.items_for(stage, s.cfg)]
+    late = 0 if edit else s.qc_late()
+    return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, items=items, edit=edit, late=late,
+                                                                 afterCo=bool(not edit and s.shift and s.shift.qc_after_co)))
+
+
+@modal("qcDisapprove")
+def m_qc_disapprove(request, s):
+    from .models import QCCheck
+    if not s.can("qc.approve"):
+        return login_needed(request, s, {"perm": "qc.approve"})
+    q = QCCheck.objects.filter(pk=request.GET.get("id")).first()
+    if not q:
+        return thin.refused("That QC check is no longer on file.")
+    return modal_response(request, "hmi/k/m_qc_disapprove.html", **ctx_for(s, q=q))
 
 
 @modal("rolls", login=True)
@@ -476,6 +524,8 @@ def downtime_rows(s, downs):
 def act(request, name):
     s = screen(request)
     touch(request)
+    if s.sup:   # each tap keeps a supervisor override going
+        request.session["sup"] = {"id": s.sup.pk, "until": now().timestamp() + SUP_MINUTES * 60}
     from . import kadmin
     fn = ACTIONS.get(name) or kadmin.ACTIONS.get(name)
     if not fn:
@@ -523,6 +573,24 @@ def a_login(request, s, p):
         resp = MODALS[nxt][0](request, screen(request))
         return thin.trigger(resp, toast=f"Logged in as {u.name}", changed=True)
     return thin.done(toast=f"Logged in as {u.name}", close=True)
+
+
+@action("supStart")
+def a_sup_start(request, s, p):
+    """Supervisor override: a supervisor's PIN takes over this screen's permissions, without logging the operator out."""
+    from .views import check_pin
+    u, err = check_pin(request, p.get("pin"), p.get("user") or None, "floor.override")
+    if not u:
+        return err_in_modal(err)
+    request.session["sup"] = {"id": u.pk, "until": now().timestamp() + SUP_MINUTES * 60}
+    engine.audit(engine.Ctx(user=u), f"Supervisor override on {s.station or 'a screen'}" + (f" (logged in: {s.me.name})" if s.me else ""))
+    return thin.done(toast=f"Supervisor override: {u.name}. It ends after {SUP_MINUTES} minutes without a tap.", close=True)
+
+
+@action("supEnd")
+def a_sup_end(request, s, p):
+    request.session.pop("sup", None)
+    return thin.done(toast="Supervisor override ended")
 
 
 @action("logout")
@@ -596,17 +664,28 @@ def a_train(request, s, p):
 
 @action("qcSave")
 def a_qc(request, s, p):
-    p = {k: p.get(k, "") for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut")} | {"scrap": int(p.get("scrap") or 0)}
-    r = run(request, s, "qcSave", p)
-    return err_in_modal(r["error"]) if not r["ok"] else thin.done(toast=r.get("msg"), close=True)
+    r = run(request, s, "qcEdit" if p.get("id") else "qcSave", p)
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") else err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg"), close=True)
+
+
+@action("qcReview")
+def a_qc_review(request, s, p):
+    r = run(request, s, "qcReview", {k: p.get(k, "") for k in ("id", "decision", "scrap")})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("admin") else (err_in_modal(r["error"]) if request.headers.get("X-In-Modal") else thin.refused(r["error"]))
+    return thin.done(toast=r.get("msg"), close=True)
 
 
 @action("qcField")
 def a_qc_field(request, s, p):
     """As a measurement is typed: in or out of tolerance (the part's spec), shown on the field."""
+    from . import qc
     k = p.get("k", "")
-    pp = s.part(s.current_item())
-    target = {"len": pp["len"], "wid": pp["wid"], "ph": pp["ph"], "sbl": pp["sb"], "sbr": pp["sb"]}.get(k)
+    pp = s.part(p.get("item") or s.current_item())
+    it = next((x for x in qc.items_for(s.machine.stage if s.machine else "s1", s.cfg) if x["key"] == k), None)
+    target = qc.target(it, pp) if it else None
     try:
         v = float(p.get(k) or "")
     except ValueError:
