@@ -8,7 +8,7 @@
       body: JSON.stringify({ pin: inp.value, adminOnly: true }) })
       .then(function (r) { return r.json(); })
       .then(function (r) {
-        if (r.ok && r.me && r.me.role === 'admin') location.reload();
+        if (r.ok && r.me && (r.me.role === 'lead' || r.me.role === 'admin')) location.reload();
         else { err.textContent = r.error || 'That PIN is not a shift lead PIN.'; inp.select(); }
       })
       .catch(function () { err.textContent = 'The server is not answering. Try again.'; });
