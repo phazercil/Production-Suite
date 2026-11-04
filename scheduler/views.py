@@ -63,7 +63,8 @@ def labor_json(world, lead, a=None, b=None):
     for mid, info in (world.get("laborLines") or {}).items():
         lines[mid] = {"line": info["line"], "shifts": {str(sid): {k: v for k, v in sh.items() if lead or k != "costPerHour"}
                                                         for sid, sh in info["shifts"].items()}}
-    return {"on": bool(plan), "enabled": world["cfg"].get("useLabor", True), "version": plan.version if plan else 0,
+    from labor.sync import master_on
+    return {"on": bool(plan), "master": master_on(), "enabled": world["cfg"].get("useLabor", True), "version": plan.version if plan else 0,
             "lines": lines, "days": plan.special_days(a, b) if plan and a and b else {}}
 
 
@@ -275,12 +276,18 @@ def save_config(request):
             raise BadRequest(f"{what} must be between {lo:g} and {hi:g}.")
         return f
 
+    from labor.sync import master_on
+    labor = master_on()   # the Labor Budget is the master of lines and shifts: only machine settings are saved here
+    if labor:
+        known = set(Machine.objects.values_list("id", flat=True))
+        if any(not isinstance(m, dict) or m.get("id") not in known for m in machines_in) or (p.get("removedMachines") or []):
+            raise BadRequest("Lines are added and removed in the Labor Budget now. Change them there; this page follows it.")
     st = PlantSettings.load()
     st.planner = {"coSamePart": bool(p.get("coSamePart")), "coFirst": p.get("coFirst") is not False,
                   "useLabor": p.get("useLabor") is not False}
     st.save(update_fields=["planner"])
     keep_s, sid_map = [], {}
-    for i, sh in enumerate(shifts_in):
+    for i, sh in enumerate([] if labor else shifts_in):
         if not isinstance(sh, dict):
             raise BadRequest("A shift didn't come through. Reload the page and try again.")
         name = str(sh.get("name") or "").strip()[:60] or f"Shift {i + 1}"
@@ -302,7 +309,7 @@ def save_config(request):
             ShiftBreak.objects.create(shift=obj, label=str(b.get("label") or "Break").strip()[:60] or "Break",
                                       start=hhmm(b.get("start"), f"{name} break start"), end=hhmm(b.get("end"), f"{name} break end"))
     # Delete only what this planner removed. Lines or shifts added meanwhile from another screen are kept.
-    removed_s = [x for x in p.get("removedShifts") or [] if isinstance(x, int) and x not in keep_s]
+    removed_s = [] if labor else [x for x in p.get("removedShifts") or [] if isinstance(x, int) and x not in keep_s]
     Shift.objects.filter(id__in=removed_s).delete()
     if not Shift.objects.exists():
         raise BadRequest("Keep at least one shift.")
@@ -314,24 +321,27 @@ def save_config(request):
         obj = Machine.objects.filter(pk=m.get("id")).first() if isinstance(m.get("id"), int) else None
         if not obj:
             obj = Machine(color=PALETTE[Machine.objects.count() % len(PALETTE)])
-        name = str(m.get("name") or "").strip()[:60] or f"Line {i + 1}"
+        name = obj.name if labor else (str(m.get("name") or "").strip()[:60] or f"Line {i + 1}")
         if name.lower() in names:
             raise BadRequest(f"Two lines are called {name}. Give each line its own name.")
         names.add(name.lower())
-        stage = m.get("stage") if m.get("stage") in STAGE_ORDER else "s1"
+        stage = obj.stage if labor else (m.get("stage") if m.get("stage") in STAGE_ORDER else "s1")
         if obj.pk and obj.stage != stage and ShiftRun.objects.filter(machine=obj, active=True).exists():
             raise BadRequest(f"{obj.name} has a shift running, so its stage can't change. End the shift on the Operator Kiosk first.")
         modes = [x for x, _ in SPEED_MODES[stage]]
         if obj.pk and orig_names.get(obj.pk) != name:
             renames.append((obj.pk, orig_names.get(obj.pk), name))
-        obj.name, obj.stage, obj.sort = name, stage, i
+        obj.name, obj.stage = name, stage
+        if not labor:
+            obj.sort = i
         obj.speed_mode = m.get("mode") if m.get("mode") in modes else modes[0]
         obj.ppm = num(m.get("ppm"), f"{name} speed (PPM)", 0, 5000)
         obj.rate = num(m.get("rate"), f"{name} speed (/hr)", 0, 100000)
         obj.scrap_pct = num(m.get("scrap"), f"{name} scrap %", 0, 90)
         obj.downtime_pct = num(m.get("downtime"), f"{name} downtime %", 0, 90)
         obj.changeover_min = num(m.get("changeover"), f"{name} changeover minutes", 0, 1440)
-        obj.run_lunch = bool(m.get("runLunch"))
+        if not labor:
+            obj.run_lunch = bool(m.get("runLunch"))
         if Machine.objects.filter(name__iexact=name).exclude(pk=obj.pk).exclude(pk__in=[x.get("id") for x in machines_in if isinstance(x.get("id"), int)]).exists():
             raise BadRequest(f"There is already a line called {name}.")
         # free the name if another line in this save is taking it over (renames that swap names)
@@ -340,7 +350,8 @@ def save_config(request):
             clash.name = f"{clash.name}~{clash.pk}"
             clash.save(update_fields=["name"])
         obj.save()
-        obj.shifts.set([sid_map[x] for x in m.get("shifts") or [] if x in sid_map])
+        if not labor:
+            obj.shifts.set([sid_map[x] for x in m.get("shifts") or [] if x in sid_map])
         keep_m.append(obj.id)
     removed = Machine.objects.filter(id__in=[x for x in p.get("removedMachines") or [] if isinstance(x, int) and x not in keep_m])
     busy = [r.name for r in removed if ShiftRun.objects.filter(machine=r, active=True).exists()]

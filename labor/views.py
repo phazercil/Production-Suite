@@ -141,7 +141,7 @@ def save(request):
     if denied:
         return denied
     p = body(request)
-    from .sync import merge, save_line_shifts
+    from .sync import apply_to_suite, merge
     data = validate_plan(p.get("data"))
     sent = json.dumps({k: v for k, v in data.items() if k != "suite"}, sort_keys=True, default=str)
     base = to_int(p.get("version"), "plan version")
@@ -154,10 +154,13 @@ def save(request):
             return JsonResponse({"ok": False, "conflict": True, "version": plan.version, "updatedBy": plan.updated_by,
                                  "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
                                  "error": f"{plan.updated_by or 'Someone'} changed the labor plan on another screen."}, status=409)
-        for what in (save_line_shifts(data) if budget == "A" else []):   # budget A's running shifts are the machines' shifts too
-            from hmi.engine import Ctx, audit
-            audit(Ctx(user=me), f"Labor Budget: {what}")
-        data, _ = merge(data)   # lines, speeds, shifts and the work week always come from the suite
+        if budget == "A":   # budget A is the master of the suite's lines and shifts
+            data, changes = apply_to_suite(data, old=plan.data if plan.version else None)
+            if changes:
+                from hmi.engine import Ctx, audit, refresh_schedule
+                audit(Ctx(user=me), "Labor Budget: " + "; ".join(changes)[:900])
+                refresh_schedule(f"{me.name} (Labor Budget)")
+        data, _ = merge(data)   # speeds, colors and anything added in Admin come from the suite
         changed = json.dumps({k: v for k, v in data.items() if k != "suite"}, sort_keys=True, default=str) != sent
         plan.data, plan.version = data, plan.version + 1
         plan.updated_by, plan.updated_at = me.name[:120], timezone.now()

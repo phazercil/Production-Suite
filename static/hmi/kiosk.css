@@ -456,3 +456,4 @@ body.c-dragging{cursor:grabbing;user-select:none}
 .okt{color:var(--ok-ink)}
 .badt{color:#f3b3ab}
 .gextra{max-width:360px}
+input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}

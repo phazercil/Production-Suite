@@ -388,6 +388,11 @@ function renderLines(){
   ${laborSection(c)}
   <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after, except lunch on a line marked <b>Runs through lunch</b>.</p></div><button class="btn" id="adds">+ Add shift</button></div>
   <div class="shift-grid">${shifts}</div>`;
+  if(S.labor&&S.labor.master){
+    // the Labor Budget is the master of lines and shifts: they're shown here, changed there
+    $("#main").querySelector(".page-head").insertAdjacentHTML("afterend",`<div class="card" style="border-left:4px solid var(--accent);margin-bottom:14px"><b>Lines and shifts come from the Labor Budget.</b> Add, rename or remove lines, change which shifts a line runs, whether it runs through lunch, and shift times, days and lunch in the <a href="/labor/">Labor Budget</a>; this page follows it when it's saved. Speeds, scrap, downtime and changeover times are still set here.</div>`);
+    $$('#main [data-f="name"],#main [data-f="stage"],#main [data-f="runLunch"],#main [data-shift],#main [data-del],#main #addm,#main .shift input,#main .shift button,#main #adds').forEach(el=>{el.disabled=true;el.title="Set in the Labor Budget"});
+  }
   const tb=$("tbody");
   tb.oninput=tb.onchange=e=>{const c=S.cfg;const tr=e.target.closest("tr");if(!tr)return;const m=c.machines[+tr.dataset.i];if(!m)return;
     if(e.target.dataset.f){const f=e.target.dataset.f;let v=e.target.type==="checkbox"?e.target.checked:e.target.value;if(["ppm","rate","scrap","downtime","changeover"].includes(f))v=Number(v)||0;m[f]=v;
