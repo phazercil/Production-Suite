@@ -331,6 +331,7 @@ def save_config(request):
         obj.scrap_pct = num(m.get("scrap"), f"{name} scrap %", 0, 90)
         obj.downtime_pct = num(m.get("downtime"), f"{name} downtime %", 0, 90)
         obj.changeover_min = num(m.get("changeover"), f"{name} changeover minutes", 0, 1440)
+        obj.run_lunch = bool(m.get("runLunch"))
         if Machine.objects.filter(name__iexact=name).exclude(pk=obj.pk).exclude(pk__in=[x.get("id") for x in machines_in if isinstance(x.get("id"), int)]).exists():
             raise BadRequest(f"There is already a line called {name}.")
         # free the name if another line in this save is taking it over (renames that swap names)

@@ -405,6 +405,16 @@ class ReviewerFindingTests(TestCase):
         from hmi.models import PpmReading
         self.assertFalse(PpmReading.objects.filter(line="Barbara").exists())
 
+    def test_runs_through_lunch_is_saved_from_the_scheduler(self):
+        from plant.models import Machine
+        self.lead()
+        st = self.c.get("/api/scheduler/state").json()
+        cfg = {**st["cfg"], "cfgSig": st["cfgSig"]}
+        for m in cfg["machines"]:
+            m["runLunch"] = m["name"] == "Salvatore"
+        self.assertTrue(self.post("/api/scheduler/config", cfg).json()["ok"])
+        self.assertEqual(set(Machine.objects.filter(run_lunch=True).values_list("name", flat=True)), {"Salvatore"})
+
     def test_stale_lines_save_keeps_machines_added_elsewhere(self):
         self.lead()
         st = self.c.get("/api/scheduler/state").json()                              # planner's screen

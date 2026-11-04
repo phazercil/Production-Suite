@@ -25,6 +25,10 @@ QDEF = {
     "part_spec": {"title": "Part specs (drawing)", "help": "One row for the part. \"Get updated drawing\" copies these into Parts & specs, so QC checks use them.",
                   "roles": [["rev", "Drawing rev", 1], ["pleats", "Pleats per unit"], ["len", "Length"], ["wid", "Width"], ["ph", "Pleat height"],
                             ["sb", "Side band height"], ["tol", "Tolerance ±"], ["media", "Media"]]},
+    "part_tooling": {"title": "Tooling for the part", "help": "What the run screen shows under Up Next and Current MO. Either one row per tool (Tool type + Tool), "
+                                                                "or one row with a column each for screws, helix, media and side bands.",
+                     "roles": [["kind", "Tool type (screws, helix, media, side band)"], ["name", "Tool / part number"], ["detail", "Size or note"],
+                               ["screws", "Screws"], ["helix", "Helix"], ["media", "Media"], ["sideband", "Side bands"]]},
 }
 
 

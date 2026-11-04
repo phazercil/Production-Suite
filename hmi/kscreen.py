@@ -322,7 +322,32 @@ class Screen:
                 per = p["pleats"]
             out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0,
                        rate=f"{last_ppm / per:.1f}" if per else "—", eta=self.eta())
+        from . import runinfo
+        use_db = bool(self.settings.get("useDb"))
+        code = self.machine.code if self.machine else ""
+        if mo:
+            out["tool"] = runinfo.tooling(mo.part, self.station, code, self.t, use_db)
+            out["avg"] = runinfo.averages(mo.part, self.station, self.t)
+            if out["avg"]:
+                out["avg_rows"] = [(f"On {self.station}", out["avg"]["here"]), ("Any machine", out["avg"]["all"])]
+        nco = self.next_changeover(nx)
+        if nco:
+            nco["tool"] = runinfo.tooling(nco["m"].part, self.station, code, self.t, use_db)
+        out["nextCo"] = nco
+        out["reports"] = runinfo.report_history(self.station, self.t)
         return out
+
+    def next_changeover(self, nx):
+        """The next MO on this line that needs a changeover and is planned to start within a day."""
+        soon = self.t + timedelta(hours=24)
+        for i, x in enumerate(nx):
+            if not x["co"]:
+                continue
+            ps = x["m"].plan_start
+            if ps is None or ps <= soon:
+                return {**x, "n": i + 1, "unplanned": ps is None}
+            return None
+        return None
 
 
 def plan_label(t, ref):
@@ -360,7 +385,7 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
     """Schedule page: today's timeline (positions in pixels), this month's due dates, and the MO list."""
     from datetime import date, timedelta as td
 
-    from plant.util import shift_windows, sod_ms
+    from plant.util import is_lunch, shift_windows, sod_ms
     from suite.templatetags.suite import clock
     t_ms = ms(s.t)
     out = {"view": view, "status": status, "sort": sort, "notices": s.unread_notices()}
@@ -387,14 +412,22 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
                     continue
                 l0 = max(X(b["start"]), LW)
                 w = max(30, min(X(b["end"]), total) - l0 - 4)
-                blocks.append({**b, "left": round(l0), "width": round(w), "more": b["end"] > end,
-                               "hours": f"{(b['end'] - b['start']) / 3600000:.1f}", "from": clock(_local_ms(b["start"])), "to": clock(_local_ms(b["end"]))})
+                blocks.append({**b, "left": round(l0), "width": round(w), "right": round(l0 + w), "more": b["end"] > end,
+                               "hours": f"{(b['end'] - b['start']) / 3600000:.1f}", "from": clock(_local_ms(b["start"])), "to": clock(_local_ms(b["end"])),
+                               "finish": plan_label(_local_ms(b["end"]), _local_ms(t_ms))})
             for i, b in enumerate(blocks):
                 if b["kind"] == "co" and i + 1 < len(blocks):
                     b["eta"] = {"left": round(max(LW, X(blocks[i + 1]["start"]) - 110)), "at": blocks[i + 1]["from"]}
-            lanes.append({"m": m, "blocks": blocks,
-                          "breaks": [{"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
-                                      "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"]))} for b in brks]})
+            runs = [b for b in blocks if b["kind"] == "mo"]
+            lane_breaks = []
+            for b in brks:
+                lunch = is_lunch(b["name"])
+                thru = lunch and m.run_lunch
+                busy = any(r["start"] < b["e"] and r["end"] > b["s"] for r in runs)
+                lane_breaks.append({"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
+                                    "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"])), "lunch": lunch, "thru": thru,
+                                    "state": ("running" if busy else "relief cover") if thru else ("stopped" if lunch and busy else "")})
+            lanes.append({"m": m, "blocks": blocks, "breaks": lane_breaks})
         out["gantt"] = {"total": total, "LW": LW, "SW": SW, "head": head, "days": days, "lanes": lanes,
                         "now": round(X(t_ms)) if ds < t_ms < end else None, "scrollTo": max(0, round(X(t_ms)) - 320) if ds < t_ms < end else 0}
     else:
@@ -423,9 +456,18 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
 
 def line_blocks(s, m, sh, t_ms):
     """A line's runs on the timeline: the running MO from its actual start to the live finish estimate, planned runs
-    with their changeovers, and a changeover in progress."""
+    with their changeovers, and a changeover in progress (the MO being set up starts when it is due to finish)."""
     out = []
     eta_ms = None
+    live = None
+    if sh and sh.state == "changeover" and (sh.co or {}).get("start"):
+        cs = sh.co["start"]
+        new = MO.objects.filter(pk=sh.co.get("newMo")).first() if sh.co.get("newMo") else None
+        allot = round((new.plan_co if new and new.plan_co else 0) or m.changeover_min or s.rules.get("coMins", 45))
+        took = max(0, (t_ms - cs) // 60000)
+        live = {"kind": "co", "live": True, "start": cs, "end": max(t_ms, cs + allot * 60000), "mins": allot, "took": took,
+                "over": took > allot, "overBy": took - allot, "new": new}
+        out.append(live)
     for mo in MO.objects.filter(line=m, status="OPEN").order_by("seq"):
         running = bool(sh and sh.mo_id == mo.pk)
         if running:
@@ -439,13 +481,16 @@ def line_blocks(s, m, sh, t_ms):
         if not mo.plan_start:
             continue
         ps = ms(mo.plan_start)
+        run_ms = ms(mo.plan_end) - ps - (mo.plan_co or 0) * 60000
+        if live and live["new"] and mo.pk == live["new"].pk:
+            out.append({"kind": "mo", "m": mo, "start": live["end"], "end": live["end"] + max(run_ms, 60000), "running": False})
+            continue
+        if live and ps < live["end"]:
+            continue   # planned before the changeover now under way; the Scheduler moves it on its next pass
         if mo.plan_co:
             out.append({"kind": "co", "start": ps, "end": ps + mo.plan_co * 60000, "mins": round(mo.plan_co)})
         out.append({"kind": "mo", "m": mo, "start": ps + (mo.plan_co or 0) * 60000, "end": ms(mo.plan_end), "running": False})
-    if sh and sh.state == "changeover" and (sh.co or {}).get("start"):
-        cs = sh.co["start"]
-        co_mins = s.rules.get("coMins", 45)
-        out.insert(0, {"kind": "co", "start": cs, "end": max(t_ms, cs + co_mins * 60000), "mins": co_mins})
+    out.sort(key=lambda b: b["start"])
     return out
 
 
@@ -485,20 +530,50 @@ def downtime_page(s):
     rows = downtime_rows(s, mine)
     for i, x in enumerate(rows):
         x["letter"] = chr(65 + i % 26)
-    return {"rows": rows, "older": downtime_rows(s, older), "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
+    stopped_mins = round((s.t - sh.stop_start).total_seconds() / 60) if sh and sh.stop_start else 0
+    head = None
+    if sh:
+        st = shift_stats(sh)
+        logged = sum(d.minutes or 0 for d in mine)
+        head = {"run": st["run"], "down": logged + stopped_mins, "stops": len(mine) + (1 if sh.stop_start else 0), "uptime": st["uptime"],
+                "since": sh.start}
+    return {"head": head, "rows": rows, "older": downtime_rows(s, older), "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
             "stopped": sh.stop_start if sh else None, "stoppedMins": round((s.t - sh.stop_start).total_seconds() / 60) if sh and sh.stop_start else 0,
             "errorsNow": s.current_errors() if sh and sh.stop_start else []}
 
 
-def maintenance_page(s):
+def maintenance_page(s, show="open"):
+    """Maintenance requests with their repair notes: open and in progress, completed, or all of the last 30 days."""
     from django.db.models import Q
 
-    from .models import TicketPhoto
-    tickets = list(Ticket.objects.filter(Q(t__gte=s.t - timedelta(days=3)) | ~Q(status="Closed")).order_by("-t"))
-    pics = {}
+    from .models import TicketNote, TicketPhoto
+    month = s.t - timedelta(days=30)
+    qs = Ticket.objects.all()
+    if show == "open":
+        qs = qs.exclude(status="Closed")
+    elif show == "done":
+        qs = qs.filter(status="Closed", updated__gte=month)
+    else:
+        qs = qs.filter(Q(t__gte=month) | ~Q(status="Closed"))
+    tickets = list(qs.order_by("-t")[:200])
+    pics, notes = {}, {}
     for p in TicketPhoto.objects.filter(ticket__in=tickets).values("id", "ticket_id"):
         pics.setdefault(p["ticket_id"], []).append(p["id"])
-    return {"tickets": [{"t": t, "photos": pics.get(t.id, [])} for t in tickets], "limit": PHOTO_LIMIT}
+    for n in TicketNote.objects.filter(ticket__in=tickets):
+        notes.setdefault(n.ticket_id, []).append(n)
+    week = s.t - timedelta(days=7)
+    rows = []
+    for t in tickets:
+        took = round((t.updated - t.t).total_seconds() / 60) if t.status == "Closed" and t.updated else None
+        rows.append({"t": t, "photos": pics.get(t.id, []), "notes": notes.get(t.id, []), "took": took,
+                     "age": round((s.t - t.t).total_seconds() / 60)})
+    if show == "open":
+        order = {"High": 0, "Medium": 1, "Low": 2}
+        rows.sort(key=lambda r: (order.get(r["t"].priority, 1), r["t"].t))
+    return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
+            "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status="In progress").count(),
+                       "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
+            "canWork": s.can("tickets.work")}
 
 
 def status_page(s):

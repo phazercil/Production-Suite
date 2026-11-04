@@ -21,7 +21,7 @@ from plant.util import MIN, Catalog, default_ops, from_ms, iso_date, ms, now, pa
 
 from . import integrations
 from .models import (PlannedTime, AuditLog, ChangeoverCache, Downtime, Event, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag,
-                     SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError)
+                     SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError, ToolingCache)
 
 log = logging.getLogger("plant")
 
@@ -145,7 +145,7 @@ def planned_windows(sh, kinds=False):
     from django.utils import timezone as _tz
 
     from plant.models import Shift
-    from plant.util import hm, local
+    from plant.util import hm, is_lunch, local
     if not sh or not sh.shift_name:
         return []
     shift = Shift.objects.filter(name=sh.shift_name).prefetch_related("breaks").first()
@@ -162,7 +162,10 @@ def planned_windows(sh, kinds=False):
             grace = rules().get("startGrace", 0) or 0
             if grace:
                 out.append((s0, s0 + timedelta(minutes=grace), "Start-up"))
+            through = bool(sh.machine and sh.machine.run_lunch)
             for b in shift.breaks.all():
+                if through and is_lunch(b.label):
+                    continue   # the line runs through lunch, so a stop then is downtime
                 bo = (hm(b.start) - hm(shift.start)) % 1440
                 bl = (hm(b.end) - hm(b.start)) % 1440
                 if bl and bo < length:
@@ -689,14 +692,38 @@ def ticket_add(p, ctx):
     return {"msg": "Maintenance ticket sent", "data": {"id": t.id}}
 
 
-@cmd("ticketStatus")
+@cmd("ticketStatus", "tickets.work")
 def ticket_status(p, ctx):
-    t = Ticket.objects.filter(pk=p.get("id")).first()
+    from .models import TicketNote
+    t = Ticket.objects.select_for_update().filter(pk=p.get("id")).first()
     need(t, "Ticket not found.")
-    t.status = "In progress" if t.status == "Open" else "Closed"
+    need(t.status != "Closed", "That request is already completed.")
+    note = str(p.get("note") or "").strip()
+    need(len(note) <= 4000, "Keep the repair note under 4,000 characters.")
+    t.status = "In progress" if t.status == "Open" and not p.get("close") else "Closed"
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save()
+    TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
+                              text=note or ("Completed" if t.status == "Closed" else "Started work"))
     event("maintenance_status", {"id": t.id, "status": t.status})
+    return {"msg": "Marked complete" if t.status == "Closed" else "Work started"}
+
+
+@cmd("ticketNote", "tickets.work")
+def ticket_note(p, ctx):
+    from .models import TicketNote
+    t = Ticket.objects.filter(pk=p.get("id")).first()
+    need(t, "Ticket not found.")
+    text = str(p.get("text") or "").strip()
+    need(text, "Write the repair note first.")
+    need(len(text) <= 4000, "Keep the repair note under 4,000 characters.")
+    TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, text=text)
+    if t.status == "Open":
+        t.status = "In progress"
+    t.updated, t.updated_by = ctx.now, ctx.by
+    t.save(update_fields=["status", "updated", "updated_by"])
+    event("maintenance_note", {"id": t.id})
+    return {"msg": "Repair note added"}
 
 
 @cmd("noteAdd")
@@ -909,13 +936,14 @@ def apply_paycom(ctx, employees, stale=False):
     st = settings_obj()
     P = st.settings["paycom"]
 
-    def inc(v, f):
+    def inc(v, f, exact=False):
         lst = [x.strip().lower() for x in str(f or "").split(",") if x.strip()]
-        return not lst or any(x in str(v or "").lower() for x in lst)
+        v = " ".join(str(v or "").lower().split())
+        return not lst or any((x == v) if exact else (x in v) for x in lst)
 
     if not isinstance(employees, list):
         raise Need("Paycom did not send an employee list. Nobody was changed.")
-    lst = [e for e in employees if isinstance(e, dict) and e.get("code") and inc(e.get("department"), P.get("dept")) and inc(e.get("position"), P.get("position"))]
+    lst = [e for e in employees if isinstance(e, dict) and e.get("code") and inc(e.get("department"), P.get("dept")) and inc(e.get("position"), P.get("position"), bool(P.get("positionExact")))]
     known = Person.objects.filter(source="paycom", active=True).count()
     if known and (not lst or len(lst) < known * 0.5):
         P["msg"] = (f"Paycom sent {len(lst)} matching people but {known} are active here, so nothing was changed. "
@@ -962,6 +990,33 @@ def apply_paycom(ctx, employees, stale=False):
 def paycom_import(p, ctx):
     need(integrations.paycom_ready(), "Paycom is not set up. Add PAYCOM_SID and PAYCOM_TOKEN to the server .env.")
     return {"msg": "Paycom: " + apply_paycom(ctx, integrations.paycom_employees())}
+
+
+@cmd("paycomPositions", "connections.edit")
+def paycom_positions(p, ctx):
+    """Every position title Paycom has for active employees (in the department filter), with how many people hold it."""
+    from collections import Counter
+    need(integrations.paycom_ready(), "Paycom is not set up. Add PAYCOM_SID and PAYCOM_TOKEN to the server .env.")
+    P = settings_obj().settings.get("paycom") or {}
+    depts = [x.strip().lower() for x in str(P.get("dept") or "").split(",") if x.strip()]
+    c = Counter()
+    for e in integrations.paycom_employees():
+        if not e.get("active") or (depts and not any(d in str(e.get("department") or "").lower() for d in depts)):
+            continue
+        c[" ".join(str(e.get("position") or "").split()) or "(no position)"] += 1
+    return {"data": sorted(c.items(), key=lambda x: (-x[1], x[0].lower()))}
+
+
+@cmd("paycomPositionsSet", "connections.edit")
+def paycom_positions_set(p, ctx):
+    pos = [" ".join(str(x).split()) for x in (p.get("positions") or []) if str(x).strip() and str(x) != "(no position)"]
+    need(all("," not in x and len(x) <= 120 for x in pos), "A position title can't contain a comma.")
+    st = settings_obj()
+    P = st.settings.setdefault("paycom", {})
+    P["position"], P["positionExact"] = ", ".join(pos), bool(pos)
+    st.save(update_fields=["settings"])
+    audit(ctx, "Paycom import limited to positions: " + (", ".join(pos) if pos else "all positions"))
+    return {"msg": f"Importing {len(pos)} position{'s' if len(pos) != 1 else ''}" if pos else "Importing every position"}
 
 
 @cmd("paycomFields", "connections.edit")
@@ -1022,6 +1077,32 @@ def user_set(p, ctx):
     else:
         raise Need("Unknown field.")
     u.save()
+
+
+@cmd("personSave", "team.manage")
+def person_save(p, ctx):
+    """Everything from a person's Edit dialog at once: only the fields that changed are written, and if any of them
+    is refused nothing is saved."""
+    u = Person.objects.select_for_update().filter(pk=p.get("id")).first()
+    need(u, "Person not found.")
+    changed = 0
+    for f in ("name", "role", "pin"):
+        if f in p and str(p.get(f) or "").strip() != str(getattr(u, f) or "").strip():
+            user_set({"id": u.pk, "f": f, "v": p.get(f)}, ctx)
+            u.refresh_from_db()
+            changed += 1
+    if "active" in p and u.source != "paycom" and bool(p.get("active")) != u.active:
+        user_set({"id": u.pk, "f": "active", "v": bool(p.get("active"))}, ctx)
+        u.refresh_from_db()
+        changed += 1
+    if isinstance(p.get("trained"), list):
+        want = {str(x) for x in p["trained"]}
+        have = set(u.trained.values_list("name", flat=True))
+        for m in Machine.objects.filter(active=True):
+            if (m.name in want) != (m.name in have):
+                user_set({"id": u.pk, "f": "train", "v": {"line": m.name, "on": m.name in want}}, ctx)
+                changed += 1
+    return {"msg": f"Saved {u.name}" if changed else "No changes to save"}
 
 
 # ---------------------------------------------------------- admin lists, machines, shifts, parts, rules
@@ -1404,7 +1485,7 @@ def rule_set(p, ctx):
 SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2kEvery": "n", "peopleUrl": "s", "peopleEvery": "n", "webhook": "s", "useDb": "b",
             "grafana.on": "b", "grafana.url": "s", "grafana.uid": "s", "grafana.slug": "s", "grafana.org": "n", "grafana.ppm": "n",
             "grafana.uptime": "n", "grafana.count": "n", "grafana.refresh": "s", "grafana.lineVar": "s",
-            "paycom.auto": "b", "paycom.every": "n", "paycom.dept": "s", "paycom.position": "s", "paycom.pinFrom": "s",
+            "paycom.auto": "b", "paycom.every": "n", "paycom.dept": "s", "paycom.position": "s", "paycom.positionExact": "b", "paycom.pinFrom": "s",
             "kiosk.layout": "s", "kiosk.range": "s", "kiosk.cols": "n", "kiosk.rotate": "n", "kiosk.panels": "j",
             "grafana.report": "j"}
 
@@ -2110,7 +2191,7 @@ def data_reset(p, ctx):
         from plant.demo import seed_demo
         seed_demo(reset=True)
         return {"msg": "Demo data loaded", "relogin": True}
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, MachineError):
+    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, ToolingCache, MachineError):
         model.objects.all().delete()
     MO.objects.all().delete()
     Machine.objects.filter(feed_type="demo").update(feed_type="none")
@@ -2136,7 +2217,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_tooling": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):

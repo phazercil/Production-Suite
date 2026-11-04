@@ -158,6 +158,19 @@ class Ticket(models.Model):
         ordering = ["t"]
 
 
+class TicketNote(models.Model):
+    """A repair note on a maintenance request: what was found, what was done, parts used."""
+    ticket = models.ForeignKey(Ticket, related_name="repairs", on_delete=models.CASCADE)
+    t = models.DateTimeField()
+    by = models.CharField(max_length=120)
+    text = models.TextField()
+    kind = models.CharField(max_length=12, default="note")   # note | started | closed
+
+    class Meta:
+        db_table = "hmi_ticket_notes"
+        ordering = ["t", "id"]
+
+
 class TicketPhoto(models.Model):
     """A picture of what is wrong, taken on a tablet or phone when the ticket is opened (or added later).
     Kept in the records database, so it is backed up with everything else. The server keeps a 1600 px JPEG and a thumbnail."""
@@ -261,6 +274,18 @@ class SavedQuery(models.Model):
 
     class Meta:
         db_table = "hmi_saved_queries"
+
+
+class ToolingCache(models.Model):
+    """Last tooling the asset database returned for a part on a machine (screws, helix, media, side bands)."""
+    part = models.CharField(max_length=40)
+    machine = models.CharField(max_length=60)
+    groups = models.JSONField(default=list)
+    t = models.DateTimeField()
+
+    class Meta:
+        db_table = "hmi_tooling_cache"
+        unique_together = [("part", "machine")]
 
 
 class ChangeoverCache(models.Model):

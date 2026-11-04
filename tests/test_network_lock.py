@@ -337,6 +337,8 @@ class OutsideDatabaseTests(TestCase):
         env = {"MACHINE_DB_HOST": "aps.example", "MACHINE_DB_INTERNET": "1"}
         self.assertTrue(read_only_mysql(lambda k, d=None: env.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
         self.assertFalse(read_only_mysql(lambda k, d=None: {"MACHINE_DB_HOST": "x"}.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
+
+
 class TwilioErrorTests(TestCase):
     def test_a_trial_account_gets_a_plain_explanation(self):
         import io

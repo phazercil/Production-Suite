@@ -1,0 +1,15 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Edit {{ u.name }}{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/personSave"{% endblock %}
+{% block body %}<input type="hidden" name="id" value="{{ u.id }}"><input type="hidden" name="hasTrained" value="1">
+  {% if u.source == "paycom" %}<p class="sub">Imported from Paycom ({{ u.eecode }}{% if u.position %} · {{ u.position }}{% endif %}). The next import sets the name and active status again; role, PIN and training stay as you set them.</p>{% endif %}
+  <div class="grid2">
+    <label class="f">Name<input type="text" name="name" value="{{ u.name }}" maxlength="120" required autofocus></label>
+    <label class="f">PIN<input type="text" name="pin" value="{{ u.pin }}" placeholder="3–12 letters or digits" autocomplete="off" {% if not u.pin %}style="border-color:var(--bad)"{% endif %}></label>
+    <label class="f">Role<select name="role">{% for v, lbl in "operator:Operator,maintenance:Maintenance,lead:Shift lead"|pairs %}<option value="{{ v }}" {% if u.role == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}{% if S.perms.permissions_manage %}<option value="admin" {% if u.role == "admin" %}selected{% endif %}>Admin</option>{% endif %}</select></label>
+    <div class="f"><span class="note">Status</span>{% if u.source == "paycom" %}<span>{% if u.active %}Active{% else %}Inactive{% endif %} <span class="note">(from Paycom)</span></span>{% elif you %}<span>Active <span class="note">(you can't deactivate yourself)</span></span>{% else %}<input type="hidden" name="hasActive" value="1"><label class="chk"><input type="checkbox" name="active" value="1" {% if u.active %}checked{% endif %}> Active (can log in)</label>{% endif %}</div>
+  </div>
+  <div class="f" style="margin-top:10px"><span class="note">Trained on</span><div class="trainpick">{% for name, on in lines %}<label class="chk"><input type="checkbox" name="trained:l" value="{{ name }}" {% if on %}checked{% endif %}> {{ name }}</label>{% empty %}<span class="note">No machines yet.</span>{% endfor %}</div></div>
+  <p class="note" style="margin-top:8px">Nothing changes until you press Save.</p>
+{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button class="btn go" type="submit">Save</button>{% endblock %}

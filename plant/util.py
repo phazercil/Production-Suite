@@ -61,6 +61,10 @@ def iso_date(t_ms):
     return local(from_ms(t_ms)).date().isoformat()
 
 
+def is_lunch(label):
+    return "lunch" in str(label or "").lower()
+
+
 def shift_list():
     return list(Shift.objects.prefetch_related("breaks").all())
 

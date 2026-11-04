@@ -1,0 +1,8 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Positions to import from Paycom{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/paycomPositionsSet"{% endblock %}
+{% block body %}<p class="sub">Tick the position titles whose people should be on the Team list. Only people with exactly one of these titles are imported; anyone already imported who doesn't match is set inactive at the next import (their history stays). Nothing ticked imports every position.{% if dept %} Department filter: {{ dept }}.{% endif %}</p>
+  <div class="poslist">{% for r in rows %}<label class="chk"><input type="checkbox" name="positions:l" value="{{ r.name }}" {% if r.on %}checked{% endif %} {% if r.name == "(no position)" %}disabled{% endif %}> <span class="grow">{{ r.name }}</span> <span class="note num">{{ r.n }} {% if r.n == 1 %}person{% else %}people{% endif %}</span></label>
+  {% empty %}<p class="note">Paycom sent no active employees{% if dept %} in that department{% endif %}.</p>{% endfor %}</div>
+{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button class="btn go" type="submit">Save</button>{% endblock %}

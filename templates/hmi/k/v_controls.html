@@ -20,16 +20,28 @@
     <div class="mo"><b>{% if R.sh.state == "changeover" %}Setting up{% else %}No MO{% endif %}</b></div><div class="desc">{% if R.sh.state == "changeover" %}Finish the changeover steps to start the next MO.{% else %}Scan an MO from Change Over to start counting parts against it.{% endif %}</div>
     {% endif %}
     <div class="shiftline"><span>Shift count <b>{{ R.sh.count|num }}</b></span><span>Uptime <b>{{ R.stats.uptime }}%</b></span><span>Down <b>{{ R.stats.down }} min</b></span>{% if R.recipe %}<span>Recipe <b>{{ R.recipe }}</b></span>{% endif %}<span>{% if R.sh.state == "changeover" %}Changeover{% else %}MO{% endif %} timer <b {% if R.timerSince %}data-since="{{ R.timerSince }}"{% endif %}>0:00:00</b></span></div>
+    {% if R.mo %}    {% if R.tool %}<div class="subsec"><span class="eyebrow">Tooling</span>{% include "hmi/k/_tooling.html" with groups=R.tool.groups tool=R.tool %}</div>{% endif %}
+    <div class="subsec"><span class="eyebrow">How {{ R.mo.part }} has run</span>
+    {% if R.avg.here or R.avg.all %}<div class="tblwrap"><table class="avgtbl"><thead><tr><th></th><th>Scrap rate</th><th>Good pcs / hr</th><th>Avg speed</th><th>Downtime</th></tr></thead><tbody>
+      {% for label, a in R.avg_rows %}<tr><th>{{ label }}{% if a %}<small>{{ a.runs }} run{{ a.runs|pluralize }} · {{ a.hours }} h</small>{% endif %}</th>{% if a %}<td class="num">{{ a.scrapRate }}%</td><td class="num">{{ a.perHour|num }}</td><td class="num">{% if a.speed %}{{ a.speed }} <small>P/m</small>{% else %}—{% endif %}</td><td class="num">{{ a.downPerHour }} <small>min/hr</small></td>{% else %}<td colspan="4" class="note">No finished runs yet</td>{% endif %}</tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="note">No finished runs of this part in the last {{ R.avg.days|default:180 }} days.</p>{% endif %}</div>{% endif %}
   </div>
   {% endif %}
   <div class="panel chartpanel"><div class="row"><span class="eyebrow">Line rate · this shift</span><span class="small">{% if R.grafana %}Grafana panel{% else %}Pleats per minute{% endif %}</span></div>
     <div class="chartcard {% if R.alert %}alert{% endif %}">{% if R.grafana %}<iframe src="{{ R.grafana }}" title="Pleater speed (Grafana)" loading="lazy" id="gf-ppm"></iframe><span class="src">Grafana</span>{% else %}{{ R.chart|safe }}{% endif %}</div></div>
 </div>
 <aside class="panel upnext"><div class="row"><span class="eyebrow">Up next</span><span class="small">from planner{% if R.planAt %} · {{ R.planAt|clock }}{% endif %}</span></div>
-  {% for x in R.next %}<div class="job"><div class="t"><b>MO {{ x.m.number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
-    {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>
+  {% if R.nextCo %}<div class="job nextco"><div class="t"><b>MO {{ R.nextCo.m.number }}</b><span>next changeover</span></div><div class="p">{{ R.nextCo.m.part }} · {{ R.nextCo.left|num }} pcs</div>
+    <div class="w">{% if R.nextCo.unplanned %}No planned start yet{% else %}Planned {{ R.nextCo.m.plan_start|plan:S.t }}{% endif %}{% if R.nextCo.n > 1 %} · after {{ R.nextCo.n|add:"-1" }} more run{{ R.nextCo.n|add:"-1"|pluralize }}{% endif %}</div>
+    {% include "hmi/k/_tooling.html" with groups=R.nextCo.tool.groups tool=R.nextCo.tool %}</div>
+  {% elif R.on %}<div class="note">No changeover planned in the next 24 hours.</div>{% endif %}
+  {% for x in R.next %}{% if not R.nextCo or x.m.pk != R.nextCo.m.pk %}<div class="job"><div class="t"><b>MO {{ x.m.number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
+    {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>{% endif %}
   {% empty %}<div class="empty">Nothing else is planned for this line. The scheduler adds runs here.</div>{% endfor %}
   {% if R.more %}<div class="small">+{{ R.more }} more on the <a href="{{ base }}/schedule/" style="color:var(--accent)">schedule</a></div>{% endif %}
+  <div class="reports"><div class="row"><span class="eyebrow">Shift reports</span><span class="small">last 24 hours</span></div>
+    {% for r in R.reports %}<div class="rep {% if r.bad %}bad{% endif %}"><div class="m"><b>{{ r.kind }}</b> · {{ r.t|plan:S.t }}{% if r.by %} · {{ r.by }}{% endif %}{% if r.status %} · <span class="pill {% if r.bad %}warn{% else %}ok{% endif %}">{{ r.status }}</span>{% endif %}</div><div class="x">{{ r.text|truncatechars:160 }}</div></div>
+    {% empty %}<div class="note">Nothing reported on {{ station }} in the last day.</div>{% endfor %}</div>
   <div class="spacer"></div>
   {% if R.on %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.state == "changeover" %}Continue changeover{% else %}Start changeover{% endif %}</button>{% endif %}
 </aside></div>

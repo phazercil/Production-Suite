@@ -315,6 +315,8 @@ def s2k_build_sql(b):
 # ------------------------------------------------------------------ changeover data (asset database queries)
 GUESS = {"step": ["step", "instruction", "step_text", "description", "text"], "seq": ["seq", "step_no", "step_number", "sort", "sort_order", "sequence"],
          "detail": ["detail", "details", "note", "notes"], "setting": ["setting", "setting_name", "parameter"], "value": ["value", "setting_value", "target"],
+         "kind": ["kind", "tool_type", "tooling_type", "category", "type"], "screws": ["screws", "screw", "screw_set"], "helix": ["helix", "helix_set"],
+         "sideband": ["sideband", "sidebands", "side_band", "side_band_material"],
          "unit": ["unit", "units", "uom"], "asset": ["asset", "asset_id", "tool", "tool_id"], "image": ["image", "image_url", "photo", "photo_url"],
          "name": ["name", "setting", "setting_name", "parameter"], "rev": ["rev", "revision", "drawing_rev"], "pleats": ["pleats", "pleat_count", "pleats_per_unit"],
          "len": ["length", "len", "length_in"], "wid": ["width", "wid", "width_in"], "ph": ["pleat_height", "ph"], "sb": ["side_band", "side_band_height", "sb"],
@@ -350,6 +352,8 @@ def build_codata_sql(qname, b):
         raise ValueError("Pick a column for: " + ", ".join(miss))
     if not b.get("f_part"):
         raise ValueError("Pick the column that holds the part number.")
+    if not any(b.get(r[0]) for r in D["roles"]):
+        raise ValueError("Pick at least one column to show.")
     sel = ",\n       ".join(f"{q(b[r[0]])} AS {r[0]}" for r in D["roles"] if b.get(r[0]))
     w = [f"{q(b['f_part'])} = :part"]
     if b.get("f_machine"):
@@ -413,6 +417,9 @@ def codata_data(s, request, states=None):
               "required": ", ".join(r[0] for r in D["roles"] if len(r) > 2 and r[2])}
         res = st.get("res")
         if res and not res.get("error"):
+            if name == "part_tooling":
+                from .runinfo import norm_tooling
+                q_["tooling"] = [g for g in norm_tooling(res["rows"]) if g["items"]]
             q_["preview"] = norm_steps(res["rows"]) if name == "changeover_steps" else norm_settings(res["rows"]) if name == "asset_settings" else res["rows"]
         qs.append(q_)
     out["queries"] = qs

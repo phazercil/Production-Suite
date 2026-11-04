@@ -1,8 +1,27 @@
-<div class="row"><h1 class="h1 grow">Maintenance</h1><button class="btn primary" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">New ticket</button></div>
-<div class="tblwrap"><table class="xl"><thead><tr><th>Opened</th><th>Machine</th><th>Issue</th><th>Priority</th><th>Notes</th><th>Pictures</th><th>By</th><th>Status</th><th></th></tr></thead><tbody>
-{% for x in P.tickets %}<tr><td>{{ x.t.t|day }} {{ x.t.t|clock }}</td><td>{{ x.t.machine }}</td><td>{{ x.t.type }}</td><td>{% if x.t.priority == "High" %}<span class="pill bad">High · line down</span>{% else %}{{ x.t.priority }}{% endif %}</td><td class="l">{{ x.t.notes }}</td>
-  <td class="l"><div class="thumbs sm">{% for pid in x.photos %}<button class="thumb" hx-get="/kiosk/m/photo?id={{ pid }}" hx-target="#modal" hx-swap="innerHTML" aria-label="Picture {{ forloop.counter }} on this ticket"><img src="/api/hmi/ticket-photo/{{ pid }}?size=thumb" alt="" loading="lazy"></button>{% endfor %}</div>
-    {% if x.photos|length < P.limit %}<form hx-post="/kiosk/do/ticketPhoto" hx-encoding="multipart/form-data" hx-trigger="change" hx-swap="none"><input type="hidden" name="id" value="{{ x.t.id }}"><label class="btn sm ghost" style="margin-top:4px">{% icon "camera" %}Add picture<input type="file" name="photo" accept="image/*" multiple hidden></label></form>{% endif %}</td>
-  <td>{{ x.t.by }}</td><td>{{ x.t.status }}</td><td>{% if x.t.status != "Closed" %}<button class="btn" hx-post="/kiosk/do/ticketStatus" hx-vals='{"id": "{{ x.t.id }}"}'>{% if x.t.status == "Open" %}Start work{% else %}Close{% endif %}</button>{% endif %}</td></tr>
-{% empty %}<tr><td colspan="9">No tickets.</td></tr>{% endfor %}
-</tbody></table></div>
+{% load suite %}<div class="row"><h1 class="h1 grow">Maintenance</h1><button class="btn primary" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">New request</button></div>
+<div class="grid3">
+  <div class="panel stat {% if P.counts.open %}bad{% endif %}"><span>Open requests</span><b class="num">{{ P.counts.open }}</b><small>waiting for maintenance</small></div>
+  <div class="panel stat"><span>In progress</span><b class="num">{{ P.counts.work }}</b><small>being worked on</small></div>
+  <div class="panel stat"><span>Completed</span><b class="num">{{ P.counts.done }}</b><small>in the last 7 days</small></div>
+</div>
+<div class="row"><div class="seg">{% for f, label in "open:Open & in progress,done:Completed,all:All (30 days)"|pairs %}<button class="{% if P.show == f %}on{% endif %}" hx-get="/kiosk/v/maintenance?show={{ f }}" hx-target="#view">{{ label }}</button>{% endfor %}</div>
+  <span class="grow"></span>{% if not P.canWork %}<span class="note">Adding repair notes and closing requests needs maintenance, a shift lead, or the Supervisor button.</span>{% endif %}</div>
+<div class="tickets">
+{% for x in P.tickets %}<article class="panel ticket {% if x.t.status == 'Closed' %}done{% elif x.t.priority == 'High' %}high{% endif %}">
+  <div class="th"><div class="grow"><b>{{ x.t.machine }}</b> · {{ x.t.type|default:"Request" }}
+      {% if x.t.priority == "High" %}<span class="pill bad">HIGH · LINE DOWN</span>{% elif x.t.priority == "Low" %}<span class="pill idle">LOW</span>{% endif %}</div>
+    {% if x.t.status == "Closed" %}<span class="pill ok">COMPLETED</span>{% elif x.t.status == "In progress" %}<span class="pill warn">IN PROGRESS</span>{% else %}<span class="pill bad">OPEN</span>{% endif %}</div>
+  <div class="tm">Requested by {{ x.t.by }} · {{ x.t.t|plan:S.t }}{% if x.t.line and x.t.line != x.t.machine %} · from {{ x.t.line }}{% endif %}
+    {% if x.t.status == "Closed" %} · completed {{ x.t.updated|plan:S.t }} by {{ x.t.updated_by }}{% if x.took is not None %} · took {{ x.took|dur }}{% endif %}{% else %} · open {{ x.age|dur }}{% endif %}</div>
+  {% if x.t.notes %}<p class="tn">{{ x.t.notes }}</p>{% endif %}
+  {% if x.photos or x.t.status != "Closed" %}<div class="row" style="gap:8px;align-items:flex-start"><div class="thumbs sm">{% for pid in x.photos %}<button class="thumb" hx-get="/kiosk/m/photo?id={{ pid }}" hx-target="#modal" hx-swap="innerHTML" aria-label="Picture {{ forloop.counter }} on this request"><img src="/api/hmi/ticket-photo/{{ pid }}?size=thumb" alt="" loading="lazy"></button>{% endfor %}</div>
+    {% if x.photos|length < P.limit and x.t.status != "Closed" %}<form hx-post="/kiosk/do/ticketPhoto" hx-encoding="multipart/form-data" hx-trigger="change" hx-swap="none"><input type="hidden" name="id" value="{{ x.t.id }}"><label class="btn sm ghost">{% icon "camera" %}Add picture<input type="file" name="photo" accept="image/*" multiple hidden></label></form>{% endif %}</div>{% endif %}
+  <div class="repairs"><span class="eyebrow">Repair notes</span>
+    {% for n in x.notes %}<div class="rn {{ n.kind }}"><div class="m"><b>{{ n.by }}</b> · {{ n.t|plan:S.t }}{% if n.kind == "started" %} · started work{% elif n.kind == "closed" %} · completed{% endif %}</div>{% if n.kind == "note" or n.text != "Started work" and n.text != "Completed" %}<div class="x">{{ n.text|linebreaksbr }}</div>{% endif %}</div>
+    {% empty %}<div class="note">No repair notes yet.</div>{% endfor %}
+    {% if x.t.status != "Closed" %}<form class="rnadd" hx-post="/kiosk/do/ticketNote" data-reset><input type="hidden" name="id" value="{{ x.t.id }}"><textarea name="text" rows="2" maxlength="4000" placeholder="What did you find or do? Parts used?" aria-label="Repair note for {{ x.t.machine }}" required></textarea><button class="btn">Add note</button></form>{% endif %}
+  </div>
+  {% if x.t.status != "Closed" %}<div class="row" style="justify-content:flex-end;gap:8px">{% if x.t.status == "Open" %}<button class="btn" hx-post="/kiosk/do/ticketStatus" hx-vals='{"id": "{{ x.t.id }}"}'>Start work</button>{% endif %}<button class="btn go" hx-get="/kiosk/m/ticketDone?id={{ x.t.id }}" hx-target="#modal" hx-swap="innerHTML">Mark complete</button></div>{% endif %}
+</article>
+{% empty %}<div class="panel note">{% if P.show == "open" %}No open maintenance requests.{% elif P.show == "done" %}Nothing completed in the last 30 days.{% else %}No requests in the last 30 days.{% endif %}</div>{% endfor %}
+</div>
