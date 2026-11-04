@@ -112,3 +112,55 @@ class RunScreenTests(TestCase):
         MO.objects.filter(number="306785").update(plan_start=t + timedelta(hours=30))
         r = self.c.get("/kiosk/v/controls")
         self.assertNotContains(r, "next changeover")
+
+
+class ScheduleTimelineTests(TestCase):
+    def setUp(self):
+        no_planned_time(self)
+        cache.clear()
+        seed_demo(reset=True)
+        self.c = Client(HTTP_HX_REQUEST="true")
+
+    def test_runs_through_lunch_keeps_the_scheduler_running(self):
+        from plant.models import Machine
+        from plant.util import sod_ms
+        from scheduler.engine import Calendar, load_world
+        day = sod_ms(timezone.now().timestamp() * 1000)
+        for i in range(7):   # a weekday the 2nd shift works
+            d = day + i * 86400000
+            world = load_world()
+            m = next(x for x in world["cfg"]["machines"] if x["name"] == "Salvatore")
+            stops = Calendar(world["cfg"]).day_iv(m, d)
+            if stops:
+                break
+        Machine.objects.filter(name="Salvatore").update(run_lunch=True)
+        world = load_world()
+        m = next(x for x in world["cfg"]["machines"] if x["name"] == "Salvatore")
+        runs = Calendar(world["cfg"]).day_iv(m, d)
+        mins = lambda iv: sum(e - s for s, e in iv) / 60000
+        self.assertEqual(mins(runs) - mins(stops), 60)       # two 30-minute lunches (1st and 2nd shift) now run
+        self.assertEqual(len(runs), len(stops) - 2)
+
+    def test_lunch_and_finish_flag_on_the_timeline(self):
+        r = self.c.get("/kiosk/v/schedule?view=timeline")
+        body = r.content.decode()
+        self.assertIn('class="fin"', body)                                # checkered flag at the MO's end
+        self.assertIn("Barbara runs through lunch", body)                 # the demo's Barbara has relief cover
+        self.assertIn("Salvatore stops for lunch", body)
+
+    def test_changeover_in_progress_turns_red_when_over_time(self):
+        from hmi.models import ShiftRun
+        from plant.util import ms
+        sh = ShiftRun.objects.get(line="Barbara", active=True)
+        nm = MO.objects.get(number="306785")
+        sh.state, sh.mo = "changeover", None
+        sh.co = {"start": ms(timezone.now() - timedelta(minutes=10)), "step": 3, "newMo": nm.pk}
+        sh.save()
+        r = self.c.get("/kiosk/v/schedule?view=timeline")
+        self.assertContains(r, "Currently Changing Over")
+        self.assertNotContains(r, "blk co live over")
+        sh.co = {**sh.co, "start": ms(timezone.now() - timedelta(minutes=45))}
+        sh.save()
+        r = self.c.get("/kiosk/v/schedule?view=timeline")
+        self.assertContains(r, "blk co live over")
+        self.assertContains(r, "15 min over")                             # Barbara is allowed 30 minutes

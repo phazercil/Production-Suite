@@ -65,7 +65,7 @@ def seed_demo(reset=True):
         m.shifts.set(shifts)
         return m
 
-    bar = machine("Barbara", code="BARB", stage="s1", speed_mode="new", ppm=285, scrap_pct=5, downtime_pct=10, changeover_min=30,
+    bar = machine("Barbara", code="BARB", stage="s1", speed_mode="new", ppm=285, scrap_pct=5, downtime_pct=10, changeover_min=30, run_lunch=True,
                   color="#c46c3c", feed_type="demo", demo_scale=1, demo_offset=0, sort=0)
     sal = machine("Salvatore", code="SALV", stage="s1", speed_mode="old", ppm=180, scrap_pct=5, downtime_pct=10, changeover_min=30,
                   color="#5e9951", feed_type="demo", demo_scale=0.65, demo_offset=140, sort=1)

@@ -145,7 +145,7 @@ def planned_windows(sh, kinds=False):
     from django.utils import timezone as _tz
 
     from plant.models import Shift
-    from plant.util import hm, local
+    from plant.util import hm, is_lunch, local
     if not sh or not sh.shift_name:
         return []
     shift = Shift.objects.filter(name=sh.shift_name).prefetch_related("breaks").first()
@@ -162,7 +162,10 @@ def planned_windows(sh, kinds=False):
             grace = rules().get("startGrace", 0) or 0
             if grace:
                 out.append((s0, s0 + timedelta(minutes=grace), "Start-up"))
+            through = bool(sh.machine and sh.machine.run_lunch)
             for b in shift.breaks.all():
+                if through and is_lunch(b.label):
+                    continue   # the line runs through lunch, so a stop then is downtime
                 bo = (hm(b.start) - hm(shift.start)) % 1440
                 bl = (hm(b.end) - hm(b.start)) % 1440
                 if bl and bo < length:

@@ -350,8 +350,8 @@ function laborSection(c){
 }
 
 /* ---------- lines & shifts page ---------- */
-function weeklyMinutes(m){let t=0;for(const sh of S.cfg.shifts){if(!(m.shifts||[]).includes(sh.id))continue;t+=shiftWorkMin(sh)*(sh.days||[]).length}return t}
-function shiftWorkMin(sh){const s0=hm(sh.start);let L=(hm(sh.end)-s0+1440)%1440||1440;let br=0;for(const b of sh.breaks||[])br+=(hm(b.end)-hm(b.start)+1440)%1440;return Math.max(0,L-br)}
+function weeklyMinutes(m){let t=0;for(const sh of S.cfg.shifts){if(!(m.shifts||[]).includes(sh.id))continue;t+=shiftWorkMin(sh,m)*(sh.days||[]).length}return t}
+function shiftWorkMin(sh,m){const s0=hm(sh.start);let L=(hm(sh.end)-s0+1440)%1440||1440;let br=0;for(const b of sh.breaks||[])if(!(m&&m.runLunch&&/lunch/i.test(b.label||"")))br+=(hm(b.end)-hm(b.start)+1440)%1440;return Math.max(0,L-br)}
 function renderLines(){
   const c=S.cfg;
   const rows=c.machines.map((m,i)=>{
@@ -364,6 +364,7 @@ function renderLines(){
       <td class="n"><input type="number" min="0" max="90" step="0.1" data-f="scrap" id="msc-${m.id}" value="${m.scrap}" aria-label="Scrap percent"></td>
       <td class="n"><input type="number" min="0" max="90" step="0.1" data-f="downtime" id="mdt-${m.id}" value="${m.downtime}" aria-label="Downtime percent"></td>
       <td class="n"><input type="number" min="0" step="1" data-f="changeover" id="mco-${m.id}" value="${m.changeover}" aria-label="Changeover minutes"></td>
+      <td class="c"><input type="checkbox" data-f="runLunch" id="mrl-${m.id}" ${m.runLunch?"checked":""} aria-label="Runs through lunch"></td>
       <td><div class="shifts-cell">${c.shifts.map(sh=>`<label><input type="checkbox" data-shift="${esc(sh.id)}" ${(m.shifts||[]).includes(sh.id)?"checked":""}>${esc(sh.name)}</label>`).join("")||`<span class="muted small">No shifts</span>`}</div></td>
       <td class="n num">${(wk/60).toFixed(1)} h<br><span class="muted small">${(wk/60*(1-m.downtime/100)).toFixed(1)} h net</span></td>
       <td><button class="btn sm danger" data-del="${i}">Remove</button></td></tr>`}).join("");
@@ -381,17 +382,17 @@ function renderLines(){
   $("#main").innerHTML=`
   <div class="page-head"><div><h2>Lines &amp; Shifts</h2><p class="sub">Machine speeds, scrap, downtime and changeovers drive every run length on the schedule. Stage 1 speed comes from the cost sheet's pleats per minute divided by the part's pleat count. Stage 1 lines are the pleaters with an Operator Kiosk; their feeds, colors and training are set in the kiosk's Admin page.</p></div>
   <button class="btn primary" id="addm">+ Add line</button></div>
-  <div class="tablewrap"><table><thead><tr><th>Line</th><th>Stage</th><th>Speed basis</th><th class="n">Speed / fallback</th><th class="n">Scrap %</th><th class="n">Downtime %</th><th class="n">Changeover min</th><th>Shifts</th><th class="n">Hours / week</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="tablewrap"><table><thead><tr><th>Line</th><th>Stage</th><th>Speed basis</th><th class="n">Speed / fallback</th><th class="n">Scrap %</th><th class="n">Downtime %</th><th class="n">Changeover min</th><th title="Relief cover keeps the line running during lunch, so runs don't pause for it">Runs through lunch</th><th>Shifts</th><th class="n">Hours / week</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="small muted" style="margin:8px 0 22px">Sheet-based lines fall back to the speed shown when a part has no rate on the cost sheet. Scrap adds extra pieces to every run; downtime slows the effective speed.</p>
   <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label></div>
   ${laborSection(c)}
-  <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after.</p></div><button class="btn" id="adds">+ Add shift</button></div>
+  <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after, except lunch on a line marked <b>Runs through lunch</b>.</p></div><button class="btn" id="adds">+ Add shift</button></div>
   <div class="shift-grid">${shifts}</div>`;
   const tb=$("tbody");
   tb.oninput=tb.onchange=e=>{const c=S.cfg;const tr=e.target.closest("tr");if(!tr)return;const m=c.machines[+tr.dataset.i];if(!m)return;
-    if(e.target.dataset.f){const f=e.target.dataset.f;let v=e.target.value;if(["ppm","rate","scrap","downtime","changeover"].includes(f))v=Number(v)||0;m[f]=v;
+    if(e.target.dataset.f){const f=e.target.dataset.f;let v=e.target.type==="checkbox"?e.target.checked:e.target.value;if(["ppm","rate","scrap","downtime","changeover"].includes(f))v=Number(v)||0;m[f]=v;
       if(f==="stage"){m.mode=(S.modes[v]||[["fixed"]])[0][0];if(v!=="s1"&&!m.rate)m.rate=300;if(v==="s1"&&!m.ppm)m.ppm=180}
-      saveCfg();if(e.type==="change"&&(f==="stage"||f==="mode"||f==="downtime"))renderLines()}
+      saveCfg();if(e.type==="change"&&(f==="stage"||f==="mode"||f==="downtime"||f==="runLunch"))renderLines()}
     if(e.target.dataset.shift&&e.type==="change"){const id=isNaN(+e.target.dataset.shift)?e.target.dataset.shift:+e.target.dataset.shift;m.shifts=m.shifts||[];if(e.target.checked){if(!m.shifts.includes(id))m.shifts.push(id)}else m.shifts=m.shifts.filter(x=>x!==id);saveCfg();renderLines()}};
   tb.onclick=e=>{const c=S.cfg;const b=e.target.closest("[data-del]");if(!b)return;const i=+b.dataset.del,m=c.machines[i];
     const n=Object.values(S.jobs).filter(j=>j.machineId===m.id).length;

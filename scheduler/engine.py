@@ -17,7 +17,7 @@ import math
 from django.db import transaction
 
 from plant.models import MO, STAGE_ORDER, Machine, PlantSettings, Shift
-from plant.util import DAY, HOUR, MIN, Catalog, add_days_ms, at_local_minutes, from_ms, hm, local, ms, now, sod_ms
+from plant.util import DAY, HOUR, MIN, Catalog, add_days_ms, at_local_minutes, from_ms, hm, is_lunch, local, ms, now, sod_ms
 
 from .models import Job
 
@@ -43,7 +43,7 @@ def load_world(jobs_override=None):
     machines = []
     for m in Machine.objects.prefetch_related("shifts"):
         machines.append({"id": m.id, "name": m.name, "stage": m.stage, "mode": m.speed_mode, "ppm": m.ppm, "rate": m.rate,
-                         "scrap": m.scrap_pct, "downtime": m.downtime_pct, "changeover": m.changeover_min,
+                         "scrap": m.scrap_pct, "downtime": m.downtime_pct, "changeover": m.changeover_min, "runLunch": m.run_lunch,
                          "shifts": [s.id for s in m.shifts.all()], "active": m.active, "color": m.color, "code": m.code})
     # Open orders take time on the board. A closed MO has finished Stage 1 at the pleater: it no longer holds a
     # Stage 1 slot, but any End Band / Arts & Crafts / Glue Bead work already on the board stays scheduled.
@@ -147,6 +147,8 @@ class Calendar:
             L = (hm(sh["end"]) - s0 + 1440) % 1440 or 1440
             segs = [(0, L)]
             for b in sh.get("breaks") or []:
+                if m.get("runLunch") and is_lunch(b.get("label")):
+                    continue   # this line keeps running through lunch
                 bo = (hm(b["start"]) - s0 + 1440) % 1440
                 bl = (hm(b["end"]) - hm(b["start"]) + 1440) % 1440
                 if not bl or bo >= L:

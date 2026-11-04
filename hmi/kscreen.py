@@ -385,7 +385,7 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
     """Schedule page: today's timeline (positions in pixels), this month's due dates, and the MO list."""
     from datetime import date, timedelta as td
 
-    from plant.util import shift_windows, sod_ms
+    from plant.util import is_lunch, shift_windows, sod_ms
     from suite.templatetags.suite import clock
     t_ms = ms(s.t)
     out = {"view": view, "status": status, "sort": sort, "notices": s.unread_notices()}
@@ -412,14 +412,22 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
                     continue
                 l0 = max(X(b["start"]), LW)
                 w = max(30, min(X(b["end"]), total) - l0 - 4)
-                blocks.append({**b, "left": round(l0), "width": round(w), "more": b["end"] > end,
-                               "hours": f"{(b['end'] - b['start']) / 3600000:.1f}", "from": clock(_local_ms(b["start"])), "to": clock(_local_ms(b["end"]))})
+                blocks.append({**b, "left": round(l0), "width": round(w), "right": round(l0 + w), "more": b["end"] > end,
+                               "hours": f"{(b['end'] - b['start']) / 3600000:.1f}", "from": clock(_local_ms(b["start"])), "to": clock(_local_ms(b["end"])),
+                               "finish": plan_label(_local_ms(b["end"]), _local_ms(t_ms))})
             for i, b in enumerate(blocks):
                 if b["kind"] == "co" and i + 1 < len(blocks):
                     b["eta"] = {"left": round(max(LW, X(blocks[i + 1]["start"]) - 110)), "at": blocks[i + 1]["from"]}
-            lanes.append({"m": m, "blocks": blocks,
-                          "breaks": [{"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
-                                      "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"]))} for b in brks]})
+            runs = [b for b in blocks if b["kind"] == "mo"]
+            lane_breaks = []
+            for b in brks:
+                lunch = is_lunch(b["name"])
+                thru = lunch and m.run_lunch
+                busy = any(r["start"] < b["e"] and r["end"] > b["s"] for r in runs)
+                lane_breaks.append({"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
+                                    "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"])), "lunch": lunch, "thru": thru,
+                                    "state": ("running" if busy else "relief cover") if thru else ("stopped" if lunch and busy else "")})
+            lanes.append({"m": m, "blocks": blocks, "breaks": lane_breaks})
         out["gantt"] = {"total": total, "LW": LW, "SW": SW, "head": head, "days": days, "lanes": lanes,
                         "now": round(X(t_ms)) if ds < t_ms < end else None, "scrollTo": max(0, round(X(t_ms)) - 320) if ds < t_ms < end else 0}
     else:
@@ -448,9 +456,18 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
 
 def line_blocks(s, m, sh, t_ms):
     """A line's runs on the timeline: the running MO from its actual start to the live finish estimate, planned runs
-    with their changeovers, and a changeover in progress."""
+    with their changeovers, and a changeover in progress (the MO being set up starts when it is due to finish)."""
     out = []
     eta_ms = None
+    live = None
+    if sh and sh.state == "changeover" and (sh.co or {}).get("start"):
+        cs = sh.co["start"]
+        new = MO.objects.filter(pk=sh.co.get("newMo")).first() if sh.co.get("newMo") else None
+        allot = round((new.plan_co if new and new.plan_co else 0) or m.changeover_min or s.rules.get("coMins", 45))
+        took = max(0, (t_ms - cs) // 60000)
+        live = {"kind": "co", "live": True, "start": cs, "end": max(t_ms, cs + allot * 60000), "mins": allot, "took": took,
+                "over": took > allot, "overBy": took - allot, "new": new}
+        out.append(live)
     for mo in MO.objects.filter(line=m, status="OPEN").order_by("seq"):
         running = bool(sh and sh.mo_id == mo.pk)
         if running:
@@ -464,13 +481,16 @@ def line_blocks(s, m, sh, t_ms):
         if not mo.plan_start:
             continue
         ps = ms(mo.plan_start)
+        run_ms = ms(mo.plan_end) - ps - (mo.plan_co or 0) * 60000
+        if live and live["new"] and mo.pk == live["new"].pk:
+            out.append({"kind": "mo", "m": mo, "start": live["end"], "end": live["end"] + max(run_ms, 60000), "running": False})
+            continue
+        if live and ps < live["end"]:
+            continue   # planned before the changeover now under way; the Scheduler moves it on its next pass
         if mo.plan_co:
             out.append({"kind": "co", "start": ps, "end": ps + mo.plan_co * 60000, "mins": round(mo.plan_co)})
         out.append({"kind": "mo", "m": mo, "start": ps + (mo.plan_co or 0) * 60000, "end": ms(mo.plan_end), "running": False})
-    if sh and sh.state == "changeover" and (sh.co or {}).get("start"):
-        cs = sh.co["start"]
-        co_mins = s.rules.get("coMins", 45)
-        out.insert(0, {"kind": "co", "start": cs, "end": max(t_ms, cs + co_mins * 60000), "mins": co_mins})
+    out.sort(key=lambda b: b["start"])
     return out
 
 

@@ -323,6 +323,8 @@ class DowntimeTests(Base):
         self.c = Client()
         login(self.c, "1111")
         ShiftRun.objects.filter(machine=self.bar, active=True).update(active=False)  # the demo's running shift
+        self.bar.run_lunch = False   # the demo's Barbara runs through lunch; these tests need it to stop
+        self.bar.save(update_fields=["run_lunch"])
         self.assertTrue(cmd(self.c, "startShift", {"line": "Barbara", "mo": "309215", "safety": [True] * 5})["ok"])
         self.sh = ShiftRun.objects.get(machine=self.bar, active=True)
 
@@ -345,6 +347,18 @@ class DowntimeTests(Base):
         engine.add_down(self.sh, at(d.year, d.month, d.day, 6, 3), at(d.year, d.month, d.day, 6, 14))
         self.assertEqual(Downtime.objects.filter(shift=self.sh).count(), 2)
         self.assertTrue(win)
+
+    def test_a_line_that_runs_through_lunch_logs_a_lunch_stop_as_downtime(self):
+        d = timezone.localdate()
+        self.put_in_first_shift(d)
+        self.bar.run_lunch = True
+        self.bar.save(update_fields=["run_lunch"])
+        self.sh.refresh_from_db()
+        kinds = [k for _, _, k in engine.planned_windows(self.sh, kinds=True)]
+        self.assertNotIn("Lunch", kinds)
+        self.assertIn("Break", kinds)
+        engine.add_down(self.sh, at(d.year, d.month, d.day, 10, 20), at(d.year, d.month, d.day, 11, 10))
+        self.assertEqual(list(Downtime.objects.filter(shift=self.sh).values_list("minutes", flat=True)), [50])
 
     def test_ticks_mark_planned_minutes(self):
         d = timezone.localdate()
