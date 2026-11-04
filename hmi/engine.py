@@ -1510,6 +1510,21 @@ def conn_save(p, ctx):
         audit(ctx, f"InfluxDB connection set to {c['url']}" + (f", writing suite records to {c['out']}" if c["out"] else ""))
         return {"msg": f"InfluxDB saved. {r['msg']}." + (f" Suite records will be copied to {c['out']} every minute." if c["out"] else ""),
                 "data": liveconfig.info()}
+    if group == "github":
+        from plant import ghupdates
+        repo = str(f.get("repo") or "").strip() or ghupdates.DEFAULT_REPO
+        token = str(f.get("token") or "").strip()
+        saved = liveconfig.info()["github"]
+        need(ghupdates.REPO_RE.match(repo), "The repository should look like owner/name, e.g. phazercil/Production-Suite.")
+        need(token or saved["hasToken"], "Paste a GitHub token that can read the repository.")
+        need(not token or re.match(r"^[A-Za-z0-9_]{20,255}$", token), "That doesn't look like a GitHub token (they start with github_pat_ or ghp_).")
+        try:   # only save a login that works
+            ghupdates.check({"repo": repo, "token": token or dj_settings.SUITE.get("GITHUB_UPDATES_TOKEN", ""), "daily": False})
+        except ghupdates.GHError as e:
+            raise Need(f"Not saved: {e}")
+        liveconfig.save({"GITHUB_UPDATES_REPO": repo, "GITHUB_UPDATES_CHECK": "1" if f.get("daily") else None, **({"GITHUB_UPDATES_TOKEN": token} if token else {})})
+        audit(ctx, f"Updates from GitHub set up ({repo}{', checked daily' if f.get('daily') else ''})")
+        return {"msg": "Updates from GitHub saved. The token works.", "data": liveconfig.info()}
     if group == "feed":
         key = str(f.get("key") or "").strip() or liveconfig.new_feed_key()
         need(re.match(r"^[A-Za-z0-9_-]{16,128}$", key), "Use 16 to 128 letters, numbers, - or _ for the feed key.")
@@ -1527,6 +1542,7 @@ def conn_remove(p, ctx):
             "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD"],
             "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD"],
             "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
+            "github": ["GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK"],
             "influx": ["INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET"]}.get(group)
     need(keys, "Unknown connection.")
     liveconfig.save({k: None for k in keys})

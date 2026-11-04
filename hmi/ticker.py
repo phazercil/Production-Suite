@@ -242,6 +242,12 @@ def timed_pulls(state, t):
         state["updates"] = t
         from plant import updates
         updates.tick(t)
+    # Updates from GitHub (Admin > Updates): when switched on, look for a newer release once a day
+    if due("github", 60):
+        def github_check():
+            from plant import ghupdates
+            ghupdates.daily(t)
+        run("github", github_check)
     # Copy the suite's records to InfluxDB (Admin > Connections > InfluxDB), once a minute
     if not state.get("influx") or (t - state["influx"]).total_seconds() >= 60:
         state["influx"] = t
