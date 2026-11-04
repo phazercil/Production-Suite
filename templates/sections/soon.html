@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Production Suite{% endblock %}
+{% block content %}<div style="max-width:760px;margin:48px auto;padding:0 20px;color:var(--ink,#e5e7eb);font-family:var(--f-body,system-ui)">
+  <h1 style="font:700 28px var(--f-disp,system-ui);margin:0 0 8px">{{ title }}</h1>
+  <p style="font-size:16px;line-height:1.5;color:var(--ink-2,#9ca3af)">{{ about }}</p>
+  <p style="margin-top:18px;padding:14px 16px;border:1px dashed var(--line,#374151);border-radius:10px">This section is coming in a later update. Who can open it is already set in Admin › Permissions ({{ perm_label }}).</p>
+</div>{% endblock %}

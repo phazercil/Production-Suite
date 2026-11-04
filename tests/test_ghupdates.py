@@ -125,7 +125,7 @@ class GitHubUpdateTests(TestCase):
         c = Client(HTTP_HX_REQUEST="true")
         c.post("/kiosk/do/login", {"pin": "4444"})          # a shift lead can't set it up
         r = c.post("/kiosk/do/ghSave", {"repo": "a/b", "token": "github_pat_" + "y" * 30})
-        self.assertContains(r, "Admin approval")
+        self.assertContains(r, "<b>Updates</b>")
         c.post("/kiosk/do/logout")
         c.post("/kiosk/do/login", {"pin": "9999"})
         r = c.get("/kiosk/v/admin?tab=updates")

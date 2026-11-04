@@ -16,12 +16,8 @@
     <span>Production Suite</span>
   </a>
   <nav class="suitetabs" aria-label="Modes">
-    <a href="/operator/" {% if mode == "operator" %}aria-current="page"{% endif %}>Operator Kiosk</a>
-    <a href="/scheduler/" {% if mode == "scheduler" %}aria-current="page"{% endif %}>Scheduler</a>
-    <a href="/data/" {% if mode == "data" %}aria-current="page"{% endif %}>Data Kiosk</a>
-    <a href="/reports/" {% if mode == "reports" %}aria-current="page"{% endif %}>Reports</a>
-    <a href="/labor/" {% if mode == "labor" %}aria-current="page"{% endif %}>Labor Budget</a>
-    <a href="/admin/" {% if mode == "admin" %}aria-current="page"{% endif %}>Admin</a>
+    {% for k, href, label in suite_modes %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
   </nav>
 </header>
 {% endif %}

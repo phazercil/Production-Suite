@@ -102,10 +102,15 @@ def run(request, s, name, p):
     return engine.execute(name, p, engine.Ctx(user=s.me, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
 
 
+def _perm_label(perm):
+    from plant import perms
+    return perms.PERMS[perm]["label"] if perm in perms.PERMS else ""
+
+
 def login_needed(request, s, r, next_modal="", next_q=""):
     """The command needs someone logged in (or a shift lead, or an Admin): ask for the PIN, then come back."""
-    level = "admin" if r.get("onlyAdmin") else "lead" if r.get("admin") else ""
-    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level=level, people=kscreen.people_for_login(level),
+    perm = r.get("perm") or ("section.admin" if r.get("admin") else "")
+    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm=perm, perm_label=_perm_label(perm), people=kscreen.people_for_login(perm),
                                                                    next=next_modal, next_q=next_q))
 
 
@@ -190,7 +195,10 @@ def view_data(s, page, request):
         from . import kadmin
         tab = page_option(request, "tab", {k for k, _ in kadmin.TABS}, "machines")
         from .models import AuditLog
-        return {"tab": tab, "tabs": kadmin.TABS, "leadTab": tab in kadmin.LEAD_TABS, "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
+        from plant import perms
+        tperm = perms.TAB_PERM.get(tab, "permissions.manage")
+        return {"tab": tab, "tabs": kadmin.TABS, "tabPerm": tperm, "tabPermLabel": perms.PERMS[tperm]["label"], "tabCan": s.can(tperm),
+                "canOpen": s.can("section.admin"), "roleLabel": dict(perms.ROLES).get(s.me.role, "") if s.me else "", "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
     return {}
 
 
@@ -233,8 +241,9 @@ def dialog(request, name):
 
 @modal("login")
 def m_login(request, s):
-    level = {"1": "lead", "2": "admin"}.get(request.GET.get("admin", ""), "")
-    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level=level, people=kscreen.people_for_login(level),
+    from plant import perms
+    perm = request.GET.get("perm") if request.GET.get("perm") in perms.PERMS else ("section.admin" if request.GET.get("admin") else "")
+    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm=perm, perm_label=_perm_label(perm), people=kscreen.people_for_login(perm),
                                                                    next=request.GET.get("next", ""), next_q=request.GET.get("next_q", "")))
 
 
@@ -356,8 +365,8 @@ def m_drawing(request, s):
 
 @modal("override")
 def m_override(request, s):
-    if not s.is_lead:
-        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level="lead", people=kscreen.people_for_login("lead"), next="override"))
+    if not s.can("runs.override"):
+        return login_needed(request, s, {"perm": "runs.override"}, "override")
     if not s.shift_on:
         return thin.refused("Start a shift first.")
     p = s.part(s.current_item())
@@ -413,8 +422,8 @@ def m_paycom_fields(request, s):
 
 @modal("addPerson")
 def m_add_person(request, s):
-    if not s.is_lead:
-        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level="lead", people=kscreen.people_for_login("lead"), next="addPerson"))
+    if not s.can("team.manage"):
+        return login_needed(request, s, {"perm": "team.manage"}, "addPerson")
     return modal_response(request, "hmi/k/m_add_person.html", **ctx_for(s))
 
 
@@ -500,8 +509,9 @@ def simple(cmd, toast=True, close=False, then=None):
 
 @action("login")
 def a_login(request, s, p):
-    level = p.get("level") if p.get("level") in ("lead", "admin") else ""
-    u, err = pin_login(request, p.get("pin"), p.get("user") or None, level)
+    from plant import perms
+    perm = p.get("perm") if p.get("perm") in perms.PERMS else ""
+    u, err = pin_login(request, p.get("pin"), p.get("user") or None, perm)
     if not u:
         return err_in_modal(err)
     nxt = p.get("next") or ""

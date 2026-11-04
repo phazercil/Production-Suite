@@ -23,11 +23,12 @@ KEEP_VERSIONS = 200
 _page_cache = {}
 
 
-def _lead(request):
+def _lead(request, perm="labor.view"):
+    from plant import perms
     me, note = current_person(request)
-    if me and me.is_lead:
+    if perms.can(me, perm):
         return me, None
-    return None, note
+    return None, note or (f"{me.name} doesn't have permission to open the Labor Budget." if me else None)
 
 
 def _json_for_html(obj):
@@ -35,12 +36,15 @@ def _json_for_html(obj):
     return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
-def _suitebar(me):
-    return ('<header class="suitebar no-print"><a class="suitebrand" href="/" aria-label="Production Suite home">'
+def _suitebar(me, only=False):
+    """The suite's top bar. On the Labor Budget's own address (/budget/) it has no other sections."""
+    from plant.context import MODES
+    nav = "" if only else ('<nav class="suitetabs" aria-label="Modes">' + "".join(
+        f'<a href="{href}"{" aria-current=\"page\"" if k == "labor" else ""}>{_esc(label)}</a>' for k, href, label in MODES) + "</nav>")
+    return ('<header class="suitebar no-print"><a class="suitebrand" href="' + ("/budget/" if only else "/") + '" aria-label="Production Suite home">'
             '<svg viewBox="0 0 34 20" aria-hidden="true"><polyline points="1,17 5,3 9,17 13,3 17,17 21,3 25,17 29,3 33,17" fill="none" '
-            'stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg><span>Production Suite</span></a>'
-            '<nav class="suitetabs" aria-label="Modes"><a href="/operator/">Operator Kiosk</a><a href="/scheduler/">Scheduler</a>'
-            '<a href="/data/">Data Kiosk</a><a href="/reports/">Reports</a><a href="/labor/" aria-current="page">Labor Budget</a></nav>'
+            'stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg><span>' + ("Labor Budget" if only else "Production Suite") + '</span></a>'
+            + nav +
             '<span class="suitesync"><span id="labor-sync" class="suitesync-dot" aria-live="polite">Saved</span>'
             f'<span class="suitewho">{_esc(me.name)}</span><button type="button" id="labor-logout" class="suitebtn">Log out</button></span></header>'
             f'<div class="suite-rev" style="position:fixed;right:6px;bottom:3px;z-index:2147483000;font:500 10px/1.2 ui-monospace,Consolas,monospace;'
@@ -51,11 +55,17 @@ def _esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def budget_only(request):
+    return page(request, only=True)
+
+
 @ensure_csrf_cookie
-def page(request):
+def page(request, only=False):
+    """The Labor Budget. `only`: its own address, /budget/, which shows nothing else of the suite (like a machine's
+    own screen), for people who may only see the budget."""
     me, note = _lead(request)
     if not me:
-        return render(request, "labor/login.html", {"mode": "labor", "note": note})
+        return render(request, "labor/login.html", {"mode": "labor", "note": note, "kiosk_lock": only, "home": "/budget/" if only else "/labor/"})
     touch(request)
     html = _page_cache.get("html")
     if html is None:
@@ -77,7 +87,7 @@ def page(request):
     out = (html.replace("__LABOR_CSS__", static("labor/labor.css"))
                .replace("__SUITEBAR_CSS__", static("labor/suitebar.css"))
                .replace("__LABOR_SYNC_JS__", static("labor/sync.js"))
-               .replace("__SUITEBAR__", _suitebar(me))
+               .replace("__SUITEBAR__", _suitebar(me, only))
                .replace("__LABOR_BOOT__", _json_for_html(boot)))
     resp = HttpResponse(out, content_type="text/html; charset=utf-8")
     # The calculator wires its buttons with inline handlers, so this one page allows inline script.
@@ -93,8 +103,8 @@ def _budget(v):
     return v if v in BUDGETS else "A"
 
 
-def _need_lead(request):
-    me, note = _lead(request)
+def _need_lead(request, perm="labor.view"):
+    me, note = _lead(request, perm)
     if not me:
         return None, JsonResponse({"ok": False, "login": True, "error": note or "Log in as a shift lead to see the labor budget."}, status=403)
     touch(request)
@@ -127,7 +137,7 @@ def validate_plan(data):
 @json_api
 @require_POST
 def save(request):
-    me, denied = _need_lead(request)
+    me, denied = _need_lead(request, "labor.edit")
     if denied:
         return denied
     p = body(request)
@@ -174,7 +184,7 @@ def history(request):
 @json_api
 @require_POST
 def restore(request):
-    me, denied = _need_lead(request)
+    me, denied = _need_lead(request, "labor.edit")
     if denied:
         return denied
     vid = to_int(body(request).get("id"), "saved version")
