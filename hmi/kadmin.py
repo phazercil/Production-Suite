@@ -127,7 +127,7 @@ def tab_data(s, tab, request):
     if tab == "updates":
         try:
             from plant import updates
-            return {"U": updates.info()}
+            return {"U": updates.info(), "GH": github_data(s)}
         except Exception as e:  # noqa: BLE001
             return {"U": None, "err": str(e)}
     if tab == "alerts":
@@ -887,6 +887,67 @@ def a_upd_upload(request, s, p):
             pass
     engine.audit(engine.Ctx(user=s.me), f"Update v{m['version']} rev {m['revision']} uploaded ({f.name})")
     return thin.done(toast=f"v{m['version']} rev {m['revision']} checked and ready.")
+
+
+# ---------------------------------------------------------------- updates from GitHub
+def github_data(s, msg=None, form=None):
+    from plant import ghupdates, liveconfig
+    return {"G": liveconfig.info()["github"], "last": ghupdates.last(), "msg": msg, "form": form}
+
+
+def github_panel(request, s, msg=None, form=None, hold=False):
+    return render_panel(request, "hmi/k/admin/_github.html", S=s, GH=github_data(s, msg, form), hold=hold or bool(msg))
+
+
+@action("ghSave")
+def a_gh_save(request, s, p):
+    deny = _need_admin(request, s)
+    if deny:
+        return deny
+    f = {"repo": p.get("repo", ""), "token": p.get("token", ""), "daily": bool(p.get("daily"))}
+    r = run(request, s, "connSave", {"group": "github", "fields": f})
+    f.pop("token")
+    return github_panel(request, s, {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}, None if r["ok"] else f)
+
+
+@action("ghRemove")
+def a_gh_remove(request, s, p):
+    deny = _need_admin(request, s)
+    if deny:
+        return deny
+    r = run(request, s, "connRemove", {"group": "github"})
+    return github_panel(request, s, {"ok": r["ok"], "text": "Updates from GitHub turned off; the token was removed." if r["ok"] else r["error"]})
+
+
+@action("ghCheck")
+def a_gh_check(request, s, p):
+    from plant import ghupdates
+    deny = _need_admin(request, s)
+    if deny:
+        return deny
+    try:
+        ghupdates.check()
+    except ghupdates.GHError as e:
+        return github_panel(request, s, {"ok": False, "text": str(e)})
+    return github_panel(request, s, hold=True)
+
+
+@action("ghInstall")
+def a_gh_install(request, s, p):
+    from plant import ghupdates
+    deny = _need_admin(request, s)
+    if deny:
+        return deny
+    when, at = p.get("when") or "idle", p.get("at") or ""
+    if when == "at" and not at:
+        return thin.refused("Pick the date and time.")
+    try:
+        m = ghupdates.install(s.me.name, when, at)
+    except ghupdates.GHError as e:
+        return github_panel(request, s, {"ok": False, "text": str(e)})
+    engine.audit(engine.Ctx(user=s.me), f"Update v{m['version']} rev {m['revision']} downloaded from GitHub")
+    return thin.trigger(github_panel(request, s, {"ok": True, "text": f"v{m['version']} rev {m['revision']} downloaded, checked and waiting to install (see above)."}),
+                        changed=True, toast=f"v{m['version']} rev {m['revision']} downloaded from GitHub and checked.")
 
 
 # ---------------------------------------------------------------- settings copy

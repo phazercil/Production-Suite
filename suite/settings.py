@@ -194,7 +194,9 @@ SUITE = {
     # Downtime alerts (Admin > Alerts): mail server, and Twilio for text messages
     **{k: env(k) for k in ("ALERT_SMTP_HOST", "ALERT_SMTP_PORT", "ALERT_SMTP_SECURITY", "ALERT_SMTP_USER", "ALERT_SMTP_PASSWORD",
                            "ALERT_FROM", "ALERT_SMTP_INTERNET", "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "GRAFANA_TOKEN",
-                           "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET")},
+                           "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET",
+                           # Updates from GitHub (Admin > Updates): an opt-in internet connection
+                           "GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK")},
     # Run the per-minute machine ticker inside `runserver` (handy for demos). In production
     # run `python manage.py runplant` as its own service and set this to 0.
     "TICKER_IN_PROCESS": env_bool("TICKER_IN_PROCESS", True),

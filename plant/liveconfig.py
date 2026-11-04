@@ -22,7 +22,8 @@ DB_GROUPS = {"assets": ("ASSET_DB", "The asset database"), "s2k": ("S2K_DB", "Th
              "machines": ("MACHINE_DB", "The machine data database")}
 SUITE_KEYS = ("PAYCOM_SID", "PAYCOM_TOKEN", "FEED_KEY", "ALERT_SMTP_HOST", "ALERT_SMTP_PORT", "ALERT_SMTP_SECURITY", "ALERT_SMTP_USER",
               "ALERT_SMTP_PASSWORD", "ALERT_FROM", "ALERT_SMTP_INTERNET", "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "GRAFANA_TOKEN",
-              "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET")
+              "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET",
+              "GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK")
 _lock = threading.Lock()
 _seen = {"mtime": None}
 
@@ -93,6 +94,8 @@ def info():
     out["sms"] = {"on": bool(v.get("TWILIO_SID") and v.get("TWILIO_TOKEN") and v.get("TWILIO_FROM")), "sid": v.get("TWILIO_SID", ""),
                   "hasToken": bool(v.get("TWILIO_TOKEN")), "from": v.get("TWILIO_FROM", "")}
     out["grafana"] = {"hasToken": bool(v.get("GRAFANA_TOKEN"))}
+    out["github"] = {"on": bool(v.get("GITHUB_UPDATES_TOKEN")), "repo": v.get("GITHUB_UPDATES_REPO", "") or "phazercil/Production-Suite",
+                     "hasToken": bool(v.get("GITHUB_UPDATES_TOKEN")), "daily": v.get("GITHUB_UPDATES_CHECK") == "1"}
     out["influx"] = {"on": bool(v.get("INFLUX_URL")), "url": v.get("INFLUX_URL", ""), "version": v.get("INFLUX_VERSION", "") or "2",
                      "org": v.get("INFLUX_ORG", ""), "user": v.get("INFLUX_USER", ""), "db": v.get("INFLUX_DB", ""),
                      "out": v.get("INFLUX_WRITE_BUCKET", ""), "hasToken": bool(v.get("INFLUX_TOKEN"))}

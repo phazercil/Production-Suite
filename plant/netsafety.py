@@ -3,8 +3,9 @@
 The suite only talks to devices on the plant network:
 - screens may only connect from an address on the plant network (PrivateNetworkOnlyMiddleware);
 - every address the server itself connects to (machine feeds, S2K, people list, webhook, Grafana,
-  MariaDB, asset database) must be on the plant network. The one exception is Paycom, a cloud
-  service that can only be reached over the internet; it is used only when PAYCOM_SID/TOKEN are set.
+  MariaDB, asset database) must be on the plant network. The exceptions are cloud services an Admin
+  chooses to set up, each used only when its login is saved: Paycom (PAYCOM_SID/TOKEN), Twilio texts, an
+  internet mail server, and updates from GitHub (GITHUB_UPDATES_TOKEN, plant/ghupdates.py).
 
 The plant network is 192.168.100.0/24 unless changed in Operator Kiosk > Admin > Network (stored in the
 database), or by the installer (PLANT_NETWORKS in .env), or with `python manage.py network --set ...`.

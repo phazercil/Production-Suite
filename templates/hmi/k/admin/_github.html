@@ -1,0 +1,29 @@
+{% load suite %}<div id="github" class="panel" {% if hold %}data-hold{% endif %}>{% with G=GH.G L=GH.last f=GH.form %}
+  <div class="row"><h2 class="h2 grow">Updates from GitHub</h2>{% if G.on %}<span class="pill ok">SET UP</span>{% else %}<span class="pill idle">NOT SET UP</span>{% endif %}</div>
+  <p class="sub" style="margin-top:4px">The server can look for a newer release of the suite on GitHub and download its update file itself. The download goes through the same checks as an uploaded file: only update files signed for this suite, newer than what's installed, are accepted. This is an internet connection (to github.com), used only when set up here, and it never installs anything by itself.</p>
+  {% if G.on %}
+    <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary" hx-post="/kiosk/do/ghCheck" hx-target="#github" hx-swap="outerHTML">Check for updates</button><span class="htmx-indicator note">Asking GitHub…</span>
+      {% if L.checked %}<span class="note">Last checked {{ L.checked|plan:S.t }}{% if L.error %} · <span style="color:var(--bad)">{{ L.error }}</span>{% endif %}</span>{% endif %}</div>
+    {% if L.release %}{% with a=L.release.asset %}
+      {% if L.newer %}<div class="panel" style="background:var(--well-3);margin-top:10px">
+        <p><b>v{{ a.version }} rev {{ a.revision }} is available</b> <span class="note">({{ L.release.name }}{% if L.release.published %}, published {{ L.release.published|slice:":10" }}{% endif %}{% if a.packages %}, includes Python packages{% endif %}, {{ a.size|filesizeformat }})</span>. This server has rev {{ L.installed.revision }}.</p>
+        {% if L.release.notes %}<details style="margin-top:6px"><summary class="note" style="cursor:pointer">What's in it</summary><p class="note" style="white-space:pre-wrap;margin-top:4px">{{ L.release.notes }}</p></details>{% endif %}
+        <form class="row" style="margin-top:8px;flex-wrap:wrap" hx-post="/kiosk/do/ghInstall" hx-target="#github" hx-swap="outerHTML">
+          <label class="f" style="min-width:240px">Install<select name="when"><option value="idle" selected>When no line is running a shift</option><option value="now">Right away</option><option value="at">At a set time</option></select></label>
+          <label class="f">Date and time (for "At a set time")<input type="datetime-local" name="at"></label>
+          <button class="btn primary" type="submit">Download and install</button><span class="htmx-indicator note">Downloading and checking…</span></form></div>
+      {% else %}<p style="margin-top:8px;color:var(--ok)">Up to date: the newest release on GitHub is v{{ a.version }} rev {{ a.revision }}.</p>{% endif %}
+    {% endwith %}{% elif L.checked and not L.error %}<p class="note" style="margin-top:8px">No release on GitHub has an update file yet.</p>{% endif %}
+  {% endif %}
+  {% include "hmi/k/admin/_msg.html" with m=GH.msg %}
+  <details style="margin-top:12px" {% if not G.on or f %}open{% endif %}><summary style="cursor:pointer;font:600 16px var(--f-disp)">{% if G.on %}Change the GitHub login{% else %}Set it up{% endif %}</summary>
+    <form hx-post="/kiosk/do/ghSave" hx-target="#github" hx-swap="outerHTML" autocomplete="off" style="margin-top:8px">
+      <div class="grid3">
+        <label class="f">Repository<input type="text" name="repo" value="{% if f %}{{ f.repo }}{% else %}{{ G.repo }}{% endif %}" spellcheck="false" placeholder="phazercil/Production-Suite"></label>
+        <label class="f">GitHub token<input type="password" name="token" autocomplete="new-password" placeholder="{% if G.hasToken %}Leave blank to keep the saved one{% else %}github_pat_…{% endif %}"></label>
+        <label class="chk"><input type="checkbox" name="daily" value="1" {% if f %}{% if f.daily %}checked{% endif %}{% elif G.daily %}checked{% endif %}> Check once a day and show a notice when there's a newer release</label>
+      </div>
+      <p class="note" style="margin-top:6px">Make the token on GitHub: Settings › Developer settings › Fine-grained tokens › Generate. Repository access: only this repository. Permissions › Contents: Read-only. It is kept in the server's protected settings file and never shown again. The server needs to reach api.github.com over HTTPS (through the company proxy if there is one).</p>
+      <div class="row" style="margin-top:8px"><button class="btn primary" type="submit">Test and save</button>{% if G.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/ghRemove" hx-target="#github" hx-swap="outerHTML" hx-confirm="Turn off updates from GitHub and remove the token?">Turn off</button>{% endif %}<span class="htmx-indicator note">Checking the token with GitHub…</span></div>
+    </form></details>
+{% endwith %}</div>
