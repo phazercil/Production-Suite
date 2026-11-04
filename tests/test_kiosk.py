@@ -152,22 +152,23 @@ class KioskTests(TestCase):
         self.assertNotIn("bad", json.dumps(self.toast(r)))
         self.assertIn("Glue skips", PlantSettings.load().config["reasons"])
         r = self.do("mdSet", id="Barbara", f="feed.type", v="none")
-        self.assertContains(r, "Admin approval")                # Machines need an Admin
+        self.assertContains(r, "Approval")                      # Machines need someone allowed to change them
+        self.assertContains(r, "<b>Machines</b>")
         self.assertNotEqual(Machine.objects.get(name="Barbara").feed_type, "none")
         r = self.do("run", c="settingSet", k="webhook", v="http://192.168.100.9/x")
-        self.assertIn("Only an Admin", self.toast(r)["text"])
+        self.assertIn("doesn't have permission", self.toast(r)["text"])
         self.do("run", c="settingSet", k="qcEvery", v="45")
         self.assertEqual(PlantSettings.load().settings["qcEvery"], 45)
         admin = Person.objects.get(pin="9999")
         r = self.do("userSet", id=admin.id, f="pin", v="123987")
-        self.assertIn("Only an Admin", self.toast(r)["text"])
+        self.assertIn("manages permissions", self.toast(r)["text"])
         op = Person.objects.get(pin="1111")
         r = self.do("userSet", id=op.id, f="role", v="admin")
-        self.assertIn("Only an Admin", self.toast(r)["text"])
+        self.assertIn("manages permissions", self.toast(r)["text"])
         self.do("userSet", id=op.id, f="role", v="lead")
         self.assertEqual(Person.objects.get(pk=op.pk).role, "lead")
         r = self.c.get("/kiosk/v/admin?tab=connections")
-        self.assertContains(r, "only an Admin can change these")
+        self.assertContains(r, "Changing this needs permission for <b>Connections</b>")
         self.assertNotContains(r, 'id="accounts"')               # logins and secrets are an Admin's
         # the last Admin can't be demoted
         self.do("logout"); self.do("login", pin="9999")
@@ -181,3 +182,56 @@ class KioskTests(TestCase):
         self.assertRedirects(self.c.get("/operator/admin/?tab=alerts"), "/admin/?tab=alerts", fetch_redirect_response=False)
         self.assertNotContains(self.c.get("/operator/"), 'href="/operator/admin/"')
         self.assertEqual(self.c.get("/db-admin/").status_code, 302)     # Django's own table editor moved here
+
+    def test_permission_manager(self):
+        from plant import perms
+        from plant.models import Person
+        lead, op = Person.objects.get(pin="4444"), Person.objects.get(pin="1111")
+        self.assertFalse(perms.can(lead, "machines.edit"))
+        self.do("login", pin="4444")
+        r = self.do("run", c="permRole", key="machines.edit", role="lead", **{"v:b": "1"})
+        self.assertContains(r, "Approval")                         # managing permissions needs it
+        self.do("logout"); self.do("login", pin="9999")
+        self.assertContains(self.c.get("/kiosk/v/admin?tab=permissions"), "Permissions by role")
+        self.do("run", c="permRole", key="machines.edit", role="lead", **{"v:b": "1"})
+        self.assertTrue(perms.can(lead, "machines.edit"))           # a role
+        self.do("run", c="permPerson", id=lead.id, key="machines.edit", v="deny")
+        self.assertFalse(perms.can(lead, "machines.edit"))          # a person wins over their role
+        self.do("run", c="permPerson", id=op.id, key="labor.view", v="allow")
+        self.assertTrue(perms.can(op, "labor.view"))
+        r = self.do("run", c="permRole", key="permissions.manage", role="admin")   # unticked
+        self.assertTrue(perms.can(Person.objects.get(pin="9999"), "permissions.manage"))   # can't lock the plant out
+        r = self.c.get("/kiosk/v/admin?tab=permissions&who=%d" % lead.id)
+        self.assertContains(r, "Permissions for one person")
+        self.do("run", c="permReset")
+        self.assertFalse(perms.can(lead, "machines.edit"))
+        self.assertFalse(perms.can(op, "labor.view"))
+
+    def test_sections_and_budget_only_link(self):
+        from plant import perms
+        from plant.models import Person
+        r = Client().get("/operator/")
+        for href in ("/supervisor/", "/maintenance/", "/admin/", "/labor/"):
+            self.assertContains(r, f'href="{href}"')
+        self.assertContains(Client().get("/supervisor/"), "packaging")
+        self.assertContains(Client().get("/maintenance/"), "Maintenance")
+        # /budget/: the Labor Budget alone, for someone allowed only that
+        op = Person.objects.get(pin="1111")
+        c = Client()
+        r = c.get("/budget/")
+        self.assertNotContains(r, 'class="suitetabs"')
+        self.assertContains(r, "Open Labor Budget")
+        r = c.post("/api/hmi/login", json.dumps({"pin": "1111", "perm": "labor.view"}), content_type="application/json").json()
+        self.assertFalse(r["ok"])                                   # not allowed yet
+        self.c.post("/kiosk/do/login", {"pin": "9999"})
+        self.do("run", c="permPerson", id=op.id, key="labor.view", v="allow")
+        self.assertTrue(perms.can(op, "labor.view"))
+        r = c.post("/api/hmi/login", json.dumps({"pin": "1111", "perm": "labor.view"}), content_type="application/json").json()
+        self.assertTrue(r["ok"], r)
+        r = c.get("/budget/")
+        self.assertContains(r, "MFG Labor")
+        self.assertNotContains(r, 'class="suitetabs"')             # no other sections
+        self.assertContains(c.get("/labor/"), 'class="suitetabs"')
+        self.assertEqual(c.get("/api/labor/state").status_code, 200)
+        r = c.post("/api/labor/save", json.dumps({"version": 0, "data": {"lines": [], "schedules": []}}), content_type="application/json")
+        self.assertEqual(r.status_code, 403)                         # viewing isn't changing

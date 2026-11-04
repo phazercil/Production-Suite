@@ -95,7 +95,7 @@ function openLogin(msg){
     <div class="foot"><button type="button" class="btn" id="lgc">Cancel</button><button class="btn primary">Log in</button></div></form></div>`;
   const close=()=>closeDialog();$("#lgx").onclick=close;$("#lgc").onclick=close;
   $("#lgform").onsubmit=async e=>{e.preventDefault();
-    const r=await fetch("/api/hmi/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({pin:$("#pinIn").value.trim(),adminOnly:true})}).then(x=>x.json()).catch(()=>({ok:false,error:"The server is not answering."}));
+    const r=await fetch("/api/hmi/login",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},body:JSON.stringify({pin:$("#pinIn").value.trim(),perm:"schedule.edit"})}).then(x=>x.json()).catch(()=>({ok:false,error:"The server is not answering."}));
     if(!r.ok){const er=$("#lgerr");er.textContent=r.error||"That is not a shift lead PIN.";er.hidden=false;$("#pinIn").select();return}
     close();await load(true);toast("Logged in. You can change the schedule now.")};
   $("#pinIn").focus();

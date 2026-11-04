@@ -451,7 +451,7 @@ class ReviewerFindingTests(TestCase):
     def test_shift_lead_approval_login(self):
         r = self.post("/api/hmi/login", {"pin": "1111", "adminOnly": True}).json()
         self.assertFalse(r["ok"])
-        self.assertIn("shift lead", r["error"])
+        self.assertIn("can't do this", r["error"])
         r = self.post("/api/hmi/login", {"pin": "9999", "adminOnly": True}).json()
         self.assertTrue(r["ok"], r)
         lead = Person.objects.get(pin="9999")

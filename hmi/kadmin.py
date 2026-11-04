@@ -21,7 +21,8 @@ from . import engine, integrations
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
-        ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup")]
+        ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
+        ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
                       "reorder or remove reasons here; the order here is the order on the screen. Maintenance and shift leads can also type a "
                       "reason that isn't listed, or change a reason already entered. Removing a reason keeps it on stops already logged. "
@@ -40,7 +41,7 @@ S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
                "breakSet", "breakDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
                "s2kPull", "peoplePull", "paycomImport", "networkFirewallSync", "srcDelete", "alertContactDelete", "updCancel", "updGoBack",
-               "updFolder", "updWhen"}
+               "updFolder", "updWhen", "permRole", "permPerson", "permReset"}
 _tables_cache = {}
 
 
@@ -131,13 +132,41 @@ def tab_data(s, tab, request):
         except Exception as e:  # noqa: BLE001
             return {"U": None, "err": str(e)}
     if tab == "alerts":
-        r = run(request, s, "alertInfo", {}) if s.is_admin else {"ok": False}
+        r = run(request, s, "alertInfo", {}) if s.can("alerts.edit") else {"ok": False}
         return {"I": r.get("data") if r.get("ok") else None}
     if tab == "connections":
         return connections_data(s, request)
+    if tab == "permissions":
+        return permissions_data(s, request)
     if tab == "codata":
         return codata_data(s, request)
     return {}
+
+
+def permissions_data(s, request):
+    from plant import perms
+    from .kviews import page_option
+    cfg = perms._cfg()
+    people = list(Person.objects.filter(active=True).order_by("name"))
+    overrides = {str(k): v for k, v in (cfg.get("people") or {}).items() if v}
+    groups = []
+    for key, d in perms.PERMS.items():
+        row = {"key": key, "label": d["label"], "help": d["help"],
+               "roles": [{"role": r, "on": perms.role_has(key, r, cfg), "locked": (key, r) in perms.LOCKED,
+                          "default": r in d["roles"]} for r, _ in perms.ROLES]}
+        if not groups or groups[-1]["name"] != d["group"]:
+            groups.append({"name": d["group"], "rows": []})
+        groups[-1]["rows"].append(row)
+    who = page_option(request, "who", {str(p.pk) for p in people} | {""}, "")
+    person = next((p for p in people if str(p.pk) == who), None)
+    detail = None
+    if person:
+        detail = [{"name": g["name"], "rows": [{**r, "rule": perms.person_rule(r["key"], person.pk, cfg),
+                                                 "role": perms.role_has(r["key"], person.role, cfg), "eff": perms.can(person, r["key"], cfg),
+                                                 "locked": (r["key"], person.role) in perms.LOCKED} for r in g["rows"]]} for g in groups]
+    return {"groups": groups, "roles": perms.ROLES, "people": people, "person": person, "detail": detail,
+            "withRules": [{"p": p, "n": len(overrides.get(str(p.pk), {}))} for p in people if overrides.get(str(p.pk))],
+            "roleLabel": dict(perms.ROLES)}
 
 
 def connections_data(s, request):
@@ -173,7 +202,7 @@ def connections_data(s, request):
     out = {"status": status, "srv": srv, "g": g, "kiosk": st.get("kiosk") or {}, "pc": pc, "st": st,
            "panelsText": "\n".join(f"{x.get('title')} = {x.get('panel')}" for x in (st.get("kiosk") or {}).get("panels", [])),
            "queries": grafana_queries(s, srv)}
-    if s.is_admin:
+    if s.can("connections.edit"):
         info = liveconfig.info()
         out["I"] = info
         out["dbBoxes"] = [db_box(info, "s2k", "S2K database (read-only)", "Open MOs for the Scheduler. After saving, set up the query under S2K schedule below."),
@@ -353,7 +382,7 @@ def codata_data(s, request, states=None):
     from .snapshot import QDEF
     srv_assets = integrations.assets_ready()
     out = {"assets": srv_assets, "useDb": s.settings.get("useDb")}
-    if not srv_assets or not s.is_admin:
+    if not srv_assets or not s.can("connections.edit"):
         return out
     T = tables("assets")
     out["T"] = T
@@ -419,11 +448,12 @@ def action(name):
 ACTIONS["run"] = act_run
 
 
-def _need_admin(request, s):
-    if s.is_admin:
+def _need(request, s, perm):
+    """None if the person on this screen has permission `perm`; otherwise the login dialog for someone who has."""
+    if s.can(perm):
         return None
     from .kviews import login_needed
-    return login_needed(request, s, {"admin": True, "onlyAdmin": True})
+    return login_needed(request, s, {"perm": perm})
 
 
 def accounts_panel(request, s, g=None, form=None, msg=None, key=None):
@@ -451,7 +481,7 @@ def _conn_fields(p, g):
 
 @action("connTest")
 def a_conn_test(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     g = p.get("group", "")
@@ -468,7 +498,7 @@ def a_conn_test(request, s, p):
 
 @action("connSave")
 def a_conn_save(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     g = p.get("group", "")
@@ -486,7 +516,7 @@ def a_conn_save(request, s, p):
 @action("connRedraw")
 def a_conn_redraw(request, s, p):
     """A choice that changes which fields a login form has (InfluxDB version): the same form again, nothing saved."""
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     g = p.get("group", "")
@@ -535,7 +565,7 @@ def a_kiosk_panels(request, s, p):
 
 @action("connRemove")
 def a_conn_remove(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     g = p.get("group", "")
@@ -587,7 +617,7 @@ def alerts_panel(request, s, edit=None, msgs=None, forms=None, err=None):
 
 @action("alertEdit")
 def a_alert_edit(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "alerts.edit")
     if deny:
         return deny
     edit = {"name": "", "email": "", "phone": "", "lines": [], "downAfter": 15, "notifyBack": True, "active": True}
@@ -702,7 +732,7 @@ def _src_from_form(request, p):
 
 @action("srcEdit")
 def a_src_edit(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     if p.get("id"):
@@ -764,7 +794,7 @@ def _s2k_bld(request, p):
 
 @action("s2k")
 def a_s2k(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     op, sql, bld = p.get("op", ""), p.get("sql", ""), _s2k_bld(request, p)
@@ -812,7 +842,7 @@ def codata_panel(request, s, name=None, st=None, browse=None):
 @action("codata")
 def a_codata(request, s, p):
     from .snapshot import QDEF
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "connections.edit")
     if deny:
         return deny
     op = p.get("op", "")
@@ -861,7 +891,7 @@ def a_codata(request, s, p):
 @action("updUpload")
 def a_upd_upload(request, s, p):
     from plant import updates
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "updates.install")
     if deny:
         return deny
     f = request.FILES.get("file")
@@ -901,7 +931,7 @@ def github_panel(request, s, msg=None, form=None, hold=False):
 
 @action("ghSave")
 def a_gh_save(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "updates.install")
     if deny:
         return deny
     f = {"repo": p.get("repo", ""), "token": p.get("token", ""), "daily": bool(p.get("daily"))}
@@ -912,7 +942,7 @@ def a_gh_save(request, s, p):
 
 @action("ghRemove")
 def a_gh_remove(request, s, p):
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "updates.install")
     if deny:
         return deny
     r = run(request, s, "connRemove", {"group": "github"})
@@ -922,7 +952,7 @@ def a_gh_remove(request, s, p):
 @action("ghCheck")
 def a_gh_check(request, s, p):
     from plant import ghupdates
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "updates.install")
     if deny:
         return deny
     try:
@@ -935,7 +965,7 @@ def a_gh_check(request, s, p):
 @action("ghInstall")
 def a_gh_install(request, s, p):
     from plant import ghupdates
-    deny = _need_admin(request, s)
+    deny = _need(request, s, "updates.install")
     if deny:
         return deny
     when, at = p.get("when") or "idle", p.get("at") or ""
@@ -964,6 +994,7 @@ def a_config_import(request, s, p):
 
 
 CONFIRM = {
+    "permReset": ("Reset permissions to the defaults?", "Every role gets its standard permissions back, and every allow or deny set for a person is removed.", "", "Reset permissions"),
     "lineDel": ("Remove {id}?", "{queued}Training and feed rates for this machine are deleted. Past downtime, QC and reports keep the name.",
                 "To stop it temporarily, untick In service instead.", "Remove machine"),
     "shiftDel": ("Remove {name}?", "{name} and its breaks come off the schedule timeline. Past reports keep the name.", "", "Remove shift"),

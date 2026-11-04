@@ -3,10 +3,10 @@
 {% else %}
 <div class="panel"><h2 class="h2">Changeover data from MariaDB</h2>
   <p class="sub" style="margin-top:4px">During a changeover, the server looks up the steps and machine settings for the new part on this machine. If the database has nothing for that part, or cannot be reached, operators get the last steps saved for it, then the standard checklist from Admin › Checklists.</p>
-  <div class="grid2" style="margin-top:10px"><label class="chk"><input type="checkbox" name="v:b" value="1" {% if C.useDb %}checked{% endif %} {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "useDb"}' hx-params="c,k,v:b"> Use database steps in changeovers</label></div>
-  {% if S.is_admin %}<div class="row" style="margin-top:8px"><button class="btn" hx-post="/kiosk/do/codata" hx-vals='{"op": "reload"}' hx-target="#codata" hx-swap="outerHTML">Reload tables</button>{% if C.T.err %}<span class="note" style="color:var(--bad)">{{ C.T.err }}</span>{% endif %}</div>
+  <div class="grid2" style="margin-top:10px"><label class="chk"><input type="checkbox" name="v:b" value="1" {% if C.useDb %}checked{% endif %} {% if not S.perms.connections_edit %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "useDb"}' hx-params="c,k,v:b"> Use database steps in changeovers</label></div>
+  {% if S.perms.connections_edit %}<div class="row" style="margin-top:8px"><button class="btn" hx-post="/kiosk/do/codata" hx-vals='{"op": "reload"}' hx-target="#codata" hx-swap="outerHTML">Reload tables</button>{% if C.T.err %}<span class="note" style="color:var(--bad)">{{ C.T.err }}</span>{% endif %}</div>
   {% else %}<p class="note" style="margin-top:8px">Log in as an Admin to set up queries.</p>{% endif %}</div>
-{% if S.is_admin and C.T %}
+{% if S.perms.connections_edit and C.T %}
 <div class="panel"><h2 class="h2">Browse tables</h2><p class="sub" style="margin-top:4px">{{ C.T.tables|length }} tables. Pick one to see its columns and first rows.</p>
   <div class="row" style="margin-top:8px"><select name="table" style="max-width:320px" aria-label="Table" hx-post="/kiosk/do/codata" hx-trigger="change" hx-vals='{"op": "browse"}' hx-target="#codata" hx-swap="outerHTML"><option value="">—</option>{% for t in C.T.tables %}<option {% if C.browse.table == t.name %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></div>
   {% if C.browse.table %}<p class="note num" style="margin-top:8px">{{ C.browse.cols|join:" · " }}</p>{% if C.browse.prev %}{% include "hmi/k/admin/_rows.html" with rows=C.browse.prev.rows columns=C.browse.prev.columns %}{% endif %}{% endif %}</div>

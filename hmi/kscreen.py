@@ -64,18 +64,29 @@ class Screen:
 
     # ------------------------------------------------------------ who
     @property
+    def perms(self):
+        """What the person on this screen may do (Admin › Permissions): S.perms.lists_edit in a template."""
+        if not hasattr(self, "_perms"):
+            from plant.perms import PermView
+            self._perms = PermView(self.me)
+        return self._perms
+
+    def can(self, key):
+        return bool(self.perms[key.replace(".", "_")])
+
+    @property
     def is_lead(self):
-        """A shift lead or an Admin: floor approvals, Team, the day-to-day Admin lists."""
-        return bool(self.me and self.me.is_lead)
+        """Can open Admin and change the day-to-day lists."""
+        return self.can("section.admin")
 
     @property
     def is_admin(self):
-        """An Admin: system settings (Connections, Network, Alerts, Updates, Backup, Machines, Changeover data)."""
-        return bool(self.me and self.me.is_admin)
+        """Holds Admin-level permissions (used for labels; each feature checks its own permission)."""
+        return bool(self.me and self.me.role == "admin")
 
     @property
     def can_override(self):
-        return bool(self.me and self.me.role in ("lead", "admin", "maintenance"))
+        return self.can("downtime.reason")
 
     @property
     def shift_on(self):
@@ -303,12 +314,11 @@ def plan_label(t, ref):
     return f"{lt.month}/{lt.day} {clock(t)}"
 
 
-def people_for_login(level=""):
-    """Who can log in for this: anyone, a shift lead or Admin ("lead", or True), or an Admin only ("admin")."""
+def people_for_login(perm=""):
+    """Who can log in for this: anyone, or the people who have permission `perm` (Admin › Permissions)."""
+    from plant import perms
     qs = Person.objects.filter(active=True)
-    if level == "admin":
-        return list(qs.filter(role="admin"))
-    return list(qs.filter(role__in=Person.LEADS) if level else qs)
+    return perms.who_can(perm, qs) if perm in perms.PERMS else list(qs)
 
 
 # ------------------------------------------------------------------ the other operator pages
@@ -545,7 +555,7 @@ def team_page(s, show_inactive=False):
         tr = {m.name for m in u.trained.all()}
         rows.append({"u": u, "trained": [(m.name, m.name in tr) for m in lines], "you": bool(s.me and u.id == s.me.id),
                      # a shift lead manages everyone but Admins; an Admin manages everyone
-                     "edit": s.is_lead and (u.role != "admin" or s.is_admin)})
+                     "edit": s.can("team.manage") and (u.role != "admin" or s.can("permissions.manage"))})
     act = [u for u in people if u.active]
     return {"rows": rows, "lines": lines, "inactive": sum(1 for u in people if not u.active), "showInactive": show_inactive,
             "needPin": sum(1 for u in act if not u.pin), "untrained": sum(1 for u in act if not u.trained.exists()),

@@ -57,7 +57,7 @@
     var inp = w.querySelector('#labor-pin-in'); inp.focus();
     w.querySelector('form').addEventListener('submit', function (e) {
       e.preventDefault();
-      post('/api/hmi/login', { pin: inp.value, adminOnly: true }).then(function (r) {
+      post('/api/hmi/login', { pin: inp.value, perm: 'labor.edit' }).then(function (r) {
         if (r.ok && r.me) { w.remove(); S.blocked = false; flushAll(); }
         else { w.querySelector('#labor-pin-err').textContent = r.error || 'That PIN is not a shift lead PIN.'; inp.select(); }
       }).catch(function () { w.querySelector('#labor-pin-err').textContent = 'The server is not answering. Try again.'; });
@@ -209,7 +209,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     var out = document.getElementById('labor-logout');
     if (out) out.addEventListener('click', function () {
-      flushAll().then(function () { return post('/api/hmi/logout', {}); }).then(function () { window.onbeforeunload = null; location.href = '/labor/'; });
+      flushAll().then(function () { return post('/api/hmi/logout', {}); }).then(function () { window.onbeforeunload = null; location.href = location.pathname; });
     });
   });
 })();

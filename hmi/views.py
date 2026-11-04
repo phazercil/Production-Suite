@@ -73,7 +73,7 @@ def state(request):
     return state_response(request)
 
 
-def pin_login(request, pin, user_id=None, admin_only=False):
+def pin_login(request, pin, user_id=None, perm=""):
     """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not).
     Slows down PIN guessing: after 5 wrong PINs from one screen (or 20 from one device address), wait 60 seconds."""
     t = timezone.now().timestamp()
@@ -93,11 +93,10 @@ def pin_login(request, pin, user_id=None, admin_only=False):
     qs = Person.objects.filter(active=True, pin=pin).exclude(pin="")
     if user_id:
         qs = qs.filter(pk=to_int(user_id, "person"))
-    if admin_only == "admin":
-        qs = qs.filter(role="admin")
-    elif admin_only:   # "lead" or True: a shift lead or an Admin
-        qs = qs.filter(role__in=Person.LEADS)
-    matches = [u for u in qs if u.pin == pin]  # exact match even where the database ignores letter case
+    from plant import perms
+    if perm is True:   # older screens asking for "a shift lead"
+        perm = "section.admin"
+    matches = [u for u in qs if u.pin == pin and (not perm or perms.can(u, perm))]  # exact PIN match even where the database ignores letter case
     u = matches[0] if pin and matches else None
     if not u:
         request.session["pin_fails"] = fails + [t]
@@ -105,7 +104,8 @@ def pin_login(request, pin, user_id=None, admin_only=False):
             cache.set(ip_key, ip_fails + [t], 120)
         except Exception:
             log.exception("PIN limit store unavailable")
-        return None, ("That is not an Admin PIN." if admin_only == "admin" else "That is not a shift lead PIN." if admin_only else "That PIN does not match. Try again or ask your shift lead.")
+        return None, (f"That PIN can't do this ({perms.PERMS[perm]['label']})." if perm in perms.PERMS
+                      else "That PIN does not match. Try again or ask your shift lead.")
     request.session.cycle_key()  # new session id at every login
     request.session["pid"] = u.id
     request.session["pin_fails"] = []
@@ -117,7 +117,9 @@ def pin_login(request, pin, user_id=None, admin_only=False):
 @require_POST
 def login(request):
     p = body(request)
-    u, err = pin_login(request, p.get("pin"), p.get("userId"), bool(p.get("adminOnly")))
+    from plant import perms
+    perm = p.get("perm") if p.get("perm") in perms.PERMS else bool(p.get("adminOnly"))
+    u, err = pin_login(request, p.get("pin"), p.get("userId"), perm)
     if not u:
         return JsonResponse({"ok": False, "error": err})
     return state_response(request)
@@ -270,8 +272,9 @@ def update_upload(request):
     """A shift lead uploads an update file (Admin > Updates). It is checked, then waits in updates/ready."""
     from plant import updates
     me, _ = current_person(request)
-    if not me or not me.is_admin:
-        return JsonResponse({"ok": False, "error": "Log in as an Admin to install updates."}, status=403)
+    from plant import perms
+    if not perms.can(me, "updates.install"):
+        return JsonResponse({"ok": False, "error": "Log in as someone allowed to install updates."}, status=403)
     touch(request)
     f = request.FILES.get("file")
     if not f:

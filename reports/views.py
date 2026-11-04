@@ -18,7 +18,8 @@ def board(request):
 
 def _lead(request):
     me, _ = current_person(request)
-    return bool(me and me.is_lead)
+    from plant import perms
+    return perms.can(me, "costs.view")
 
 
 @json_api
