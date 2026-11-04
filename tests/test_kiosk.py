@@ -235,3 +235,29 @@ class KioskTests(TestCase):
         self.assertEqual(c.get("/api/labor/state").status_code, 200)
         r = c.post("/api/labor/save", json.dumps({"version": 0, "data": {"lines": [], "schedules": []}}), content_type="application/json")
         self.assertEqual(r.status_code, 403)                         # viewing isn't changing
+
+    def test_supervisor_override(self):
+        from hmi.models import AuditLog, Downtime
+        d = Downtime.objects.filter(line="Barbara").exclude(reason=None).first() or Downtime.objects.filter(line="Barbara").first()
+        Downtime.objects.filter(pk=d.pk).update(reason="Jam or misfeed", by="M. Lee")
+        self.do("login", pin="1111")                                     # J. Ortiz, an operator
+        r = self.do("downtimeSet", id=d.id, reason="Something not on the list")
+        self.assertIn("Pick a reason from the list", json.dumps(self.toast(r)))
+        self.assertContains(self.c.get("/kiosk/r/rail"), "Supervisor")
+        r = self.c.get("/kiosk/m/login?sup=1")
+        self.assertContains(r, "Supervisor override")
+        self.assertContains(r, "K. Patel<br>")                             # maintenance may override
+        self.assertNotContains(r, "J. Ortiz<br>")
+        r = self.do("supStart", pin="1111")
+        self.assertContains(r, "can&#x27;t do this")
+        r = self.do("supStart", pin="3333")                                # K. Patel
+        self.assertIn("Supervisor override: K. Patel", self.toast(r)["text"])
+        self.assertContains(self.c.get("/kiosk/r/rail"), "End override")
+        self.assertContains(self.c.get("/kiosk/r/rail"), "Log out")        # the operator is still logged in
+        r = self.do("downtimeSet", id=d.id, reason="Something not on the list")
+        self.assertEqual(Downtime.objects.get(pk=d.pk).reason, "Something not on the list")
+        self.assertTrue(AuditLog.objects.filter(what__startswith="Supervisor override").exists())
+        self.do("supEnd")
+        self.assertContains(self.c.get("/kiosk/r/rail"), ">Supervisor<")
+        r = self.do("downtimeSet", id=d.id, reason="Another")
+        self.assertIn("Pick a reason", json.dumps(self.toast(r)))

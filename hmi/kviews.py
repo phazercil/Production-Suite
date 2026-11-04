@@ -31,11 +31,28 @@ BUILT = {"controls", "schedule", "qc-log", "downtime", "maintenance", "status", 
 
 
 # ------------------------------------------------------------------ helpers
+SUP_MINUTES = 10   # a supervisor override ends after this long without a tap
+
+
 def screen(request):
     me, note = current_person(request)
-    s = kscreen.Screen(request, me=me, lock=request.session.get("lock", ""))
+    s = kscreen.Screen(request, me=me, lock=request.session.get("lock", ""), sup=supervisor(request))
     s.note = note
     return s
+
+
+def supervisor(request):
+    """The supervisor who has taken over this screen (Supervisor button), while it lasts."""
+    from plant import perms
+    sup = request.session.get("sup") or {}
+    if not sup or sup.get("until", 0) < now().timestamp():
+        request.session.pop("sup", None)
+        return None
+    p = Person.objects.filter(pk=sup.get("id"), active=True).first()
+    if not perms.can(p, "floor.override"):
+        request.session.pop("sup", None)
+        return None
+    return p
 
 
 def ctx_for(s, **kw):
@@ -99,7 +116,7 @@ def form_params(request):
 
 def run(request, s, name, p):
     """Run one plant command for this screen (the same rules every screen uses)."""
-    return engine.execute(name, p, engine.Ctx(user=s.me, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
+    return engine.execute(name, p, engine.Ctx(user=s.actor, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
 
 
 def _perm_label(perm):
@@ -241,6 +258,9 @@ def dialog(request, name):
 
 @modal("login")
 def m_login(request, s):
+    if request.GET.get("sup"):   # the Supervisor button
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm="floor.override", perm_label=_perm_label("floor.override"),
+                                                                       sup=True, people=kscreen.people_for_login("floor.override")))
     from plant import perms
     perm = request.GET.get("perm") if request.GET.get("perm") in perms.PERMS else ("section.admin" if request.GET.get("admin") else "")
     return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm=perm, perm_label=_perm_label(perm), people=kscreen.people_for_login(perm),
@@ -476,6 +496,8 @@ def downtime_rows(s, downs):
 def act(request, name):
     s = screen(request)
     touch(request)
+    if s.sup:   # each tap keeps a supervisor override going
+        request.session["sup"] = {"id": s.sup.pk, "until": now().timestamp() + SUP_MINUTES * 60}
     from . import kadmin
     fn = ACTIONS.get(name) or kadmin.ACTIONS.get(name)
     if not fn:
@@ -523,6 +545,24 @@ def a_login(request, s, p):
         resp = MODALS[nxt][0](request, screen(request))
         return thin.trigger(resp, toast=f"Logged in as {u.name}", changed=True)
     return thin.done(toast=f"Logged in as {u.name}", close=True)
+
+
+@action("supStart")
+def a_sup_start(request, s, p):
+    """Supervisor override: a supervisor's PIN takes over this screen's permissions, without logging the operator out."""
+    from .views import check_pin
+    u, err = check_pin(request, p.get("pin"), p.get("user") or None, "floor.override")
+    if not u:
+        return err_in_modal(err)
+    request.session["sup"] = {"id": u.pk, "until": now().timestamp() + SUP_MINUTES * 60}
+    engine.audit(engine.Ctx(user=u), f"Supervisor override on {s.station or 'a screen'}" + (f" (logged in: {s.me.name})" if s.me else ""))
+    return thin.done(toast=f"Supervisor override: {u.name}. It ends after {SUP_MINUTES} minutes without a tap.", close=True)
+
+
+@action("supEnd")
+def a_sup_end(request, s, p):
+    request.session.pop("sup", None)
+    return thin.done(toast="Supervisor override ended")
 
 
 @action("logout")

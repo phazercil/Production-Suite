@@ -34,10 +34,11 @@ def hms(seconds):
 class Screen:
     """One kiosk screen at one moment: the person logged in, the machine it is for, and what follows from them."""
 
-    def __init__(self, request, me=None, lock=""):
+    def __init__(self, request, me=None, lock="", sup=None):
         self.request = request
         self.t = now()
         self.me = me
+        self.sup = sup   # a supervisor who has taken over this screen (Supervisor button)
         self.lock = lock
         self.st = PlantSettings.load()
         self.cfg = self.st.config
@@ -68,8 +69,13 @@ class Screen:
         """What the person on this screen may do (Admin › Permissions): S.perms.lists_edit in a template."""
         if not hasattr(self, "_perms"):
             from plant.perms import PermView
-            self._perms = PermView(self.me)
+            self._perms = PermView(self.actor)
         return self._perms
+
+    @property
+    def actor(self):
+        """Who this screen acts as: the supervisor during an override, otherwise the person logged in."""
+        return self.sup or self.me
 
     def can(self, key):
         return bool(self.perms[key.replace(".", "_")])

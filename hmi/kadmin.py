@@ -50,7 +50,7 @@ def q(name):
 
 
 def run(request, s, name, p):
-    return engine.execute(name, p, engine.Ctx(user=s.me, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
+    return engine.execute(name, p, engine.Ctx(user=s.actor, line=s.station, client_ip=request.META.get("REMOTE_ADDR", "")))
 
 
 def tables(db):
@@ -907,7 +907,7 @@ def a_upd_upload(request, s, p):
         for chunk in f.chunks():
             out.write(chunk)
     try:
-        m = updates.receive(tmp, f.name, s.me.name, when, at)
+        m = updates.receive(tmp, f.name, s.actor.name, when, at)
     except updates.UpdError as e:
         return thin.refused(str(e))
     finally:
@@ -915,7 +915,7 @@ def a_upd_upload(request, s, p):
             tmp.unlink()
         except OSError:
             pass
-    engine.audit(engine.Ctx(user=s.me), f"Update v{m['version']} rev {m['revision']} uploaded ({f.name})")
+    engine.audit(engine.Ctx(user=s.actor), f"Update v{m['version']} rev {m['revision']} uploaded ({f.name})")
     return thin.done(toast=f"v{m['version']} rev {m['revision']} checked and ready.")
 
 
@@ -972,10 +972,10 @@ def a_gh_install(request, s, p):
     if when == "at" and not at:
         return thin.refused("Pick the date and time.")
     try:
-        m = ghupdates.install(s.me.name, when, at)
+        m = ghupdates.install(s.actor.name, when, at)
     except ghupdates.GHError as e:
         return github_panel(request, s, {"ok": False, "text": str(e)})
-    engine.audit(engine.Ctx(user=s.me), f"Update v{m['version']} rev {m['revision']} downloaded from GitHub")
+    engine.audit(engine.Ctx(user=s.actor), f"Update v{m['version']} rev {m['revision']} downloaded from GitHub")
     return thin.trigger(github_panel(request, s, {"ok": True, "text": f"v{m['version']} rev {m['revision']} downloaded, checked and waiting to install (see above)."}),
                         changed=True, toast=f"v{m['version']} rev {m['revision']} downloaded from GitHub and checked.")
 
