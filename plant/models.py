@@ -101,6 +101,27 @@ class Machine(models.Model):
         return self.stage == "s1"
 
 
+class ExtraBreak(models.Model):
+    """A break an Admin or shift lead adds on top of the shift's own breaks, e.g. 2:00 pm for 15 minutes on a hot
+    day. It can repeat every day up to a date. Runs pause through it, and a stop during it isn't downtime."""
+    day = models.DateField()
+    until = models.DateField(null=True, blank=True, help_text="Repeat every day up to and including this date")
+    start = models.CharField(max_length=5, help_text="HH:MM")
+    minutes = models.IntegerField()
+    label = models.CharField(max_length=60, default="Break")
+    machines = models.ManyToManyField(Machine, blank=True, related_name="+", help_text="None ticked = every line")
+    by = models.CharField(max_length=120, blank=True)
+    t = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["day", "start", "id"]
+        db_table = "plant_extra_break"
+
+    @property
+    def last_day(self):
+        return self.until or self.day
+
+
 class PartSpec(models.Model):
     """Drawing specs the QC check measures against. Prefixes like 1MG/2MG share the MG spec."""
     key = models.CharField(max_length=40, unique=True)

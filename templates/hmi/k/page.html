@@ -10,6 +10,7 @@
   {% include "hmi/k/_nav.html" %}
   <main>
     {% include "hmi/k/_banner.html" %}
+    {% include "hmi/k/_notibar.html" %}
     <section id="view" class="view" hx-get="/kiosk/v/{{ page }}" hx-trigger="load, suite:changed from:body" hx-swap="innerHTML"></section>
   </main>
 </div>

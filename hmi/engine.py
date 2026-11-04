@@ -64,9 +64,13 @@ def event(kind, data):
         Event.objects.create(t=now(), kind=kind, data=json.loads(json.dumps(data, default=str)))
 
 
-def notify(text, kind="schedule", t=None):
-    Notice.objects.create(t=t or now(), text=text[:300], kind=kind)
-    ids = list(Notice.objects.values_list("id", flat=True)[60:])
+OPERATOR_KINDS = ("schedule", "break", "maint", "qc", "info")   # what the operator notification bar shows
+
+
+def notify(text, kind="schedule", t=None, lines=None, go=""):
+    """A notice. lines: machine names it is for (None / empty = every line). go: the operator page with more."""
+    Notice.objects.create(t=t or now(), text=text[:300], kind=kind, lines=sorted({str(x) for x in (lines or []) if x}), go=go[:20])
+    ids = list(Notice.objects.values_list("id", flat=True)[200:])
     if ids:
         Notice.objects.filter(id__in=ids).delete()
 
@@ -170,6 +174,10 @@ def planned_windows(sh, kinds=False):
                 bl = (hm(b.end) - hm(b.start)) % 1440
                 if bl and bo < length:
                     out.append((s0 + timedelta(minutes=bo), s0 + timedelta(minutes=bo + bl), b.label or "Break"))
+            from plant.util import extra_breaks
+            for w in extra_breaks(s0, e0):   # breaks an Admin or shift lead added for today
+                if w["machines"] is None or sh.machine_id in w["machines"]:
+                    out.append((max(w["s"], s0), min(w["e"], e0), w["label"]))
             out.sort()
             return out if kinds else [(a, b) for a, b, _ in out]
     return []
@@ -658,6 +666,8 @@ def qc_review(p, ctx):
     q.scrapped = q.scrapped + n
     q.save(update_fields=["review", "reviewed_by", "reviewed_at", "scrapped"])
     audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else ""))
+    notify(f"QC check at {fmt_t(q.t)} {d} by {ctx.by}" + (f": {q.scrapped} filters scrapped from the count" if q.scrapped else ""),
+           "qc", lines=[q.line], go="qc-log")
     return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"}
 
 
@@ -706,6 +716,8 @@ def ticket_status(p, ctx):
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
                               text=note or ("Completed" if t.status == "Closed" else "Started work"))
     event("maintenance_status", {"id": t.id, "status": t.status})
+    notify((f"Maintenance completed on {t.machine} · {t.type} by {ctx.by}" + (f": {note}" if note else "")) if t.status == "Closed"
+           else f"Maintenance started on {t.machine} · {t.type} ({ctx.by})", "maint", lines=[t.line or t.machine, t.machine], go="maintenance")
     return {"msg": "Marked complete" if t.status == "Closed" else "Work started"}
 
 
@@ -723,6 +735,7 @@ def ticket_note(p, ctx):
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save(update_fields=["status", "updated", "updated_by"])
     event("maintenance_note", {"id": t.id})
+    notify(f"Repair note on {t.machine} · {t.type} from {ctx.by}: {text}", "maint", lines=[t.line or t.machine, t.machine], go="maintenance")
     return {"msg": "Repair note added"}
 
 
@@ -757,12 +770,22 @@ def downtime_set(p, ctx):
     event("downtime_update", {"id": d.id, "reason": d.reason, "notes": d.notes})
 
 
-@cmd("ackNotices")
+@cmd("ackNotices", "none")
 def ack_notices(p, ctx):
-    qs = Notice.objects.filter(read=False)
+    """Mark notices read on this machine's screen (other machines still see theirs). With no machine, for everyone."""
+    from .models import NoticeRead
+    line = str(p.get("line") or ctx.line or "")
+    qs = Notice.objects.all()
     if p.get("id"):
         qs = qs.filter(pk=p["id"])
-    qs.update(read=True)
+    else:
+        qs = qs.filter(t__gte=ctx.now - timedelta(days=14))
+    if not line:
+        qs.update(read=True)
+        return
+    for n in qs:
+        if not n.lines or line in n.lines:
+            NoticeRead.objects.get_or_create(notice=n, line=line, defaults={"by": ctx.by, "t": ctx.now})
 
 
 @cmd("getDrawing")
@@ -847,11 +870,11 @@ def import_mos(ctx, rows, source="s2k"):
                           mfg=str(r.get("mfg") or "MFGOUT")[:12], hot=bool(r.get("hot")), ops=default_ops(item), source=source)
         added += 1
     if added:
-        notify(f"{added} new MO{'s' if added > 1 else ''} from S2K are waiting in the Scheduler", "schedule")
+        notify(f"{added} new MO{'s' if added > 1 else ''} from S2K are waiting in the Scheduler", "planner")
         audit(ctx, f"Imported {added} MOs")
     if skipped:
         log.warning("MO import skipped %s rows without a usable MO number, item or quantity", skipped)
-        notify(f"{skipped} MO row{'s' if skipped > 1 else ''} from S2K skipped: missing MO number, item or quantity", "schedule")
+        notify(f"{skipped} MO row{'s' if skipped > 1 else ''} from S2K skipped: missing MO number, item or quantity", "planner")
     return added
 
 
@@ -1077,6 +1100,67 @@ def user_set(p, ctx):
     else:
         raise Need("Unknown field.")
     u.save()
+
+
+@cmd("extraBreakAdd", "lists.edit")
+def extra_break_add(p, ctx):
+    """Schedule an extra break: at a time of day, for some minutes, on one day or every day up to a date, on every
+    line or only some. Runs pause through it, stops in it aren't downtime, and the lines' operators are told."""
+    from datetime import date as _date
+
+    from plant.models import ExtraBreak
+    from plant.util import local
+
+    def day(v, label):
+        try:
+            return _date.fromisoformat(str(v or "").strip())
+        except ValueError:
+            raise Need(f"Pick the {label}.")
+    d = day(p.get("day"), "day")
+    until = day(p.get("until"), "last day") if str(p.get("until") or "").strip() else None
+    today = local(ctx.now).date()
+    need(d >= today, "Pick today or a later day.")
+    need(not until or until >= d, "The last day can't be before the first day.")
+    need(not until or (until - d).days <= 92, "Repeat it for up to three months at a time.")
+    start = str(p.get("start") or "").strip()
+    need(re.match(r"^([01]\d|2[0-3]):[0-5]\d$", start), "Pick the start time.")
+    mins = to_number(p.get("minutes"))
+    need(mins is not None and mins == int(mins) and 1 <= mins <= 240, "Minutes must be a whole number from 1 to 240.")
+    label = " ".join(str(p.get("label") or "").split())[:60] or "Break"
+    names = [str(x) for x in (p.get("machines") or []) if str(x).strip()]
+    ms_ = list(Machine.objects.filter(name__in=names))
+    need(len(ms_) == len(set(names)), "One of those machines isn't on the list any more.")
+    for y in ExtraBreak.objects.filter(day=d, until=until, start=start, minutes=int(mins)).prefetch_related("machines"):
+        need({m.pk for m in y.machines.all()} != {m.pk for m in ms_}, "That break is already scheduled.")
+    x = ExtraBreak.objects.create(day=d, until=until, start=start, minutes=int(mins), label=label, by=ctx.by, t=ctx.now)
+    x.machines.set(ms_)
+    from suite.templatetags.suite import clock
+    from datetime import datetime as _dt
+    s0 = _dt(2000, 1, 1, int(start[:2]), int(start[3:]))
+    when = (f"{clock(s0)}–{clock(s0 + timedelta(minutes=int(mins)))}" +
+            (" today" if d == today and not until else f" on {d:%a} {d.month}/{d.day}" if not until
+             else f" every day {d.month}/{d.day}–{until.month}/{until.day}"))
+    lines = [m.name for m in ms_] or list(Machine.objects.filter(active=True, stage="s1").values_list("name", flat=True))
+    audit(ctx, f"Extra break \"{label}\" {when}, {int(mins)} min, " + (", ".join(m.name for m in ms_) if ms_ else "every line"))
+    notify(f"{label}: {when}, added by {ctx.by}", "break", lines=[m.name for m in ms_] or None, go="schedule")
+    refresh_schedule(f"{ctx.by} (extra break)")
+    return {"msg": f"{label} scheduled {when}", "data": {"id": x.pk, "lines": lines}}
+
+
+@cmd("extraBreakDel", "lists.edit")
+def extra_break_del(p, ctx):
+    from plant.models import ExtraBreak
+    x = ExtraBreak.objects.filter(pk=p.get("id")).prefetch_related("machines").first()
+    need(x, "That break is already gone.")
+    names = [m.name for m in x.machines.all()]
+    audit(ctx, f"Removed extra break \"{x.label}\" {x.start} on {x.day}")
+    from suite.templatetags.suite import clock
+    from datetime import datetime as _dt
+    at = clock(_dt(2000, 1, 1, int(x.start[:2]), int(x.start[3:5])))
+    notify(f"{x.label} at {at} on {x.day:%a} {x.day.month}/{x.day.day} was cancelled by {ctx.by}", "break", lines=names or None, go="schedule")
+    x.delete()
+    refresh_schedule(f"{ctx.by} (extra break removed)")
+    return {"msg": "Break removed"}
 
 
 @cmd("personSave", "team.manage")
@@ -1515,6 +1599,8 @@ def setting_set(p, ctx):
         v = str("" if v is None else v).strip()
     if k == "qcEvery":
         v = max(5, v or 30)
+        if v != settings_obj().settings.get("qcEvery"):
+            notify(f"QC checks are now every {v:g} minutes ({ctx.by})", "qc", go="qc-log")
     if k == "paycom.every":
         v = max(15, v or 60)
     if k in ("s2kUrl", "peopleUrl", "webhook", "grafana.url") and v:
@@ -1729,6 +1815,9 @@ def _qc_store(st, stage, items, ctx, what):
     st.config = cfg
     st.save(update_fields=["config"])
     audit(ctx, f"QC checks ({stage}): {what}")
+    names = list(Machine.objects.filter(stage=stage, active=True).values_list("name", flat=True))
+    if names:
+        notify(f"QC check items changed by {ctx.by}: {what}", "qc", lines=names, go="qc-log")
 
 
 @cmd("qcItemAdd", "lists.edit")

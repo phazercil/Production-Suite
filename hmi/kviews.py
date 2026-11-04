@@ -156,7 +156,7 @@ def page(request, page="controls", lock=None):
     if s.lock and page in kscreen.LOCKED_OUT:
         return redirect(ctx_for(s)["base"] + "/controls/")
     return render(request, "hmi/k/page.html", ctx_for(s, page=page, thin=True, mode="operator", kiosk_lock=bool(s.lock), nav=s.nav(page),
-                                                      B=s.banner(), alarms=s.alarms()))
+                                                      B=s.banner(), alarms=s.alarms(), N=s.notibar()))
 
 
 @ensure_csrf_cookie
@@ -231,6 +231,8 @@ def part(request, name):
         return render(request, "hmi/k/_banner.html", ctx_for(s, B=s.banner(), page=page))
     if name == "prompt":
         return render(request, "hmi/k/_prompt.html", ctx_for(s, open=s.reason_prompt()))
+    if name == "notibar":
+        return render(request, "hmi/k/_notibar.html", ctx_for(s, N=s.notibar(), page=page))
     raise Http404("No such part")
 
 
@@ -493,6 +495,25 @@ def m_paycom_positions(request, s):
     return modal_response(request, "hmi/k/m_paycom_positions.html", **ctx_for(s, rows=rows, dept=P.get("dept") or ""))
 
 
+@modal("notices")
+def m_notices(request, s):
+    """Everything this machine's screen hasn't acknowledged yet, newest first."""
+    return modal_response(request, "hmi/k/m_notices.html", **ctx_for(s, N=s.notibar(all_=True)))
+
+
+@modal("extraBreak")
+def m_extra_break(request, s):
+    if not s.can("lists.edit"):
+        return login_needed(request, s, {"perm": "lists.edit"})
+    from datetime import timedelta
+
+    from plant.util import local
+    t = local(s.t)
+    nxt = (t + timedelta(minutes=30 - t.minute % 30 + 30)).strftime("%H:%M")
+    return modal_response(request, "hmi/k/m_extra_break.html",
+                          **ctx_for(s, today=t.date().isoformat(), start=nxt, lines=[m.name for m in s.active_lines]))
+
+
 @modal("addPerson")
 def m_add_person(request, s):
     if not s.can("team.manage"):
@@ -688,6 +709,8 @@ ACTIONS["settingSet"] = simple("settingSet", toast=False)
 ACTIONS["userSet"] = simple("userSet", toast=False)
 ACTIONS["paycomImport"] = simple("paycomImport")
 ACTIONS["paycomPositionsSet"] = simple("paycomPositionsSet", close=True)
+ACTIONS["extraBreakAdd"] = simple("extraBreakAdd", close=True)
+ACTIONS["extraBreakDel"] = simple("extraBreakDel")
 
 
 @action("userAdd")

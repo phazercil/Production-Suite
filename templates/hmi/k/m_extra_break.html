@@ -1,0 +1,14 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Schedule a break{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/extraBreakAdd"{% endblock %}
+{% block body %}<p class="sub">An extra break on top of the shift's own, for example 2:00 pm for 15 minutes on a hot day. Runs on the schedule pause through it, stops during it aren't downtime, and operators see it in their notification bar.</p>
+  <div class="grid2" style="margin-top:8px">
+    <label class="f">Reason<input type="text" name="label" maxlength="60" value="Heat break" required></label>
+    <label class="f">Start time<input type="time" name="start" value="{{ start }}" required></label>
+    <label class="f">How long (minutes)<input type="number" name="minutes" min="1" max="240" value="15" required></label>
+    <label class="f">Day<input type="date" name="day" value="{{ today }}" min="{{ today }}" required></label>
+    <label class="f">Repeat every day until (optional)<input type="date" name="until" min="{{ today }}"></label>
+  </div>
+  <div class="f" style="margin-top:10px"><span class="note">Lines (none ticked = every line)</span><div class="trainpick">{% for n in lines %}<label class="chk"><input type="checkbox" name="machines:l" value="{{ n }}"> {{ n }}</label>{% endfor %}</div></div>
+{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button class="btn go" type="submit">Schedule break</button>{% endblock %}

@@ -61,6 +61,29 @@ def iso_date(t_ms):
     return local(from_ms(t_ms)).date().isoformat()
 
 
+def extra_breaks(start, end):
+    """Extra breaks (Admin-scheduled) between two aware datetimes: [{id, s, e, label, machines: set of ids or None}]."""
+    from datetime import datetime, timedelta
+
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from .models import ExtraBreak
+    a, b = local(start).date(), local(end).date()
+    a0 = a - timedelta(days=1)   # a break late in a shift that started yesterday
+    out = []
+    for x in ExtraBreak.objects.filter(day__lte=b).filter(Q(until__gte=a0) | Q(until__isnull=True, day__gte=a0)).prefetch_related("machines"):
+        ids = {m.pk for m in x.machines.all()} or None
+        d = max(x.day, a0)
+        while d <= min(x.last_day, b):
+            s = timezone.make_aware(datetime(d.year, d.month, d.day)) + timedelta(minutes=hm(x.start))
+            e = s + timedelta(minutes=x.minutes)
+            if s < end and e > start:
+                out.append({"id": x.pk, "s": s, "e": e, "label": x.label or "Break", "machines": ids})
+            d += timedelta(days=1)
+    return sorted(out, key=lambda w: w["s"])
+
+
 def is_lunch(label):
     return "lunch" in str(label or "").lower()
 

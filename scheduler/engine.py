@@ -66,7 +66,13 @@ def load_world(jobs_override=None):
     # The Labor Budget plan: work calendar, which shifts each line has a crew for, and crew cost (labor/plan.py).
     from labor.plan import LaborPlanView, machine_labor
     plan = LaborPlanView.current() if cfg["useLabor"] else None
-    return {"cfg": cfg, "labor": plan, "laborLines": machine_labor(plan, cfg),
+    from datetime import timedelta as _td
+
+    from plant.util import extra_breaks
+    t0 = now()
+    extra = [{"s": ms(w["s"]), "e": ms(w["e"]), "machines": sorted(w["machines"]) if w["machines"] else None}
+             for w in extra_breaks(t0 - _td(days=2), t0 + _td(days=120))]
+    return {"cfg": cfg, "labor": plan, "laborLines": machine_labor(plan, cfg), "extraBreaks": extra,
             "mos": mos, "jobs": jobs, "catalog": Catalog(), "running": running, "now": ms(now())}
 
 
@@ -119,10 +125,11 @@ class Calendar:
     """Shift time for each line. With a Labor Budget plan: no shifts on its holidays and days off, shifts on its
     extra work days, and only the shifts it has a crew for on that line."""
 
-    def __init__(self, cfg, labor=None, labor_lines=None):
+    def __init__(self, cfg, labor=None, labor_lines=None, extra=None):
         self.shifts = {s["id"]: s for s in cfg["shifts"]}
         self.labor = labor
         self.labor_lines = labor_lines or {}
+        self.extra = extra or []   # Admin-scheduled breaks: [{s, e, machines: [ids] or None}]
         self.cache = {}
 
     def day_iv(self, m, day):
@@ -163,6 +170,16 @@ class Calendar:
                 segs = nxt
             for a, z in segs:
                 out.append((at_local_minutes(day, s0 + a), at_local_minutes(day, s0 + z), sid))
+        for x in self.extra:   # take out the extra breaks for this line
+            if x["machines"] is not None and m["id"] not in x["machines"]:
+                continue
+            nxt = []
+            for a, z, sid in out:
+                if x["e"] <= a or x["s"] >= z:
+                    nxt.append((a, z, sid))
+                else:
+                    nxt += [(p, q, sid) for p, q in ((a, x["s"]), (x["e"], z)) if q > p]
+            out = nxt
         self.cache[key] = out
         return out
 
@@ -262,7 +279,7 @@ def compute(world, jobs=None):
     cfg = world["cfg"]
     jobs = world["jobs"] if jobs is None else jobs
     mos, cat = world["mos"], world["catalog"]
-    cal = Calendar(cfg, world.get("labor"), world.get("laborLines"))
+    cal = Calendar(cfg, world.get("labor"), world.get("laborLines"), world.get("extraBreaks"))
     running = world.get("running", {})
     t_now = world.get("now") or ms(now())
     res, by_m, s1_res, s1_done = {}, {}, {}, set()
@@ -387,8 +404,14 @@ def refresh_floor_queue(by="Scheduler"):
     from hmi.engine import notify  # local import: hmi depends on scheduler for ETAs
 
     added = moved = removed = 0
+    per_line = {}   # machine name -> what changed in its queue, for that machine's operators
+
+    def note(mid, what):
+        if mid:
+            per_line.setdefault(mid, []).append(what)
     with transaction.atomic():
         world = load_world()
+        mname = {m["id"]: m["name"] for m in world["cfg"]["machines"]}
         sch = compute(world)
         running_by_mo = world["running"]  # mo id -> machine id it is running on right now
         planned = {}
@@ -415,12 +438,19 @@ def refresh_floor_queue(by="Scheduler"):
                 if mo.line_id != mid or mo.seq != seq:
                     if mo.line_id is None:
                         added += 1
+                        note(mid, f"MO {mo.number} ({mo.part}) added as #{seq}")
                     else:
                         moved += 1
+                        if mo.line_id != mid:
+                            note(mid, f"MO {mo.number} ({mo.part}) moved here from {mname.get(mo.line_id, 'another line')}")
+                            note(mo.line_id, f"MO {mo.number} ({mo.part}) moved to {mname.get(mid, 'another line')}")
+                        elif seq == 1 or mo.seq == 1:
+                            note(mid, f"MO {mo.number} ({mo.part}) is now #{seq}")
                 mo.line_id, mo.seq = mid, seq
                 mo.plan_start, mo.plan_end, mo.plan_co = from_ms(r["start"]), from_ms(r["end"]), r["coMin"]
                 mo.save(update_fields=["line", "seq", "plan_start", "plan_end", "plan_co"])
             elif mo.line_id:
+                note(mo.line_id, f"MO {mo.number} ({mo.part}) taken off this line")
                 mo.line_id, mo.seq, mo.plan_start, mo.plan_end, mo.plan_co = None, 0, None, None, 0
                 mo.save(update_fields=["line", "seq", "plan_start", "plan_end", "plan_co"])
                 removed += 1
@@ -428,8 +458,13 @@ def refresh_floor_queue(by="Scheduler"):
         st.plan_at = now()
         st.save(update_fields=["plan_at"])
         parts = [x for x in (added and f"{added} added", moved and f"{moved} re-ordered", removed and f"{removed} taken off a line") if x]
-        if parts:
-            notify(f"Schedule updated by {by}: " + ", ".join(parts))
+        for mid, whats in per_line.items():
+            name = mname.get(mid)
+            if name:
+                more = f" (+{len(whats) - 3} more)" if len(whats) > 3 else ""
+                notify(f"Schedule changed by {by}: " + "; ".join(whats[:3]) + more, "schedule", lines=[name], go="schedule")
+        if parts and not per_line:
+            notify(f"Schedule updated by {by}: " + ", ".join(parts), "planner")
         PlantSettings.bump()
     return sch
 
@@ -444,5 +479,5 @@ def eta(machine, remaining_units, start_ms, world=None, item=None, mo=None):
     eff = rate * (1 - min(.95, max(0, float(m["downtime"] or 0) / 100)))
     if eff <= 0:
         return None
-    segs = Calendar(world["cfg"], world.get("labor"), world.get("laborLines")).consume(m, start_ms, remaining_units / eff * HOUR)
+    segs = Calendar(world["cfg"], world.get("labor"), world.get("laborLines"), world.get("extraBreaks")).consume(m, start_ms, remaining_units / eff * HOUR)
     return segs[-1][1] if segs else None

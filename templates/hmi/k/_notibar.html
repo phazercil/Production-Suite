@@ -1,0 +1,9 @@
+<div id="notibar" class="notibar-wrap" hx-get="/kiosk/r/notibar?page={{ page }}" hx-trigger="suite:changed from:body" hx-swap="outerHTML">
+{% if N.brk %}<div class="notibar brk {% if N.brk.now %}now{% endif %}" role="status"><span class="ic" aria-hidden="true">☕</span>
+  <span class="tx">{% if N.brk.now %}<b>{{ N.brk.label }} now</b> until {{ N.brk.e|clock }}. Stops during it aren't downtime.{% else %}<b>{{ N.brk.label }} in {{ N.brk.inMins }} min</b>: {{ N.brk.s|clock }}–{{ N.brk.e|clock }}.{% endif %}</span></div>{% endif %}
+{% if N.top %}<div class="notibar k-{{ N.top.kind }}" role="status"><span class="ic" aria-hidden="true">{{ N.icon|get:N.top.kind|default:"ℹ" }}</span>
+  <span class="tx"><b class="num">{{ N.top.t|plan:S.t }}</b> · {{ N.top.text }}</span>
+  {% if N.more %}<button class="btn sm ghost" hx-get="/kiosk/m/notices" hx-target="#modal" hx-swap="innerHTML">+{{ N.more }} more</button>{% endif %}
+  {% if N.top.go and N.top.go != page %}<a class="btn sm ghost" href="{{ base }}/{{ N.top.go }}/">Show me</a>{% endif %}
+  <button class="btn sm" hx-post="/kiosk/do/ackNotices" hx-vals='{"id": "{{ N.top.id }}"}'>Got it</button></div>{% endif %}
+</div>
