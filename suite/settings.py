@@ -173,6 +173,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = Path(env("STATIC_ROOT", str(BASE_DIR / "staticfiles")))  # Linux: /var/www/production-suite/static, served by Apache
+# every {% static %} address carries the build revision, so screens pick up new styles and scripts after an update
+STORAGES = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+            "staticfiles": {"BACKEND": "suite.staticfiles.VersionedStaticFilesStorage"}}
 
 # Kiosk sessions: an operator stays logged in on a screen until they log out;
 # shift lead (admin) mode times out after the idle minutes set in Admin › Rules.

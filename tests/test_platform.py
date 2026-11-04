@@ -135,6 +135,19 @@ class SchedulerLaborTests(Base):
         self.assertEqual(len(cal.day_iv(sal, ms(at(2030, 1, 2)))), len(Calendar(w["cfg"]).day_iv(sal, ms(at(2030, 1, 2)))))
         self.assertEqual(LaborPlanView(PLAN).day_status(at(2030, 1, 6).date()), ("OFF", False))
 
+    def test_a_shift_with_no_crew_in_the_plan_still_runs(self):
+        """Which shifts a line runs is set in Lines & Shifts; the Labor Budget's crews don't switch shifts off."""
+        from plant.util import ms
+        from scheduler.engine import Calendar, load_world
+        s2 = Shift.objects.get(name="2nd shift")
+        w = load_world()
+        m = next(x for x in w["cfg"]["machines"] if x["name"] == "Barbara")
+        m["shifts"] = sorted(set(m["shifts"]) | {s2.id})
+        w["laborLines"][m["id"]]["shifts"][s2.id] = {"staffed": False, "crew": 0, "filled": 0, "costPerHour": 0, "roles": []}
+        iv = Calendar(w["cfg"], w["labor"], w["laborLines"]).day_iv(m, ms(at(2030, 1, 2)))
+        hours = [timezone.localtime(timezone.datetime.fromtimestamp(s / 1000, tz=timezone.get_current_timezone())).hour for s, e in iv]
+        self.assertTrue(any(h >= 15 for h in hours), hours)        # 2nd shift time is there
+
     def test_wages_only_for_shift_leads(self):
         r = Client().get("/api/scheduler/state").json()
         self.assertTrue(r["labor"]["on"])
@@ -517,3 +530,12 @@ class ReportTests(Base):
         sent = call.call_args[0][1]["queries"][0]["rawSql"]
         self.assertIn("'Barbara'", sent)
         self.assertEqual((s[0]["last"], s[0]["max"], s[0]["avg"]), (150, 200, 150.0))
+
+
+class StaticVersionTests(TestCase):
+    def test_style_and_script_addresses_carry_the_revision(self):
+        from django.conf import settings
+        from django.templatetags.static import static
+        self.assertEqual(static("hmi/kiosk.css"), f"/static/hmi/kiosk.css?v={settings.SUITE['REVISION']}")
+        html = Client().get("/scheduler/").content.decode()
+        self.assertIn(f"scheduler.js?v={settings.SUITE['REVISION']}", html)

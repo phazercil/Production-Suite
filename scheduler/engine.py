@@ -63,7 +63,8 @@ def load_world(jobs_override=None):
     running = {r["mo_id"]: r["machine_id"] for r in ShiftRun.objects.filter(active=True, mo__isnull=False, machine__isnull=False).values("mo_id", "machine_id")}
     cfg = {"shifts": shifts, "machines": machines, "coSamePart": st.planner.get("coSamePart", False),
            "coFirst": st.planner.get("coFirst", True), "useLabor": st.planner.get("useLabor", True) is not False}
-    # The Labor Budget plan: work calendar, which shifts each line has a crew for, and crew cost (labor/plan.py).
+    # The Labor Budget plan: work calendar (holidays, days off, extra work days) and crew cost (labor/plan.py).
+    # Which shifts a line runs is set in Lines & Shifts only; a shift with no crew in the plan is pointed out, not skipped.
     from labor.plan import LaborPlanView, machine_labor
     plan = LaborPlanView.current() if cfg["useLabor"] else None
     from datetime import timedelta as _td
@@ -123,7 +124,7 @@ def rate_for(m, item, mo):
 # ------------------------------------------------------------------ calendar
 class Calendar:
     """Shift time for each line. With a Labor Budget plan: no shifts on its holidays and days off, shifts on its
-    extra work days, and only the shifts it has a crew for on that line."""
+    extra work days. Each line runs the shifts ticked for it in Lines & Shifts, whatever crew the plan has."""
 
     def __init__(self, cfg, labor=None, labor_lines=None, extra=None):
         self.shifts = {s["id"]: s for s in cfg["shifts"]}
@@ -142,14 +143,11 @@ class Calendar:
             return self.cache[key]
         dow = (local(from_ms(day)).weekday() + 1) % 7
         status, by_date = self.labor.day_status_ms(day) if self.labor else ("WORK", False)
-        crews = (self.labor_lines.get(m["id"]) or {}).get("shifts")
         out = []
         for sid in ((m.get("shifts") or []) if status == "WORK" else []):
             sh = self.shifts.get(sid)
             if not sh or not (by_date or dow in (sh.get("days") or [])):
                 continue
-            if crews is not None and not (crews.get(sid) or {}).get("staffed"):
-                continue  # the labor plan has no crew for this shift on this line
             s0 = hm(sh["start"])
             L = (hm(sh["end"]) - s0 + 1440) % 1440 or 1440
             segs = [(0, L)]
@@ -343,9 +341,8 @@ def compute(world, jobs=None):
                     res[j["id"]] = {"id": j["id"], "moId": mo["id"], "op": st, "machineId": m["id"], "rate": rate, "basis": basis, "eff": 0,
                                     "gross": 0, "qty": float(mo["qty"] or 0), "scrap": 0, "dt": 0, "coMin": 0, "runMin": 0,
                                     "start": j["reqStart"], "runStart": j["reqStart"], "end": j["reqStart"], "segs": [], "coSegs": [], "runSegs": [],
-                                    "warn": warn + [("The Labor Budget plan has no crew on this line's shifts, so this run can't be timed"
-                                                     if m["id"] in world.get("laborLines", {}) else
-                                                     "This line has no shifts assigned, so this run can't be timed")], "waiting": waiting,
+                                    "warn": warn + ["This line has no shift time ahead (no shifts ticked in Lines & Shifts, or the "
+                                                    "Labor Budget calendar has no work days), so this run can't be timed"], "waiting": waiting,
                                     "paced": False, "overlap": False, "pushed": False, "late": False, "reqStart": j["reqStart"], "running": is_running,
                                     "unplanned": True}
                     by_m[m["id"]].append(j["id"])

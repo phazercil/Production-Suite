@@ -1,3 +1,10 @@
+## What's new in 1.8.1
+
+- **Scheduler:** every shift ticked for a line in Lines & Shifts counts. The Labor Budget no longer switches off a shift it has no crew for, which made 2nd shift show as off-shift.
+- **Scheduler:** the board leaves out hours no shift covers (e.g. shows 06:00–23:00 instead of midnight to midnight).
+- **Scheduler:** drag an order by its whole card, not just the stage chip.
+- Screens pick up new styles and scripts right after an update. In 1.8.0 a browser could keep the old style file, which stopped the Admin page from scrolling.
+
 ## What's new in 1.8.0
 
 **Operator Kiosk**
