@@ -8,7 +8,7 @@ from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
 from scheduler import views as sch
-from suite import thin
+from suite import sections, thin
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/operator/", permanent=False)),
@@ -63,6 +63,9 @@ urlpatterns = [
     path("api/report/grafana/data", reports.grafana_data),
     # Labor Budget (shift leads only)
     path("labor/", labor.page, name="labor"),
+    path("budget/", labor.budget_only, name="budget"),
+    path("supervisor/", sections.soon, {"key": "supervisor"}, name="supervisor"),
+    path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),
     path("api/labor/history", labor.history),

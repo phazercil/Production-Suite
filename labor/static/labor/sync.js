@@ -1,8 +1,11 @@
-/* Production Suite: keeps the Labor Calculator's plan on the server instead of in one browser.
-   The calculator calls LaborSync.boot() when it starts and LaborSync.save(state) after every change. */
+/* Production Suite: keeps the Labor Calculator's budgets on the server instead of in one browser.
+   Budget A is the plant's plan (the Scheduler uses it); budget B is a second budget to compare.
+   The calculator calls LaborSync.boot() when it starts, LaborSync.save(state, budget) after every change,
+   and LaborSync.read(budget) / write(budget, data) where it used to read and write this browser's storage. */
 (function () {
   'use strict';
-  var S = { version: 0, user: '', pending: null, timer: null, inflight: null, migrateKey: null, retry: null, blocked: false };
+  var S = { user: '', timer: null, retry: null, blocked: false, migrate: null,
+            B: { A: { version: 0, data: null, pending: null, inflight: null }, B: { version: 0, data: null, pending: null, inflight: null } } };
 
   function csrf() { var m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; }
   function fmt(iso) { try { return new Date(iso).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
@@ -54,8 +57,8 @@
     var inp = w.querySelector('#labor-pin-in'); inp.focus();
     w.querySelector('form').addEventListener('submit', function (e) {
       e.preventDefault();
-      post('/api/hmi/login', { pin: inp.value, adminOnly: true }).then(function (r) {
-        if (r.ok && r.me && (r.me.role === 'lead' || r.me.role === 'admin')) { w.remove(); S.blocked = false; send(); }
+      post('/api/hmi/login', { pin: inp.value, perm: 'labor.edit' }).then(function (r) {
+        if (r.ok && r.me) { w.remove(); S.blocked = false; flushAll(); }
         else { w.querySelector('#labor-pin-err').textContent = r.error || 'That PIN is not a shift lead PIN.'; inp.select(); }
       }).catch(function () { w.querySelector('#labor-pin-err').textContent = 'The server is not answering. Try again.'; });
     });
@@ -72,82 +75,93 @@
     };
     if (document.body) add(); else document.addEventListener('DOMContentLoaded', add);
   }
+  function active() { try { return localStorage.getItem('MFG_AB_ACTIVE') === 'B' ? 'B' : 'A'; } catch (e) { return 'A'; } }
+  function copy(o) { return o == null ? null : JSON.parse(JSON.stringify(o)); }
 
-  // ---- saving
-  function send(force) {
-    if (S.inflight) return S.inflight.then(function () { return send(force); });
-    if (!S.pending || S.blocked) return Promise.resolve(!S.pending);
-    var data = S.pending; S.pending = null;
+  // ---- saving (each budget on its own)
+  function send(which, force) {
+    var b = S.B[which];
+    if (b.inflight) return b.inflight.then(function () { return send(which, force); });
+    if (!b.pending || S.blocked) return Promise.resolve(!b.pending);
+    var data = b.pending; b.pending = null;
     clearTimeout(S.retry);
     status('saving', 'Saving…');
-    S.inflight = post('/api/labor/save', { version: S.version, data: data, force: !!force }).then(function (r) {
-      S.inflight = null;
+    b.inflight = post('/api/labor/save', { budget: which, version: b.version, data: data, force: !!force }).then(function (r) {
+      b.inflight = null;
       if (r.ok) {
-        S.version = r.version;
-        if (r.suiteChanged && !S.pending) {   // the server put the suite's lines / shifts back in: show them
+        b.version = r.version; b.data = data;
+        clearBar('labor-conflict'); clearBar('labor-offline');
+        status('saved', 'Saved ' + fmt(r.updatedAt));
+        if (S.migrate && which === 'A') { try { S.migrate.forEach(function (k) { localStorage.removeItem(k); }); } catch (e) {} S.migrate = null; }
+        if (r.suiteChanged && !b.pending && which === active()) {   // the server put the suite's lines / shifts back in: show them
           toast('Lines, speeds and shifts come from the suite (Scheduler › Lines & Shifts). Showing the current ones.', 'info');
           window.onbeforeunload = null; setTimeout(function () { location.reload(); }, 1500);
         }
-        clearBar('labor-conflict'); clearBar('labor-offline');
-        status('saved', 'Saved ' + fmt(r.updatedAt));
-        if (S.migrateKey) { try { localStorage.removeItem(S.migrateKey); } catch (e) {} S.migrateKey = null; }
-        return S.pending ? send() : true;
+        return b.pending ? send(which) : true;
       }
-      if (!S.pending) S.pending = data;
+      if (!b.pending) b.pending = data;
       if (r.conflict) {
         S.blocked = true;
         status('error', 'Not saved');
-        bar('labor-conflict', (r.updatedBy || 'Someone') + ' changed the labor plan on another screen' + (r.updatedAt ? ' at ' + fmt(r.updatedAt) : '') +
+        bar('labor-conflict', (r.updatedBy || 'Someone') + ' changed budget ' + which + ' on another screen' + (r.updatedAt ? ' at ' + fmt(r.updatedAt) : '') +
           '. Your latest change is not saved.', [
-          ['Load their version', function () { S.pending = null; window.onbeforeunload = null; location.reload(); }],
-          ['Keep mine', function () { S.blocked = false; clearBar('labor-conflict'); send(true); }]], 'warn');
+          ['Load their version', function () { b.pending = null; window.onbeforeunload = null; location.reload(); }],
+          ['Keep mine', function () { S.blocked = false; clearBar('labor-conflict'); send(which, true); }]], 'warn');
         return false;
       }
       if (r.login || r.status === 403) { S.blocked = true; status('error', 'Not saved'); askPin(r.error); return false; }
-      if (r.status === 400) { status('error', 'Not saved'); toast('Not saved: ' + (r.error || 'the server refused the plan.'), 'error'); S.pending = null; return false; }
+      if (r.status === 400) { status('error', 'Not saved'); toast('Not saved: ' + (r.error || 'the server refused the plan.'), 'error'); b.pending = null; return false; }
       throw new Error(r.error || ('HTTP ' + r.status));
     }).catch(function () {
-      S.inflight = null;
-      if (!S.pending) S.pending = data;
+      b.inflight = null;
+      if (!b.pending) b.pending = data;
       status('error', 'Not saved, retrying');
-      bar('labor-offline', 'The server is not answering, so your latest change is not saved yet. It will keep trying.', [['Try now', function () { send(); }]], 'bad');
-      S.retry = setTimeout(send, 10000);
+      bar('labor-offline', 'The server is not answering, so your latest change is not saved yet. It will keep trying.', [['Try now', flushAll]], 'bad');
+      S.retry = setTimeout(flushAll, 10000);
       return false;
     });
-    return S.inflight;
+    return b.inflight;
   }
+  function flushAll() { clearTimeout(S.timer); return send('A').then(function (a) { return send('B').then(function (b) { return a && b; }); }); }
 
   window.LaborSync = {
     boot: function (oldKey) {
       var b = JSON.parse(document.getElementById('labor-boot').textContent || '{}');
-      S.version = b.version || 0; S.user = b.user || '';
-      peopleList((b.data || b.starter || {}).suite);
+      S.user = b.user || '';
+      ['A', 'B'].forEach(function (k) { var x = (b.budgets || {})[k] || {}; S.B[k].version = x.version || 0; S.B[k].data = x.data || null; });
+      peopleList((S.B.A.data || b.starter || {}).suite);
       (b.syncNotes || []).forEach(function (n) { setTimeout(function () { toast(n, 'info'); }, 800); });
-      if (b.data) { status('saved', 'Saved ' + (b.updatedAt ? fmt(b.updatedAt) : '') + (b.updatedBy ? ' by ' + b.updatedBy : '')); return b.data; }
-      // Nothing on the server yet: bring over a plan the stand-alone calculator saved in this browser, if any.
-      try {
-        var old = localStorage.getItem(oldKey);
-        if (old) {
-          var d = JSON.parse(old);
-          S.migrateKey = oldKey;
-          setTimeout(function () {
-            S.pending = d; send().then(function (ok) { if (ok) toast('Moved the labor plan saved in this browser to the server. Every shift lead now sees the same plan.', 'success'); });
-          }, 300);
-          return d;
-        }
-      } catch (e) { }
-      status('saved', 'Not saved yet');
-      return b.starter || null;
+      // Nothing on the server yet: bring over budgets the stand-alone calculator saved in this browser, if any.
+      if (!S.B.A.version) {
+        try {
+          var keys = [], found = false;
+          [['A', oldKey], ['B', oldKey + '__B']].forEach(function (p) {
+            var t = localStorage.getItem(p[1]);
+            if (t) { S.B[p[0]].data = JSON.parse(t); S.B[p[0]].pending = S.B[p[0]].data; keys.push(p[1]); found = true; }
+          });
+          if (found) {
+            S.migrate = keys;
+            setTimeout(function () { flushAll().then(function (ok) { if (ok) toast('Moved the labor budgets saved in this browser to the server. Every shift lead now sees the same budgets.', 'success'); }); }, 300);
+          }
+        } catch (e) { }
+      }
+      var cur = S.B[active()];
+      var x = (b.budgets || {})[active()] || {};
+      status('saved', cur.version ? 'Saved ' + (x.updatedAt ? fmt(x.updatedAt) : '') + (x.updatedBy ? ' by ' + x.updatedBy : '') : 'Not saved yet');
+      return copy(cur.data) || copy(b.starter) || null;
     },
-    save: function (state) {
-      S.pending = state;
+    read: function (which) { return copy(S.B[which === 'B' ? 'B' : 'A'].data); },
+    write: function (which, data) { which = which === 'B' ? 'B' : 'A'; S.B[which].data = copy(data); S.B[which].pending = copy(data); return send(which); },
+    save: function (state, which) {
+      which = which === 'B' ? 'B' : (which === 'A' ? 'A' : active());
+      S.B[which].pending = copy(state); S.B[which].data = copy(state);
       clearTimeout(S.timer);
       status('pending', 'Saving…');
-      S.timer = setTimeout(function () { send(); }, 1200);
+      S.timer = setTimeout(flushAll, 1200);
     },
-    flush: function () { clearTimeout(S.timer); return send(); },
+    flush: flushAll,
     showHistory: function () {
-      LaborSync.flush().then(function () { return fetch('/api/labor/history', { credentials: 'same-origin' }); })
+      flushAll().then(function () { return fetch('/api/labor/history?budget=' + active(), { credentials: 'same-origin' }); })
         .then(function (r) { return r.json(); }).then(function (r) {
           if (!r.ok) { toast(r.error || 'Could not load the saved versions.', 'error'); if (r.login) askPin(r.error); return; }
           var w = document.createElement('div');
@@ -155,7 +169,7 @@
           w.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:16px';
           var c = document.createElement('div');
           c.style.cssText = 'background:#fff;color:#0f172a;border-radius:12px;padding:20px;width:min(520px,94vw);max-height:80vh;overflow:auto;font:14px system-ui,Segoe UI,sans-serif';
-          var h = document.createElement('div'); h.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:4px'; h.textContent = 'Saved versions';
+          var h = document.createElement('div'); h.style.cssText = 'font-weight:700;font-size:16px;margin-bottom:4px'; h.textContent = 'Saved versions of budget ' + active();
           var sub = document.createElement('div'); sub.style.cssText = 'color:#475569;margin-bottom:12px';
           sub.textContent = 'Every save is kept (the last 200). Restoring one makes it the current plan; the plan you have now stays in this list.';
           c.appendChild(h); c.appendChild(sub);
@@ -190,12 +204,12 @@
   };
 
   window.addEventListener('beforeunload', function (e) {
-    if (S.pending || S.inflight) { LaborSync.flush(); e.preventDefault(); e.returnValue = ''; return ''; }
+    if (S.B.A.pending || S.B.B.pending || S.B.A.inflight || S.B.B.inflight) { flushAll(); e.preventDefault(); e.returnValue = ''; return ''; }
   });
   document.addEventListener('DOMContentLoaded', function () {
     var out = document.getElementById('labor-logout');
     if (out) out.addEventListener('click', function () {
-      LaborSync.flush().then(function () { return post('/api/hmi/logout', {}); }).then(function () { window.onbeforeunload = null; location.href = '/labor/'; });
+      flushAll().then(function () { return post('/api/hmi/logout', {}); }).then(function () { window.onbeforeunload = null; location.href = location.pathname; });
     });
   });
 })();

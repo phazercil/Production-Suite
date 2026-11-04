@@ -5,11 +5,11 @@
     e.preventDefault();
     err.textContent = '';
     fetch('/api/hmi/login', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
-      body: JSON.stringify({ pin: inp.value, adminOnly: true }) })
+      body: JSON.stringify({ pin: inp.value, perm: 'labor.view' }) })
       .then(function (r) { return r.json(); })
       .then(function (r) {
-        if (r.ok && r.me && (r.me.role === 'lead' || r.me.role === 'admin')) location.reload();
-        else { err.textContent = r.error || 'That PIN is not a shift lead PIN.'; inp.select(); }
+        if (r.ok && r.me) location.reload();
+        else { err.textContent = r.error || 'That PIN cannot open the Labor Budget.'; inp.select(); }
       })
       .catch(function () { err.textContent = 'The server is not answering. Try again.'; });
   });

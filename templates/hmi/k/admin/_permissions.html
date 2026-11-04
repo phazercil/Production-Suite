@@ -1,0 +1,22 @@
+{% with P=A dis=S.perms.permissions_manage|yesno:",disabled" %}
+<div class="panel"><div class="row"><h2 class="h2 grow">Permissions by role</h2>{% if S.perms.permissions_manage %}<button class="btn ghost sm" hx-get="/kiosk/m/confirm?a=run&k=permReset&c=permReset" hx-target="#modal" hx-swap="innerHTML">Reset to defaults</button>{% endif %}</div>
+  <p class="sub" style="margin-top:4px">What each role may do. A person can also be allowed or denied a permission on their own, below; that wins over their role. Every change is in the audit log. The Admin role always keeps Manage permissions, so the plant can't be locked out. Marked <span class="note">•</span> is the standard setting.</p>
+  <div class="tblwrap" style="margin-top:10px"><table class="xl permtbl"><thead><tr><th class="l">Permission</th>{% for r, l in P.roles %}<th>{{ l }}</th>{% endfor %}</tr></thead>
+  {% for g in P.groups %}<tbody><tr class="permgroup"><td class="l" colspan="5"><b>{{ g.name }}</b></td></tr>
+    {% for row in g.rows %}<tr><td class="l"><b>{{ row.label }}</b><br><span class="note">{{ row.help }}</span></td>
+      {% for c in row.roles %}<td><label class="permcell" title="{% if c.default %}Standard: on{% else %}Standard: off{% endif %}"><input type="checkbox" name="v:b" value="1" {% if c.on %}checked{% endif %} {% if c.locked %}disabled{% endif %} {{ dis }}
+        hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "permRole", "key": "{{ row.key }}", "role": "{{ c.role }}"}' hx-params="c,key,role,v:b" aria-label="{{ row.label }}: {{ c.role }}">{% if c.default %}<span class="note">•</span>{% endif %}</label></td>{% endfor %}</tr>{% endfor %}</tbody>{% endfor %}
+  </table></div></div>
+
+<div class="panel"><h2 class="h2">Permissions for one person</h2>
+  <p class="sub" style="margin-top:4px">Allow or deny a permission for one person, whatever their role. "Role" follows their role.</p>
+  <div class="row" style="margin-top:10px;flex-wrap:wrap"><label class="f" style="min-width:280px">Person<select hx-get="/kiosk/v/admin?tab=permissions" hx-target="#view" name="who" hx-trigger="change"><option value="">Pick someone…</option>{% for p in P.people %}<option value="{{ p.pk }}" {% if P.person.pk == p.pk %}selected{% endif %}>{{ p.name }} · {{ P.roleLabel|get:p.role }}</option>{% endfor %}</select></label>
+    {% if P.withRules %}<span class="note">People with their own permissions: {% for x in P.withRules %}<a href="#" hx-get="/kiosk/v/admin?tab=permissions&who={{ x.p.pk }}" hx-target="#view">{{ x.p.name }}</a> ({{ x.n }}){% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}</div>
+  {% if P.person %}<div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th class="l">Permission</th><th>Their role ({{ P.roleLabel|get:P.person.role }})</th><th>For {{ P.person.name }}</th><th>Result</th></tr></thead>
+    {% for g in P.detail %}<tbody><tr class="permgroup"><td class="l" colspan="4"><b>{{ g.name }}</b></td></tr>
+      {% for row in g.rows %}<tr><td class="l">{{ row.label }}</td><td>{% if row.role %}Allowed{% else %}<span class="note">No</span>{% endif %}</td>
+        <td><select name="v" {{ dis }} {% if row.locked %}disabled title="Admins always keep this"{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "permPerson", "id": "{{ P.person.pk }}", "key": "{{ row.key }}"}' hx-params="c,id,key,v" aria-label="{{ row.label }} for {{ P.person.name }}">
+          <option value="" {% if row.rule is None %}selected{% endif %}>Role</option><option value="allow" {% if row.rule is True %}selected{% endif %}>Allow</option><option value="deny" {% if row.rule is False %}selected{% endif %}>Deny</option></select></td>
+        <td>{% if row.eff %}<span class="pill ok">YES</span>{% else %}<span class="pill idle">NO</span>{% endif %}</td></tr>{% endfor %}</tbody>{% endfor %}
+  </table></div>{% endif %}</div>
+{% endwith %}

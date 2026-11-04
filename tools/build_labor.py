@@ -13,7 +13,6 @@ Each change is checked: if the calculator's code no longer matches, the build st
 import argparse
 import json
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +30,21 @@ def patch(html, old, new, what, count=1):
     return html.replace(old, new)
 
 
+def scrub(html):
+    """The calculator's built-in example plan, without people: no names on crew slots, no wages, no project name.
+    A calculator downloaded from its own page carries the whole plan it was showing."""
+    m = re.search(r"(/\*EMBEDDED_STATE_START\*/\s*const defaultState = )(.*?)(;\s*/\*EMBEDDED_STATE_END\*/)", html, re.S)
+    if not m:
+        sys.exit("build_labor: can't find the calculator's built-in plan (EMBEDDED_STATE).")
+    d = json.loads(m.group(2))
+    d["slotAssignments"] = {}
+    d["projectName"] = ""
+    for p in d.get("positionsDefaults") or []:
+        if isinstance(p, dict) and "defaultWage" in p:
+            p["defaultWage"] = 0
+    return html[:m.start(2)] + json.dumps(d, indent=2) + html[m.end(2):]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("source", nargs="?", default=str(LABOR / "source" / "Labor_Calculator.html"))
@@ -38,19 +52,19 @@ def main():
     ap.add_argument("--no-css", action="store_true", help="keep labor.css as it is (the suite's additions use inline styles)")
     a = ap.parse_args()
     src = Path(a.source)
-    html = src.read_text(encoding="utf-8")
-    if src.resolve() != (LABOR / "source" / "Labor_Calculator.html").resolve():
-        shutil.copyfile(src, LABOR / "source" / "Labor_Calculator.html")
+    html = scrub(src.read_text(encoding="utf-8"))
+    # the kept copy never holds anyone's names or pay (a calculator saved as a file carries its whole plan)
+    (LABOR / "source" / "Labor_Calculator.html").write_text(html, encoding="utf-8")
 
     # ---- stylesheet (Tailwind v3, the same version the CDN script served)
-    if a.no_css:
+    if a.no_css or 'id="offline-assets"' in html:
         pass
     else:
         build_css(src, a.tailwind)
     html = build_page(html)
     (LABOR / "page").mkdir(exist_ok=True)
     (LABOR / "page" / "labor.html").write_text(html, encoding="utf-8")
-    print("Built labor/page/labor.html" + ("" if a.no_css else " and labor/static/labor/labor.css"))
+    print("Built labor/page/labor.html" + ("" if a.no_css or "id=\"offline-assets\"" in html else " and labor/static/labor/labor.css"))
 
 
 def build_css(src, tailwind):
@@ -69,34 +83,27 @@ def build_css(src, tailwind):
 
 
 def build_page(html):
-    html = patch(html, '<script src="https://cdn.tailwindcss.com"></script>',
-                 '<link rel="stylesheet" href="__LABOR_CSS__">\n  <link rel="stylesheet" href="__SUITEBAR_CSS__">', "the Tailwind CDN script")
+    if 'id="offline-assets"' in html:
+        # newer calculators carry Tailwind and their font inside the file: nothing to build or fetch
+        html = patch(html, "</head>", '  <link rel="stylesheet" href="__SUITEBAR_CSS__">\n</head>', "</head>")
+    else:
+        html = patch(html, '<script src="https://cdn.tailwindcss.com"></script>',
+                     '<link rel="stylesheet" href="__LABOR_CSS__">\n  <link rel="stylesheet" href="__SUITEBAR_CSS__">', "the Tailwind CDN script")
     html = re.sub(r'\s*<link href="https://fonts\.googleapis\.com/[^"]*" rel="stylesheet">', "", html, count=1)
     if "googleapis" in html or "cdn.tailwindcss" in html:
         sys.exit("build_labor: the calculator still loads something from the internet.")
-    html = patch(html, '''      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) return JSON.parse(saved);
-      } catch (e) {
-        console.warn('Could not read localStorage', e);
-      }
-      return JSON.parse(JSON.stringify(defaultState));''', '''      // Production Suite: the plan lives on the server (see static/labor/sync.js).
-      try {
-        const boot = LaborSync.boot(STORAGE_KEY);
-        if (boot) return boot;
-      } catch (e) {
-        console.warn('Could not read the plan from the server page', e);
-      }
-      return JSON.parse(JSON.stringify(defaultState));''', "loadState()")
-    html = patch(html, '''      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (e) {
-        console.warn('Could not save to localStorage', e);
-      }''', '''      try {
-        LaborSync.save(state);
-      } catch (e) {
-        console.warn('Could not save the plan to the server', e);
-      }''', "persistState()")
+    # the budgets live on the server (static/labor/sync.js): A is the plant's plan, B a second budget to compare
+    html = patch(html, """        const saved = localStorage.getItem(localStorage.getItem('MFG_AB_ACTIVE') === 'B' ? STORAGE_KEY + '__B' : STORAGE_KEY);
+        if (saved) return JSON.parse(saved);""", """        const boot = LaborSync.boot(STORAGE_KEY);   // Production Suite: from the server
+        if (boot) return boot;""", "loadState()")
+    html = patch(html, "        localStorage.setItem(budgetKey(activeBudget()), JSON.stringify(state));",
+                 "        LaborSync.save(state, activeBudget());", "persistState()")
+    html = patch(html, "      try { const t = localStorage.getItem(budgetKey(which)); return t ? JSON.parse(t) : null; } catch (e) { return null; }",
+                 "      return LaborSync.read(which);", "readBudget()")
+    html = patch(html, "        try { localStorage.setItem(budgetKey(which), JSON.stringify(next)); } catch (e) {}",
+                 "        LaborSync.write(which, next);", "switchBudget()")
+    html = patch(html, "        try { localStorage.setItem(budgetKey(other), JSON.stringify(copy)); } catch (e) {}",
+                 "        LaborSync.write(other, copy);", "copyBudget()")
     html = patch(html, '''      saveState();
       showToast('State successfully saved to browser storage!', 'success');''', '''      saveState();
       LaborSync.flush().then(ok => { if (ok) showToast('Plan saved on the server.', 'success'); });''', "manualSaveState()")

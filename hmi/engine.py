@@ -12,8 +12,10 @@ from datetime import timedelta
 from django.conf import settings as dj_settings
 from django.db import transaction
 from django.db.models import F
+from django.db.models.functions import Greatest
 
 from plant import netsafety
+from plant import perms
 from plant.models import MO, PALETTE, CostItem, Machine, PartSpec, Person, PlantSettings, Shift, ShiftBreak, part_key, DEFAULT_CONFIG
 from plant.util import MIN, Catalog, default_ops, from_ms, iso_date, ms, now, part_spec, shift_at
 
@@ -286,7 +288,9 @@ def tick(machine, sample, t):
                     add_down(sh, sh.stop_start, end)
                 sh.stop_start = None
             sh.state = "running"
-    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state"])
+            if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
+                sh.qc_due_at = t - timedelta(minutes=1)
+    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at"])
 
 
 def close_stop(sh, t):
@@ -553,37 +557,105 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     add_down(sh, from_ms(co["start"]), ctx.now, "Changeover")
-    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co, sh.qc_last = m, ctx.now, 0, "running", None, ctx.now
+    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, 0, "running", None
+    sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()
     event("mo_start", {"line": sh.line, "mo": m.number, "item": m.part, "steps_from": co.get("src", "admin")})
     return {"msg": f"Running MO {m.number} · {m.part}"}
 
 
-@cmd("qcSave")
-def qc_save(p, ctx):
-    sh = shift_of(p, ctx)
+def _qc_values(sh, p):
+    """The stage's QC items (Admin › QC checks), the values submitted for them, and the part's spec."""
+    from . import qc
     item = sh.mo.part if sh.mo else (MO.objects.get(pk=sh.co["newMo"]).part if sh.co and sh.co.get("newMo") else "")
     P = spec_for(item)
-    vals = {}
-    for k in ("len", "wid", "ph", "sbl", "sbr"):
-        v = to_number(p.get(k)) if str(p.get(k) or "").strip() else None
-        need(v is not None and 0 <= v < 1000, "Enter all five measurements in inches.")
-        vals[k] = v
-    tgt = {"len": P["len"], "wid": P["wid"], "ph": P["ph"], "sbl": P["sb"], "sbr": P["sb"]}
-    glue = "Fail" if p.get("glue") == "Fail" else "Pass"
-    cut = "Fail" if p.get("cut") == "Fail" else "Pass"
-    scrap = to_number(p.get("scrap") or 0)
-    need(scrap is not None and 0 <= scrap <= 1_000_000, "Enter scrap as a whole number (0 if none).")
-    scrap = int(scrap)
-    ok = all(abs(vals[k] - tgt[k]) <= P["tol"] + 1e-9 for k in vals) and glue == "Pass" and cut == "Pass"
-    QCCheck.objects.create(shift=sh, t=ctx.now, line=sh.line, mo=sh.mo.number if sh.mo else "", item=P["key"], by=ctx.by, glue=glue, cut=cut,
-                           scrap=scrap, passed=ok, **vals)
-    if sh.mo and scrap:
-        MO.objects.filter(pk=sh.mo_id).update(scrap=F("scrap") + scrap)
-    sh.qc_last = ctx.now
-    sh.save(update_fields=["qc_last"])
+    items = qc.items_for(sh.machine.stage if sh.machine else "s1")
+    try:
+        vals = qc.parse(items, p)
+    except ValueError as e:
+        raise Need(str(e))
+    ok, fails = qc.judge(items, vals, P)
+    cols = {k: vals.get(k) for k in ("len", "wid", "ph", "sbl", "sbr")}
+    cols.update(glue=vals.get("glue", ""), cut=vals.get("cut", ""), scrap=int(vals.get("scrap") or 0))
+    return P, vals, ok, fails, cols
+
+
+@cmd("qcSave")
+def qc_save(p, ctx):
+    from . import qc
+    sh = shift_of(p, ctx)
+    P, vals, ok, fails, cols = _qc_values(sh, p)
+    due = qc.due_at(sh, settings_obj().settings, ctx.now)
+    late = qc.late_by(sh, settings_obj().settings, rules(), ctx.now)
+    reason = str(p.get("lateReason") or "").strip()
+    need(not late or reason, f"This check is {late} min late. Say why it wasn't done on time.")
+    q = QCCheck.objects.create(shift=sh, t=ctx.now, line=sh.line, mo=sh.mo.number if sh.mo else "", item=P["key"], by=ctx.by, passed=ok,
+                               values=vals, fails=fails, due_at=due, late_reason=reason[:500] if late else "", review="" if ok else "pending", **cols)
+    if sh.mo and cols["scrap"]:
+        MO.objects.filter(pk=sh.mo_id).update(scrap=F("scrap") + cols["scrap"])
+    sh.qc_last, sh.qc_after_co, sh.qc_due_at = ctx.now, False, None
+    sh.save(update_fields=["qc_last", "qc_after_co", "qc_due_at"])
     event("qc", {"line": sh.line, "item": P["key"], "pass": ok, **vals})
-    return {"msg": "QC passed and saved" if ok else "QC FAIL saved — tell your shift lead", "data": {"pass": ok}}
+    return {"msg": "QC passed and saved" if ok else "QC out of spec — a supervisor needs to approve or disapprove it",
+            "data": {"pass": ok, "id": q.id}}
+
+
+@cmd("qcEdit", "qc.edit")
+def qc_edit(p, ctx):
+    """A supervisor corrects a finished QC check (Supervisor override)."""
+    q = QCCheck.objects.filter(pk=p.get("id")).select_related("shift", "shift__machine", "shift__mo").first()
+    need(q and q.shift, "That QC check is no longer on file.")
+    from . import qc
+    items = qc.items_for(q.shift.machine.stage if q.shift.machine else "s1")
+    try:
+        vals = qc.parse(items, p)
+    except ValueError as e:
+        raise Need(str(e))
+    P = spec_for(q.item)
+    ok, fails = qc.judge(items, vals, P)
+    old_scrap = q.scrap
+    for k in ("len", "wid", "ph", "sbl", "sbr"):
+        setattr(q, k, vals.get(k))
+    q.glue, q.cut, q.scrap = vals.get("glue", ""), vals.get("cut", ""), int(vals.get("scrap") or 0)
+    q.values, q.fails, q.passed = vals, fails, ok
+    if ok and q.review == "pending":
+        q.review = ""
+    elif not ok and not q.review:
+        q.review = "pending"
+    q.edited_by, q.edited_at = ctx.by, ctx.now
+    q.save()
+    if q.mo and q.scrap != old_scrap:
+        MO.objects.filter(number=q.mo).update(scrap=F("scrap") + (q.scrap - old_scrap))
+    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} changed ({'pass' if ok else 'out of spec'})")
+    return {"msg": "QC check changed"}
+
+
+@cmd("qcReview", "qc.approve")
+def qc_review(p, ctx):
+    """A supervisor approves an out-of-spec QC check, or disapproves it and takes scrapped filters off the count."""
+    q = QCCheck.objects.select_for_update().filter(pk=p.get("id")).first()
+    need(q, "That QC check is no longer on file.")
+    need(not q.passed, "That check passed; there's nothing to approve.")
+    d = p.get("decision")
+    need(d in ("approved", "disapproved"), "Approve or disapprove.")
+    n = 0
+    if d == "disapproved":
+        n = to_number(p.get("scrap"))
+        need(n is not None and n >= 0 and n == int(n) and n <= 1_000_000, "How many filters to scrap? (a whole number, 0 for none)")
+        n = int(n) - q.scrapped   # a second decision only scraps the difference
+    sh = q.shift
+    if n:
+        if sh:
+            sh.count = max(0, sh.count - n)
+            if sh.mo and sh.mo.number == q.mo:
+                sh.mo_count = max(0, sh.mo_count - n)
+            sh.save(update_fields=["count", "mo_count"])
+        MO.objects.filter(number=q.mo).update(produced=Greatest(F("produced") - n, 0), scrap=F("scrap") + n)
+    q.review, q.reviewed_by, q.reviewed_at = d, ctx.by, ctx.now
+    q.scrapped = q.scrapped + n
+    q.save(update_fields=["review", "reviewed_by", "reviewed_at", "scrapped"])
+    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else ""))
+    return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"}
 
 
 @cmd("rollAdd")
@@ -642,7 +714,7 @@ def downtime_set(p, ctx):
     need(d, "That stop is no longer on file.")
     if "reason" in p:
         reason = str(p["reason"] or "").strip()[:120] or None
-        lead = ctx.user.role in ("maintenance", "lead", "admin")
+        lead = perms.can(ctx.user, "downtime.reason")   # Admin › Permissions
         # Operators pick from the list (Admin > Downtime reasons) and can't change a reason someone else entered.
         # Maintenance and shift leads can type their own reason or change one already entered.
         if not lead:
@@ -691,7 +763,7 @@ def get_drawing(p, ctx):
     return {"msg": msg or f"Rev {spec_for(key)['rev']} is current (checked {fmt_t(ctx.now)})."}
 
 
-@cmd("overrideSet", "lead")
+@cmd("overrideSet", "runs.override")
 def override_set(p, ctx):
     sh = shift_of(p, ctx)
     o = {}
@@ -711,7 +783,7 @@ def override_set(p, ctx):
     return {"msg": "Setting applied to this MO"}
 
 
-@cmd("overrideClear", "lead")
+@cmd("overrideClear", "runs.override")
 def override_clear(p, ctx):
     sh = shift_of(p, ctx)
     sh.override = None
@@ -756,7 +828,7 @@ def import_mos(ctx, rows, source="s2k"):
     return added
 
 
-@cmd("importMOs", "lead")
+@cmd("importMOs", "schedule.edit")
 def cmd_import(p, ctx):
     n = import_mos(ctx, p.get("list"), "import")
     return {"msg": f"{n} new MO{'s' if n != 1 else ''} added to the Scheduler" if n else "No new MOs found"}
@@ -824,7 +896,7 @@ def apply_people(ctx, rows):
     return f"{add} added, {upd} updated"
 
 
-@cmd("peoplePull", "lead")
+@cmd("peoplePull", "team.import")
 def people_pull(p, ctx):
     url = settings_obj().settings.get("peopleUrl")
     need(url, "Set the people list URL in Admin › Connections first.")
@@ -886,36 +958,36 @@ def apply_paycom(ctx, employees, stale=False):
     return P["msg"]
 
 
-@cmd("paycomImport", "lead")
+@cmd("paycomImport", "team.import")
 def paycom_import(p, ctx):
     need(integrations.paycom_ready(), "Paycom is not set up. Add PAYCOM_SID and PAYCOM_TOKEN to the server .env.")
     return {"msg": "Paycom: " + apply_paycom(ctx, integrations.paycom_employees())}
 
 
-@cmd("paycomFields", "admin")
+@cmd("paycomFields", "connections.edit")
 def paycom_fields(p, ctx):
     need(integrations.paycom_ready(), "Paycom is not set up. Add PAYCOM_SID and PAYCOM_TOKEN to the server .env.")
     return {"data": integrations.paycom_fields()}
 
 
-@cmd("userAdd", "lead")
+@cmd("userAdd", "team.manage")
 def user_add(p, ctx):
     name, pin = str(p.get("name") or "").strip(), str(p.get("pin") or "").strip()
     need(name and pin, "Name and PIN are both needed.")
     need(re.match(r"^[A-Za-z0-9]{3,12}$", pin), "PINs are 3–12 letters or digits.")
     need(not Person.objects.filter(pin__iexact=pin).exists(), "That PIN is already used.")
     role = p.get("role") if p.get("role") in ("operator", "maintenance", "lead", "admin") else "operator"
-    need(role != "admin" or ctx.user.role == "admin", "Only an Admin can add an Admin.")
+    need(role != "admin" or perms.can(ctx.user, "permissions.manage"), "Only someone who manages permissions can add an Admin.")
     Person.objects.create(name=name, pin=pin, role=role)
     audit(ctx, f"Added {name}")
 
 
-@cmd("userSet", "lead")
+@cmd("userSet", "team.manage")
 def user_set(p, ctx):
     u = Person.objects.filter(pk=p.get("id")).first()
     need(u, "Person not found.")
     f, v = p.get("f"), p.get("v")
-    need(u.role != "admin" or ctx.user.role == "admin" or f == "train", "Only an Admin can change an Admin's login.")
+    need(u.role != "admin" or perms.can(ctx.user, "permissions.manage") or f == "train", "Only someone who manages permissions can change an Admin's login.")
     if f == "name":
         v = " ".join(str(v or "").split())
         need(v, "Type a name.")
@@ -925,7 +997,7 @@ def user_set(p, ctx):
             u.name = v
     elif f == "role":
         need(v in ("operator", "maintenance", "lead", "admin"), "Unknown role.")
-        need(v != "admin" or ctx.user.role == "admin", "Only an Admin can make someone an Admin.")
+        need(v != "admin" or perms.can(ctx.user, "permissions.manage"), "Only someone who manages permissions can make someone an Admin.")
         need(not (u.role == "admin" and v != "admin" and Person.objects.filter(role="admin", active=True).count() < 2),
              "This is the only Admin. Make someone else an Admin first.")
         u.role = v
@@ -962,7 +1034,7 @@ def _list(k):
     return st, st.config[k]
 
 
-@cmd("listAdd", "lead")
+@cmd("listAdd", "lists.edit")
 def list_add(p, ctx):
     st, L = _list(p.get("k"))
     v = str(p.get("v") or "").strip()
@@ -973,7 +1045,7 @@ def list_add(p, ctx):
     audit(ctx, f'Added "{v}" to {p["k"]}')
 
 
-@cmd("listDel", "lead")
+@cmd("listDel", "lists.edit")
 def list_del(p, ctx):
     st, L = _list(p.get("k"))
     need(len(L) > 1, "Keep at least one item on this list.")
@@ -983,7 +1055,7 @@ def list_del(p, ctx):
     return {"msg": f'Removed "{v}"'}
 
 
-@cmd("listMove", "lead")
+@cmd("listMove", "lists.edit")
 def list_move(p, ctx):
     st, L = _list(p.get("k"))
     i = int(p.get("i"))
@@ -994,7 +1066,7 @@ def list_move(p, ctx):
     audit(ctx, f"Reordered {p['k']}")
 
 
-@cmd("listSet", "lead")
+@cmd("listSet", "lists.edit")
 def list_set(p, ctx):
     st, L = _list(p.get("k"))
     i, v = int(p.get("i")), str(p.get("v") or "").strip()
@@ -1005,7 +1077,7 @@ def list_set(p, ctx):
         audit(ctx, f'Renamed "{old}" to "{v}" in {p["k"]}')
 
 
-@cmd("lineAdd", "admin")
+@cmd("lineAdd", "machines.edit")
 def line_add(p, ctx):
     n = Machine.objects.filter(stage="s1").count() + 1
     while Machine.objects.filter(name=f"Machine {n}").exists():
@@ -1060,7 +1132,7 @@ def _set_source(m, f, v):
     setattr(m, attr, cur)
 
 
-@cmd("lineFeedTest", "admin")
+@cmd("lineFeedTest", "machines.edit")
 def line_feed_test(p, ctx):
     """Admin > Machine data > Test: the newest row of the machine's table, run signal or alarm log, and what the
     suite reads from it. Changes nothing."""
@@ -1085,7 +1157,7 @@ def line_feed_test(p, ctx):
         raise Need(f"Couldn't read it: {str(e)[:200]}")
 
 
-@cmd("machineTables", "admin")
+@cmd("machineTables", "machines.edit")
 def machine_tables(p, ctx):
     """Tables and their columns, for the machine-data pickers."""
     from . import machinedata
@@ -1099,7 +1171,7 @@ def machine_tables(p, ctx):
         raise Need(str(e))
 
 
-@cmd("lineSet", "admin")
+@cmd("lineSet", "machines.edit")
 def line_set(p, ctx):
     m = line_of(p.get("id"))
     need(m, "Machine not found.")
@@ -1175,7 +1247,7 @@ def line_set(p, ctx):
         refresh_schedule("a machine change")
 
 
-@cmd("lineDel", "admin")
+@cmd("lineDel", "machines.edit")
 def line_del(p, ctx):
     m = line_of(p.get("id"))
     need(m, "Machine not found.")
@@ -1192,7 +1264,7 @@ def _shift(i):
     return sh[int(i)]
 
 
-@cmd("shiftAdd", "lead")
+@cmd("shiftAdd", "lists.edit")
 def shift_add(p, ctx):
     s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count())
     for m in Machine.objects.all():
@@ -1200,7 +1272,7 @@ def shift_add(p, ctx):
     audit(ctx, "Added a shift")
 
 
-@cmd("shiftSet", "lead")
+@cmd("shiftSet", "lists.edit")
 def shift_set(p, ctx):
     s = _shift(p.get("s"))
     f, v = p.get("f"), str(p.get("v") or "").strip()
@@ -1216,7 +1288,7 @@ def shift_set(p, ctx):
         refresh_schedule("a shift change")
 
 
-@cmd("shiftDel", "lead")
+@cmd("shiftDel", "lists.edit")
 def shift_del(p, ctx):
     need(Shift.objects.count() > 1, "Keep at least one shift.")
     s = _shift(p.get("s"))
@@ -1231,7 +1303,7 @@ def _mins_to_hm(mins):
     return f"{mins // 60:02d}:{mins % 60:02d}"
 
 
-@cmd("breakAdd", "lead")
+@cmd("breakAdd", "lists.edit")
 def break_add(p, ctx):
     from plant.util import hm
     s = _shift(p.get("s"))
@@ -1241,7 +1313,7 @@ def break_add(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("breakSet", "lead")
+@cmd("breakSet", "lists.edit")
 def break_set(p, ctx):
     from plant.util import hm
     s = _shift(p.get("s"))
@@ -1267,7 +1339,7 @@ def break_set(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("breakDel", "lead")
+@cmd("breakDel", "lists.edit")
 def break_del(p, ctx):
     s = _shift(p.get("s"))
     brs = list(s.breaks.all())
@@ -1278,7 +1350,7 @@ def break_del(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("partAdd", "lead")
+@cmd("partAdd", "lists.edit")
 def part_add(p, ctx):
     k = part_key(p.get("k"))
     need(k, "Type a part number.")
@@ -1288,7 +1360,7 @@ def part_add(p, ctx):
     audit(ctx, f"Added part {k}")
 
 
-@cmd("partSet", "lead")
+@cmd("partSet", "lists.edit")
 def part_set(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -1307,7 +1379,7 @@ def part_set(p, ctx):
     audit(ctx, f"{ps.key} {f} set to {v}")
 
 
-@cmd("partDel", "lead")
+@cmd("partDel", "lists.edit")
 def part_del(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -1316,7 +1388,7 @@ def part_del(p, ctx):
     return {"msg": f"{p['k']} removed. Open MOs for it use the cost sheet pleat count and estimated specs until it is added back."}
 
 
-@cmd("ruleSet", "lead")
+@cmd("ruleSet", "lists.edit")
 def rule_set(p, ctx):
     st = settings_obj()
     need(p.get("k") in st.config["rules"], "Unknown rule.")
@@ -1337,15 +1409,16 @@ SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2k
             "grafana.report": "j"}
 
 
-LEAD_SETTINGS = {"autoQC", "qcEvery"}   # floor settings; the rest are system settings for an Admin
+LEAD_SETTINGS = {"autoQC", "qcEvery"}   # floor settings (day-to-day lists); the rest are connection settings
 
 
-@cmd("settingSet", "lead")
+@cmd("settingSet", "user")
 def setting_set(p, ctx):
     k = p.get("k")
     t = SETTINGS.get(k)
     need(t, "Unknown setting.")
-    need(k in LEAD_SETTINGS or ctx.user.role == "admin", "Only an Admin can change this setting.")
+    need(perms.can(ctx.user, "lists.edit" if k in LEAD_SETTINGS else "connections.edit"),
+         f"{ctx.user.name} doesn't have permission to change this setting (Admin › Permissions).")
     v = p.get("v")
     if t == "b":
         v = bool(v)
@@ -1415,7 +1488,7 @@ def _db_test(group, f):
     return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=records, internet=v["internet"])
 
 
-@cmd("connInfo", "admin")
+@cmd("connInfo", "connections.edit")
 def conn_info(p, ctx):
     from plant import liveconfig
     return {"data": liveconfig.info()}
@@ -1449,7 +1522,7 @@ def _influx_fields(f):
     return c
 
 
-@cmd("connTest", "admin")
+@cmd("connTest", "connections.edit")
 def conn_test(p, ctx):
     group = p.get("group")
     if group == "influx":
@@ -1464,7 +1537,7 @@ def conn_test(p, ctx):
     return {"data": r}
 
 
-@cmd("connSave", "admin")
+@cmd("connSave", "connections.edit")
 def conn_save(p, ctx):
     from plant import liveconfig
     from plant.liveconfig import TEXT_RE
@@ -1537,7 +1610,7 @@ def conn_save(p, ctx):
     raise Need("Unknown connection.")
 
 
-@cmd("connRemove", "admin")
+@cmd("connRemove", "connections.edit")
 def conn_remove(p, ctx):
     from plant import liveconfig
     group = p.get("group")
@@ -1559,6 +1632,126 @@ def conn_remove(p, ctx):
     return {"msg": "Connection removed.", "data": liveconfig.info()}
 
 
+# ------------------------------------------------------------------ QC items per stage (Admin > QC checks)
+def _qc_list(st, stage):
+    from plant.models import STAGES
+
+    from . import qc
+    need(stage in dict(STAGES), "Unknown stage.")
+    cur = [{"key": i["key"]} if i["builtin"] else {k: i[k] for k in ("key", "label", "type", "min", "max")} for i in qc.items_for(stage, st.config)]
+    return cur
+
+
+def _qc_store(st, stage, items, ctx, what):
+    cfg = dict(st.config)
+    cfg["qcItems"] = {**(cfg.get("qcItems") or {}), stage: items}
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"QC checks ({stage}): {what}")
+
+
+@cmd("qcItemAdd", "lists.edit")
+def qc_item_add(p, ctx):
+    from . import qc
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    key = p.get("key") or ""
+    if key in qc.BUILTIN:
+        need(all(i["key"] != key for i in items), "That item is already on the list.")
+        items.append({"key": key})
+        what = qc.BUILTIN[key]["label"]
+    else:
+        label = str(p.get("label") or "").strip()[:60]
+        need(label, "Name the check.")
+        typ = p.get("type")
+        need(typ in qc.TYPES, "Pick what kind of check it is.")
+        lo, hi = (to_number(p.get(k)) if str(p.get(k) or "").strip() else None for k in ("min", "max"))
+        need(lo is None or hi is None or lo <= hi, "The lowest allowed value is above the highest.")
+        n = 1 + max([int(i["key"][1:]) for i in items if i["key"][1:].isdigit()] + [0])
+        items.append({"key": f"c{n}", "label": label, "type": typ, "min": lo if typ == "number" else None, "max": hi if typ == "number" else None})
+        what = label
+    _qc_store(st, stage, items, ctx, f"added {what}")
+
+
+@cmd("qcItemDel", "lists.edit")
+def qc_item_del(p, ctx):
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    i = int(p.get("i") or -1)
+    need(0 <= i < len(items), "That item is no longer on the list.")
+    gone = items.pop(i)
+    _qc_store(st, stage, items, ctx, f"removed {gone.get('label') or gone['key']}")
+
+
+@cmd("qcItemMove", "lists.edit")
+def qc_item_move(p, ctx):
+    st = settings_obj()
+    stage = p.get("stage")
+    items = _qc_list(st, stage)
+    i, d = int(p.get("i") or 0), int(p.get("d") or 0)
+    j = i + d
+    need(0 <= i < len(items) and 0 <= j < len(items), "Can't move that item further.")
+    items[i], items[j] = items[j], items[i]
+    _qc_store(st, stage, items, ctx, "reordered")
+
+
+# ------------------------------------------------------------------ permissions (Admin > Permissions)
+def _perm_cfg(st):
+    cfg = dict(st.config)
+    p = cfg.get("perms") if isinstance(cfg.get("perms"), dict) else {}
+    p = {"roles": dict(p.get("roles") or {}), "people": {k: dict(v) for k, v in (p.get("people") or {}).items()}}
+    cfg["perms"] = p
+    return cfg, p
+
+
+@cmd("permRole", "permissions.manage")
+def perm_role(p, ctx):
+    key, role, on = p.get("key"), p.get("role"), bool(p.get("v"))
+    need(key in perms.PERMS, "Unknown permission.")
+    need(role in dict(perms.ROLES), "Unknown role.")
+    need((key, role) not in perms.LOCKED or on, "The Admin role always keeps Manage permissions.")
+    st = settings_obj()
+    cfg, pc = _perm_cfg(st)
+    roles = [r for r, _ in perms.ROLES if (r == role and on) or (r != role and perms.role_has(key, r, cfg["perms"]))]
+    pc["roles"][key] = roles
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"Permission {perms.PERMS[key]['label']}: {dict(perms.ROLES)[role]} {'allowed' if on else 'not allowed'}")
+
+
+@cmd("permPerson", "permissions.manage")
+def perm_person(p, ctx):
+    key, v = p.get("key"), p.get("v") or ""
+    u = Person.objects.filter(pk=p.get("id")).first()
+    need(u, "Person not found.")
+    need(key in perms.PERMS, "Unknown permission.")
+    need(v in ("", "allow", "deny"), "Pick allow, deny or follow the role.")
+    st = settings_obj()
+    cfg, pc = _perm_cfg(st)
+    rules = pc["people"].setdefault(str(u.pk), {})
+    if v:
+        rules[key] = v == "allow"
+    else:
+        rules.pop(key, None)
+    if not rules:
+        pc["people"].pop(str(u.pk), None)
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"Permission {perms.PERMS[key]['label']} for {u.name}: {'allowed' if v == 'allow' else 'denied' if v == 'deny' else 'follows their role'}")
+
+
+@cmd("permReset", "permissions.manage")
+def perm_reset(p, ctx):
+    st = settings_obj()
+    cfg = dict(st.config)
+    cfg.pop("perms", None)
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, "Permissions reset to the defaults")
+
+
 # ------------------------------------------------------------------ updates (Admin > Updates)
 def _upd():
     from plant import updates
@@ -1574,33 +1767,33 @@ def _upd_call(fn, *a):
     return {"data": up.info()}
 
 
-@cmd("updInfo", "admin")
+@cmd("updInfo", "updates.install")
 def upd_info(p, ctx):
     return {"data": _upd().info()}
 
 
-@cmd("updWhen", "admin")
+@cmd("updWhen", "updates.install")
 def upd_when(p, ctx):
     r = _upd_call(_upd().schedule, str(p.get("when") or ""), str(p.get("at") or ""), ctx.by)
     audit(ctx, f"Update set to install {p.get('when')} {p.get('at') or ''}".strip())
     return r
 
 
-@cmd("updCancel", "admin")
+@cmd("updCancel", "updates.install")
 def upd_cancel(p, ctx):
     r = _upd_call(_upd().cancel, ctx.by)
     audit(ctx, "Waiting update removed")
     return r
 
 
-@cmd("updGoBack", "admin")
+@cmd("updGoBack", "updates.install")
 def upd_goback(p, ctx):
     r = _upd_call(_upd().request_goback, ctx.by)
     audit(ctx, "Asked to go back to the previous version")
     return {**r, "msg": "Going back to the previous version within a minute. Screens reconnect by themselves."}
 
 
-@cmd("updFolder", "admin")
+@cmd("updFolder", "updates.install")
 def upd_folder(p, ctx):
     r = _upd_call(_upd().set_policy, str(p.get("when") or ""))
     audit(ctx, f"Update folder files install: {p.get('when')}")
@@ -1615,13 +1808,13 @@ def _src_json(x):
             "lastMsg": x.last_msg, "received": x.received, "sample": x.sample, "fields": inbound.field_paths(x.sample or {})}
 
 
-@cmd("srcList", "admin")
+@cmd("srcList", "connections.edit")
 def src_list(p, ctx):
     from .models import DataSource
     return {"data": [_src_json(x) for x in DataSource.objects.all()]}
 
 
-@cmd("srcSave", "admin")
+@cmd("srcSave", "connections.edit")
 def src_save(p, ctx):
     from . import inbound
     from .models import DataSource
@@ -1670,7 +1863,7 @@ def src_save(p, ctx):
     return {"msg": f"Data source {name} saved.", "data": _src_json(x), "key": key}
 
 
-@cmd("srcNewKey", "admin")
+@cmd("srcNewKey", "connections.edit")
 def src_new_key(p, ctx):
     from . import inbound
     from .models import DataSource
@@ -1683,7 +1876,7 @@ def src_new_key(p, ctx):
     return {"msg": "New key made. The old key stops working now.", "key": key, "data": _src_json(x)}
 
 
-@cmd("srcDelete", "admin")
+@cmd("srcDelete", "connections.edit")
 def src_delete(p, ctx):
     from .models import DataSource
     x = DataSource.objects.filter(pk=p.get("id")).first()
@@ -1694,7 +1887,7 @@ def src_delete(p, ctx):
     return {"msg": f"Data source {name} removed. The data it already sent is kept."}
 
 
-@cmd("srcTest", "admin")
+@cmd("srcTest", "connections.edit")
 def src_test(p, ctx):
     """Collect once without storing (poll), or show what the last data received would be read as (push)."""
     from . import inbound, integrations
@@ -1722,7 +1915,7 @@ def _contact_json(c):
             "notifyBack": c.notify_back, "active": c.active}
 
 
-@cmd("alertInfo", "admin")
+@cmd("alertInfo", "alerts.edit")
 def alert_info(p, ctx):
     from plant import liveconfig
 
@@ -1733,7 +1926,7 @@ def alert_info(p, ctx):
                               "msg": x.msg} for x in AlertLog.objects.exclude(channel="none")[:40]]}}
 
 
-@cmd("alertContactSave", "admin")
+@cmd("alertContactSave", "alerts.edit")
 def alert_contact_save(p, ctx):
     from . import alerts
     from .models import AlertContact
@@ -1762,7 +1955,7 @@ def alert_contact_save(p, ctx):
     return {"msg": f"{name} saved.", "data": _contact_json(c)}
 
 
-@cmd("alertContactDelete", "admin")
+@cmd("alertContactDelete", "alerts.edit")
 def alert_contact_delete(p, ctx):
     from .models import AlertContact
     c = AlertContact.objects.filter(pk=p.get("id")).first()
@@ -1772,7 +1965,7 @@ def alert_contact_delete(p, ctx):
     return {"msg": f"{c.name} removed."}
 
 
-@cmd("alertTest", "admin")
+@cmd("alertTest", "alerts.edit")
 def alert_test(p, ctx):
     from . import alerts
     from .models import AlertContact
@@ -1787,7 +1980,7 @@ def alert_test(p, ctx):
     return {"msg": "Test sent: " + ", ".join(f"{r['channel']} to {r['to']}" for r in res)}
 
 
-@cmd("alertConfigSave", "admin")
+@cmd("alertConfigSave", "alerts.edit")
 def alert_config_save(p, ctx):
     from plant import liveconfig
     from plant.liveconfig import TEXT_RE
@@ -1845,7 +2038,7 @@ def alert_config_save(p, ctx):
     raise Need("Unknown setting.")
 
 
-@cmd("networkSet", "admin")
+@cmd("networkSet", "network.edit")
 def network_set(p, ctx):
     """Change the plant network: the addresses screens may connect from, and that the server may connect to."""
     raw = p.get("allowed")
@@ -1868,13 +2061,13 @@ def network_set(p, ctx):
     return {"msg": "Plant network saved: " + ", ".join(new)}
 
 
-@cmd("networkFirewallSync", "admin")
+@cmd("networkFirewallSync", "network.edit")
 def network_firewall_sync(p, ctx):
     transaction.on_commit(lambda: netsafety.sync_and_record())
     return {"msg": "Checking Windows Firewall…"}
 
 
-@cmd("configImport", "admin")
+@cmd("configImport", "backup.manage")
 def config_import(p, ctx):
     o = p.get("data") or {}
     need(isinstance(o.get("config"), dict) and isinstance(o.get("lines"), list), "Settings text is missing the machines or config section.")
@@ -1902,7 +2095,7 @@ def config_import(p, ctx):
     return {"msg": "Settings loaded"}
 
 
-@cmd("configReset", "admin")
+@cmd("configReset", "backup.manage")
 def config_reset(p, ctx):
     st = settings_obj()
     rules_ = DEFAULT_CONFIG["rules"]
@@ -1911,7 +2104,7 @@ def config_reset(p, ctx):
     audit(ctx, "Restored default lists and rules")
 
 
-@cmd("dataReset", "admin")
+@cmd("dataReset", "backup.manage")
 def data_reset(p, ctx):
     if p.get("mode") == "demo":
         from plant.demo import seed_demo
@@ -1930,13 +2123,13 @@ def data_reset(p, ctx):
 
 
 # ---------------------------------------------------------- connections & asset database
-@cmd("testConn", "admin")
+@cmd("testConn", "connections.edit")
 def test_conn(p, ctx):
     ok, msg = integrations.test(p.get("k"))
     return {"data": {"ok": ok, "msg": msg}}
 
 
-@cmd("testAll", "admin")
+@cmd("testAll", "connections.edit")
 def test_all(p, ctx):
     keys = ["store", "grafana", "assets", "paycom", "s2k", "people", "webhook"] + [f"feed:{m.name}" for m in Machine.objects.filter(stage="s1")]
     res = [integrations.test(k) for k in keys]
@@ -1953,7 +2146,7 @@ def _which_db(p):
     return db
 
 
-@cmd("dbSchema", "admin")
+@cmd("dbSchema", "connections.edit")
 def db_schema(p, ctx):
     try:
         return {"data": integrations.schema(_which_db(p))}
@@ -1961,7 +2154,7 @@ def db_schema(p, ctx):
         raise Need(str(e))
 
 
-@cmd("dbPreview", "admin")
+@cmd("dbPreview", "connections.edit")
 def db_preview(p, ctx):
     try:
         return {"data": integrations.preview(str(p.get("table") or ""), _which_db(p))}
@@ -1969,7 +2162,7 @@ def db_preview(p, ctx):
         raise Need(str(e))
 
 
-@cmd("dbTest", "admin")
+@cmd("dbTest", "connections.edit")
 def db_test(p, ctx):
     db = _which_db(p)
     try:
@@ -1980,7 +2173,7 @@ def db_test(p, ctx):
         raise Need(str(e))
 
 
-@cmd("dbSave", "admin")
+@cmd("dbSave", "connections.edit")
 def db_save(p, ctx):
     name = p.get("name")
     need(name in QUERY_DB, "Unknown query.")
@@ -2001,7 +2194,7 @@ def db_save(p, ctx):
     audit(ctx, f"Saved the {name} query")
 
 
-@cmd("dbQueries", "admin")
+@cmd("dbQueries", "connections.edit")
 def db_queries(p, ctx):
     return {"data": {q.name: {"sql": q.sql, "savedBy": q.saved_by, "savedAt": ms(q.saved_at)} for q in SavedQuery.objects.all()}}
 
@@ -2014,10 +2207,10 @@ def execute(name, p, ctx):
     role = ROLE[name]
     if role != "none" and not ctx.user:
         return {"ok": False, "error": "Log in first.", "login": True}
-    if role == "lead" and ctx.user.role not in Person.LEADS:
-        return {"ok": False, "error": "A shift lead needs to approve this. Log in as a shift lead.", "admin": True}
-    if role == "admin" and ctx.user.role != "admin":
-        return {"ok": False, "error": "Only an Admin can change this. Log in as an Admin.", "admin": True, "onlyAdmin": True}
+    if role in perms.PERMS and not perms.can(ctx.user, role):   # Admin › Permissions
+        what = perms.PERMS[role]["label"]
+        return {"ok": False, "error": f"{ctx.user.name} doesn't have permission for this ({what}). Log in as someone who does.",
+                "admin": True, "perm": role}
     try:
         with transaction.atomic():
             r = fn(p or {}, ctx) or {}

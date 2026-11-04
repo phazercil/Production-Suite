@@ -34,10 +34,11 @@ def hms(seconds):
 class Screen:
     """One kiosk screen at one moment: the person logged in, the machine it is for, and what follows from them."""
 
-    def __init__(self, request, me=None, lock=""):
+    def __init__(self, request, me=None, lock="", sup=None):
         self.request = request
         self.t = now()
         self.me = me
+        self.sup = sup   # a supervisor who has taken over this screen (Supervisor button)
         self.lock = lock
         self.st = PlantSettings.load()
         self.cfg = self.st.config
@@ -64,18 +65,34 @@ class Screen:
 
     # ------------------------------------------------------------ who
     @property
+    def perms(self):
+        """What the person on this screen may do (Admin › Permissions): S.perms.lists_edit in a template."""
+        if not hasattr(self, "_perms"):
+            from plant.perms import PermView
+            self._perms = PermView(self.actor)
+        return self._perms
+
+    @property
+    def actor(self):
+        """Who this screen acts as: the supervisor during an override, otherwise the person logged in."""
+        return self.sup or self.me
+
+    def can(self, key):
+        return bool(self.perms[key.replace(".", "_")])
+
+    @property
     def is_lead(self):
-        """A shift lead or an Admin: floor approvals, Team, the day-to-day Admin lists."""
-        return bool(self.me and self.me.is_lead)
+        """Can open Admin and change the day-to-day lists."""
+        return self.can("section.admin")
 
     @property
     def is_admin(self):
-        """An Admin: system settings (Connections, Network, Alerts, Updates, Backup, Machines, Changeover data)."""
-        return bool(self.me and self.me.is_admin)
+        """Holds Admin-level permissions (used for labels; each feature checks its own permission)."""
+        return bool(self.me and self.me.role == "admin")
 
     @property
     def can_override(self):
-        return bool(self.me and self.me.role in ("lead", "admin", "maintenance"))
+        return self.can("downtime.reason")
 
     @property
     def shift_on(self):
@@ -122,21 +139,35 @@ class Screen:
         snooze = self.request.session.get("down_snooze", 0)
         return self.reason_due() and ms(self.t) > snooze
 
+    def qc_due_at(self):
+        from . import qc
+        return qc.due_at(self.shift, self.settings, self.t) if self.shift_on else None
+
     def qc_due(self):
-        if not self.shift_on or not self.settings.get("autoQC"):
-            return False
-        last = self.shift.qc_last
-        return last is None or (self.t - last).total_seconds() >= (self.settings.get("qcEvery") or 30) * 60
+        d = self.qc_due_at()
+        return d is not None and self.t >= d
+
+    def qc_late(self):
+        """Minutes a due QC check is past its allowance (Rules › QC late after); 0 if it isn't late."""
+        from . import qc
+        return qc.late_by(self.shift, self.settings, self.rules, self.t) if self.shift_on else 0
 
     def qc_next(self):
         if not self.settings.get("autoQC"):
             return "Auto QC off"
         if not self.shift_on:
             return "—"
-        last = self.shift.qc_last
-        left = (self.settings.get("qcEvery") or 30) - ((self.t - last).total_seconds() / 60 if last else 1e9)
+        d = self.qc_due_at()
+        if d is None:
+            return "When the machine runs"   # after a changeover
+        left = (d - self.t).total_seconds() / 60
         m = int(round(abs(left)))
         return f"Overdue {m // 60}:{m % 60:02d}" if left <= 0 else f"in {m // 60}:{m % 60:02d}"
+
+    def qc_pending(self):
+        """Out-of-spec QC checks on this line waiting for a supervisor (approve, or disapprove and scrap)."""
+        from .models import QCCheck
+        return list(QCCheck.objects.filter(line=self.station, review="pending").order_by("-t")[:20]) if self.station else []
 
     def unread_notices(self):
         return list(Notice.objects.filter(read=False).exclude(kind="team").order_by("-t")[:30])
@@ -169,7 +200,14 @@ class Screen:
             n = len(self.need_reason())
             a.append({"sev": "bad", "text": f"{n} downtime {'entries need' if n > 1 else 'entry needs'} a reason", "go": "downtime"})
         if self.qc_due():
-            a.append({"sev": "warn", "text": f"QC check due (every {self.settings.get('qcEvery')} min)", "go": "qc", "modal": "qc"})
+            late = self.qc_late()
+            first = self.shift.qc_after_co
+            a.append({"sev": "bad" if late else "warn", "go": "qc", "modal": "qc",
+                      "text": ("QC check after the changeover" if first else f"QC check due (every {self.settings.get('qcEvery')} min)")
+                      + (f" · {late} min late: a reason is needed" if late else "")})
+        n = len(self.qc_pending())
+        if n:
+            a.append({"sev": "bad", "text": f"{n} QC check{'s' if n > 1 else ''} out of spec: a supervisor needs to approve or disapprove", "go": "qc-log"})
         for n in self.unread_notices():
             a.append({"sev": "warn", "text": n.text, "go": "schedule", "notice": n.id})
         for tk in self.open_tickets():
@@ -303,12 +341,11 @@ def plan_label(t, ref):
     return f"{lt.month}/{lt.day} {clock(t)}"
 
 
-def people_for_login(level=""):
-    """Who can log in for this: anyone, a shift lead or Admin ("lead", or True), or an Admin only ("admin")."""
+def people_for_login(perm=""):
+    """Who can log in for this: anyone, or the people who have permission `perm` (Admin › Permissions)."""
+    from plant import perms
     qs = Person.objects.filter(active=True)
-    if level == "admin":
-        return list(qs.filter(role="admin"))
-    return list(qs.filter(role__in=Person.LEADS) if level else qs)
+    return perms.who_can(perm, qs) if perm in perms.PERMS else list(qs)
 
 
 # ------------------------------------------------------------------ the other operator pages
@@ -413,24 +450,25 @@ def line_blocks(s, m, sh, t_ms):
 
 
 def qc_log_page(s):
+    from . import qc
     from .models import QCCheck
+    items = qc.items_for(s.machine.stage if s.machine else "s1", s.cfg)
     since = s.t - timedelta(days=3)
     checks = list(QCCheck.objects.filter(line=s.station, t__gte=since).order_by("-t"))
     rows = []
     for q in checks:
         p = s.part(q.item)
-        target = {"len": p["len"], "wid": p["wid"], "ph": p["ph"], "sbl": p["sb"], "sbr": p["sb"]}
-        cells = []
-        for k in ("len", "wid", "ph", "sbl", "sbr"):
-            v = getattr(q, k)
-            cells.append({"v": v, "ok": v is None or abs(v - target[k]) <= p["tol"]})
+        vals = q.values or {k: getattr(q, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
+        fails = q.fails if q.values else qc.judge(items, vals, p)[1]   # checks saved before QC items were set per stage
+        cells = [{"v": vals.get(it["key"]), "type": it["type"], "ok": it["key"] not in fails, "target": qc.target(it, p)} for it in items]
         rows.append({"q": q, "cells": cells})
     from .snapshot import autoqc_summary
     auto = autoqc_summary(s.t).get(s.station)
     if auto:
         auto["pct"] = round(100 * (auto["n"] - auto["fails"]) / auto["n"]) if auto["n"] else 100
-    return {"rows": rows, "fails": sum(1 for q in checks if not q.passed), "scrap": sum(q.scrap for q in checks), "next": s.qc_next(),
-            "auto": auto, "autoQC": s.settings.get("autoQC"), "every": s.settings.get("qcEvery")}
+    return {"items": items, "rows": rows, "fails": sum(1 for q in checks if not q.passed), "scrap": sum(q.scrap for q in checks), "next": s.qc_next(),
+            "pending": sum(1 for q in checks if q.review == "pending"), "scrapped": sum(q.scrapped for q in checks),
+            "auto": auto, "autoQC": s.settings.get("autoQC"), "every": s.settings.get("qcEvery"), "late": s.rules.get("qcLate", 10)}
 
 
 def downtime_page(s):
@@ -545,7 +583,7 @@ def team_page(s, show_inactive=False):
         tr = {m.name for m in u.trained.all()}
         rows.append({"u": u, "trained": [(m.name, m.name in tr) for m in lines], "you": bool(s.me and u.id == s.me.id),
                      # a shift lead manages everyone but Admins; an Admin manages everyone
-                     "edit": s.is_lead and (u.role != "admin" or s.is_admin)})
+                     "edit": s.can("team.manage") and (u.role != "admin" or s.can("permissions.manage"))})
     act = [u for u in people if u.active]
     return {"rows": rows, "lines": lines, "inactive": sum(1 for u in people if not u.active), "showInactive": show_inactive,
             "needPin": sum(1 for u in act if not u.pin), "untrained": sum(1 for u in act if not u.trained.exists()),

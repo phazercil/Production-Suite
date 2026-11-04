@@ -64,7 +64,7 @@ class Command(BaseCommand):
                 who = f"Server desktop ({getpass.getuser()})"
             except Exception:
                 who = "Server desktop"
-        return engine.Ctx(user=SimpleNamespace(name=who[:80], role="admin", id=None, pk=None), client_ip="127.0.0.1")
+        return engine.Ctx(user=SimpleNamespace(name=who[:80], role="admin", id=None, pk=None, system=True), client_ip="127.0.0.1")
 
     def env(self):
         from plant import liveconfig

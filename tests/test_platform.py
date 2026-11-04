@@ -63,7 +63,7 @@ class Base(TestCase):
 class LaborBudgetTests(Base):
     def test_shift_leads_only(self):
         r = Client().get("/labor/")
-        self.assertContains(r, "Shift lead PIN")
+        self.assertContains(r, "Open Labor Budget")
         self.assertEqual(Client().get("/api/labor/state").status_code, 403)
         c = Client()
         login(c, "1111")  # an operator
@@ -71,7 +71,7 @@ class LaborBudgetTests(Base):
         c = Client()
         login(c, "9999")
         r = c.get("/labor/")
-        self.assertContains(r, "MFG LABOR")
+        self.assertContains(r, "MFG Labor &amp; Production Budget")
         self.assertIn("'unsafe-inline'", r["Content-Security-Policy"])
         self.assertIn("connect-src 'self'", r["Content-Security-Policy"])
         self.assertNotIn(b"cdn.tailwindcss.com", r.content)

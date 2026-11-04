@@ -1,14 +1,15 @@
 {% extends "hmi/k/m_base.html" %}
-{% block title %}{% if level == "admin" %}Admin approval{% elif level %}Shift lead approval{% else %}Log in{% endif %}{% endblock %}
-{% block form_attrs %}hx-post="/kiosk/do/login"{% endblock %}
+{% block title %}{% if sup %}Supervisor override{% elif perm %}Approval{% else %}Log in{% endif %}{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/{% if sup %}supStart{% else %}login{% endif %}"{% endblock %}
 {% block body %}
-  {% if level == "admin" %}<p class="sub">This is a system setting: it needs an Admin PIN.</p>{% elif level %}<p class="sub">This needs a shift lead PIN.</p>{% endif %}
+  {% if sup %}<p class="sub">A supervisor's PIN lets this screen change finished entries (downtime reasons, QC checks) without logging {% if me %}{{ me.name }}{% else %}anyone{% endif %} out. It ends with End override, or after 10 minutes without a tap.</p>
+  {% elif perm %}<p class="sub">This needs someone allowed to: <b>{{ perm_label }}</b>.</p>{% endif %}
   <input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="next_q" value="{{ next_q }}">
-  {% if level %}<input type="hidden" name="level" value="{{ level }}">{% endif %}
+  {% if perm %}<input type="hidden" name="perm" value="{{ perm }}">{% endif %}
   <div class="users" role="radiogroup" aria-label="Who are you?">
     {% for u in people %}<label class="userpick"><input type="radio" name="user" value="{{ u.id }}"><span class="btn">{{ u.name }}<br><span class="note">{% if u.role == "admin" %}Admin{% elif u.role == "lead" %}shift lead{% else %}{{ u.role }}{% endif %}</span></span></label>{% endfor %}
   </div>
   <label class="f">PIN<input type="password" name="pin" inputmode="numeric" autocomplete="off" placeholder="Scan badge or type PIN" autofocus></label>
   {% if S.st.demo %}<p class="note">Example PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · S. Lead 4444 · Plant Admin 9999</p>{% endif %}
 {% endblock %}
-{% block foot %}<button class="btn go" type="submit">{% if level %}Approve{% else %}Log in{% endif %}</button>{% endblock %}
+{% block foot %}<button class="btn go" type="submit">{% if sup %}Start override{% elif perm %}Approve{% else %}Log in{% endif %}</button>{% endblock %}
