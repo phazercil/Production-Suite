@@ -199,3 +199,6 @@ td input[type=text]{width:140px}
 .note.bad{background:var(--bad-soft);color:var(--bad)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;z-index:90;font-size:13px;box-shadow:var(--shadow);max-width:calc(100% - 32px)}
 @media (prefers-reduced-motion: no-preference){.bar{transition:left .15s,width .15s}}
+.mo.grab{cursor:grab}
+.mo.grab:hover{border-color:var(--accent,#5B9BD5)}
+.mo.dragging{opacity:.5}

@@ -131,8 +131,26 @@ const SCALES={
   week:{px:9,start:t=>{const s=sod(t),d=new Date(s).getDay();return addDays(s,-((d+6)%7))},end:s=>addDays(s,7),step:7,snap:30*MIN},
   month:{px:2,start:t=>{const d=new Date(t);return new Date(d.getFullYear(),d.getMonth(),1).getTime()},end:s=>{const d=new Date(s);return new Date(d.getFullYear(),d.getMonth()+1,1).getTime()},step:"m",snap:2*HOUR}};
 function viewWindow(){const sc=SCALES[S.view.scale];const a=sc.start(S.view.anchor);return {sc,a,b:sc.end(a)}}
-const X=(t,a,px)=>(t-a)/HOUR*px;
-function buckets(a,b){const out=[];if(S.view.scale==="day"){for(let t=a;t<b;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
+/* Hours no shift covers (e.g. midnight to 6 am) are left off the board: every day shows only the hours from the
+   earliest shift start to the latest shift end of the shifts the lines use. A shift past midnight shows whole days. */
+function shownHours(){
+  const used=new Set(S.cfg.machines.filter(m=>m.active!==false).flatMap(m=>m.shifts||[]));
+  const sh=S.cfg.shifts.filter(s=>used.has(s.id)&&(s.days||[]).length);
+  if(!sh.length)return [0,24];
+  let lo=24*60,hi=0;
+  for(const s of sh){const a=hm(s.start),e=hm(s.end);if(e<=a)return [0,24];lo=Math.min(lo,a);hi=Math.max(hi,e)}
+  return [Math.floor(lo/60),Math.min(24,Math.ceil(hi/60))];
+}
+let TMAP=null;   // time <-> board position for the view on screen
+function makeMap(a,b,px){
+  const [h0,h1]=shownHours(),days=[];let off=0;
+  for(let d=a;d<b;d=addDays(d,1)){const s=d+h0*HOUR,e=Math.min(addDays(d,1),d+h1*HOUR);days.push({d,s,e,off});off+=(e-s)/HOUR*px}
+  return {a,b,px,h0,h1,days,W:off,
+    x(t){if(t<=a)return 0;if(t>=b)return off;let k=days.length-1;while(k>0&&t<days[k].d)k--;const D=days[k];return D.off+(Math.min(Math.max(t,D.s),D.e)-D.s)/HOUR*px},
+    t(x){let k=days.length-1;while(k>0&&x<days[k].off)k--;const D=days[k];return Math.min(D.e,D.s+(x-D.off)/px*HOUR)}};
+}
+const X=(t,a,px)=>TMAP&&TMAP.a===a&&TMAP.px===px?TMAP.x(t):(t-a)/HOUR*px;
+function buckets(a,b){const out=[];if(S.view.scale==="day"){const [h0,h1]=TMAP?[TMAP.h0,TMAP.h1]:[0,24];for(let t=a+h0*HOUR;t<a+h1*HOUR;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
 function rangeLabel(a,b){
   const d=new Date(a),mon=d.toLocaleString("en-US",{month:"long"});
   if(S.view.scale==="day")return d.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",year:"numeric"});
@@ -146,17 +164,18 @@ function renderSchedule(){
   const main=$("#main");
   const keepScroll=$(".gwrap")?{l:$(".gwrap").scrollLeft,t:$(".gwrap").scrollTop,k:S.view.scale+S.view.anchor}:null;
   const railScroll=$(".rail-list")?$(".rail-list").scrollTop:0;
-  const {sc,a,b}=viewWindow();const px=sc.px;const W=Math.round(X(b,a,px));
+  const {sc,a,b}=viewWindow();const px=sc.px;TMAP=makeMap(a,b,px);const W=Math.round(X(b,a,px));
   const mos=Object.values(S.mos);
   const late=new Set(),waiting=new Set();let scheduled=0;
   for(const mo of mos){const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));const rs=ops.map(o=>S.res[jobKey(mo.id,o)]).filter(Boolean);
     if(rs.length===ops.length&&ops.length)scheduled++;if(rs.some(r=>r.late))late.add(mo.id);if(rs.some(r=>r.waiting))waiting.add(mo.id)}
   const unsched=mos.length-scheduled;
   let axis="";const now=Date.now();
-  if(S.view.scale==="day"){for(let t=a;t<b;t+=HOUR){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${px}px"><span class="big">${String(h).padStart(2,"0")}:00</span></div>`}}
+  const hrsLbl=TMAP.h0===0&&TMAP.h1===24?"06 · 12 · 18":`${String(TMAP.h0).padStart(2,"0")}:00 – ${String(TMAP.h1%24).padStart(2,"0")}:00`;
+  if(S.view.scale==="day"){for(let t=a+TMAP.h0*HOUR;t<a+TMAP.h1*HOUR;t+=HOUR){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${px}px"><span class="big">${String(h).padStart(2,"0")}:00</span></div>`}}
   else{for(let t=a;t<b;t=addDays(t,1)){const d=new Date(t),w=X(addDays(t,1),a,px)-X(t,a,px),we=d.getDay()===0||d.getDay()===6,td=sod(now)===t;
     const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Holiday":"Day off"} in the Labor Budget plan"`:"",spL=sp==="HOLIDAY"?"Holiday":sp==="OFF"?"Off":sp==="WORK"?"Work day":"";
-    axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||"06 · 12 · 18"}</div>`
+    axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||hrsLbl}</div>`
       :`<div class="tick ${d.getDay()===1?"major":""} ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${d.getDate()}</span>${sp==="HOLIDAY"?"H":DOW[d.getDay()][0]}</div>`}}
   const bk=buckets(a,b);
   const nowX=(now>=a&&now<b)?`<div class="nowline" style="left:${X(now,a,px)}px"></div>`:"";
@@ -182,7 +201,7 @@ function renderSchedule(){
       const cells=bk.map(([x,y])=>{const q=rs.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
       const sp=m.stage==="s1"?`${m.mode==="fixed"?m.ppm+" PPM":m.mode==="new"?"New-machine PPM":"Sheet PPM"}`:`${(S.modes[m.stage]||[]).find(x=>x[0]===m.mode)?.[1].split(" (")[0]||"Fixed"}`;
       const lab=(S.labor.lines||{})[m.id];
-      const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} none`).join(" · "):"";
+      const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} no crew`).join(" · "):"";
       rows+=`<div class="g-row"><div class="g-lab"><span class="nm">${esc(m.name)}${m.stage==="s1"?' <span class="pill" title="Feeds the Operator Kiosk queue">kiosk</span>':""}</span><span class="ds">${esc(sp)} · ${m.scrap}% scrap · ${m.downtime}% down</span>${lab?`<span class="ds" title="Crew per shift from the Labor Budget plan">Crew: ${esc(crewTxt)}</span>`:""}<span class="tot">${fmtN(tot)} pcs in view</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${off}${grid}${bars}${cells}</div></div>`;
     }
   }
@@ -197,7 +216,10 @@ function renderSchedule(){
       if(o==="s1"&&s1Done)return `<span class="chip s1 done" title="Stage 1 finished at the pleater">S1 <span class="t">done</span></span>`;
       const blocked=o!=="s1"&&!s1Done&&!S.jobs[jobKey(mo.id,"s1")];
       return `<span class="chip ${o} ${r?"done":""} ${blocked&&!r?"blocked":""}" draggable="${blocked&&!r?"false":"true"}" data-mo="${esc(mo.id)}" data-op="${o}" tabindex="0" role="button" title="${blocked&&!r?"Schedule Stage 1 first":r?`${esc(machineById(r.machineId)?.name)}: ${fmtDT(r.start)} → ${fmtDT(r.end)}`:"Drag onto a "+STAGES[o].short+" line, or click to set a start time"}">${STAGES[o].tag}${r?` <span class="t">${fmtDT(r.end).slice(4)}</span>`:""}</span>`}).join("");
-    return `<div class="mo"><div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater; later stages still to run">closed at S1</span>':""}</span><span class="mo-qty">${fmtN(mo.qty)}</span></div>
+    // the whole card drags the stage that most needs a place: the first one not on the board yet, else Stage 1
+    const can=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done)&&(o==="s1"||s1Done||S.jobs[jobKey(mo.id,"s1")]));
+    const cardOp=can.find(o=>!S.jobs[jobKey(mo.id,o)])||can[0]||"";
+    return `<div class="mo ${cardOp?"grab":""}" ${cardOp?`draggable="true" data-mo="${esc(mo.id)}" data-op="${cardOp}" title="Drag onto a ${esc(STAGES[cardOp].short)} line (or drag one stage below)"`:""}><div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater; later stages still to run">closed at S1</span>':""}</span><span class="mo-qty">${fmtN(mo.qty)}</span></div>
       <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}${mo.produced?`<span>${fmtN(mo.produced)} made</span>`:""}</div>
       <div class="chips">${chips}</div></div>`}).join("");
   main.innerHTML=`
@@ -250,6 +272,11 @@ function wireSchedule(a,px){
   $("#jump").onchange=e=>{if(e.target.value){const [y,m,d]=e.target.value.split("-").map(Number);S.view.anchor=new Date(y,m-1,d).getTime();saveView();load(true)}};
   $("#q").oninput=e=>{S.view.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)};
   $("#showdone").onchange=e=>{S.view.showDone=e.target.checked;saveView();render()};
+  $$(".mo[data-op]").forEach(c=>{
+    c.addEventListener("dragstart",e=>{if(e.target.closest&&e.target.closest(".chip"))return;   // a stage chip drags its own stage
+      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grab:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging")});
+    c.addEventListener("dragend",()=>c.classList.remove("dragging"));
+  });
   $$(".chip").forEach(c=>{
     c.addEventListener("dragstart",e=>{if(c.classList.contains("blocked")){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
       DRAG={moId:+c.dataset.mo,op:c.dataset.op,grab:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move"});
@@ -261,7 +288,7 @@ function wireSchedule(a,px){
       DRAG={moId:j.moId,op:j.op,grab:(e.clientX-rect.left)/px*HOUR};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move"});
     bEl.addEventListener("click",()=>{const j=S.jobs[bEl.dataset.job];if(j)openJobDialog(j.moId,j.op)});
   });
-  const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();let t=a+(e.clientX-rect.left)/px*HOUR-(DRAG?DRAG.grab:0);const sn=SCALES[S.view.scale].snap;return Math.round(t/sn)*sn};
+  const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();let t=(TMAP?TMAP.t(e.clientX-rect.left):a+(e.clientX-rect.left)/px*HOUR)-(DRAG?DRAG.grab:0);const sn=SCALES[S.view.scale].snap;return Math.round(t/sn)*sn};
   $$(".g-track[data-m]").forEach(tr=>{
     const m=machineById(+tr.dataset.m);
     tr.addEventListener("dragover",e=>{if(!DRAG)return;const ok=m.stage===DRAG.op;tr.classList.toggle("drop-ok",ok);tr.classList.toggle("drop-no",!ok);
@@ -333,7 +360,7 @@ function ordinal(n){return n+(n===1?"st":n===2?"nd":n===3?"rd":"th")}
 function fmtMoney(v,d=2){return "$"+Number(v||0).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d})}
 function laborSection(c){
   const L=S.labor||{lines:{}},lead=!!(S.me&&S.me.lead);
-  const head=`<label class="check"><input type="checkbox" id="uselabor" ${c.useLabor!==false?"checked":""}> Use the Labor Budget plan: no runs on its holidays and days off, runs on its extra work days, and each line only runs the shifts the plan has a crew for</label>`;
+  const head=`<label class="check"><input type="checkbox" id="uselabor" ${c.useLabor!==false?"checked":""}> Use the Labor Budget plan: no runs on its holidays and days off, and runs on its extra work days. Each line runs the shifts ticked for it above; the plan's crews are shown for cost and staffing only</label>`;
   let body;
   if(c.useLabor===false)body=`<p class="small muted">Turned off: every line runs all the shifts ticked above, on the shifts' own days.</p>`;
   else if(!L.on)body=`<p class="small muted">No Labor Budget plan is saved yet. A shift lead can build one in <a href="/labor/">Labor Budget</a>; lines with the same name there are linked automatically.</p>`;
@@ -343,7 +370,7 @@ function laborSection(c){
       return `<tr><td>${esc(m.name)}</td><td>${esc(lab.line)}</td>${c.shifts.map(sh=>{const x=lab.shifts[String(sh.id)];
         if(!x)return `<td class="muted">not this line's shift</td>`;
         return x.staffed?`<td>${ordinal(x.n)}: crew ${x.crew}${x.filled<x.crew?` <span class="muted">(${x.filled} named)</span>`:""}${lead&&x.costPerHour!=null?`<br><span class="muted small">${fmtMoney(x.costPerHour)}/h base wages</span>`:""}</td>`
-          :`<td><span class="late">${ordinal(x.n)}: no crew</span><br><span class="muted small">not used for runs</span></td>`}).join("")}</tr>`}).join("");
+          :`<td><span class="late">${ordinal(x.n)}: no crew</span><br><span class="muted small">still runs: add a crew in the Labor Budget</span></td>`}).join("")}</tr>`}).join("");
     body=`<div class="tablewrap"><table><thead><tr><th>Line</th><th>Labor plan line</th>${c.shifts.map((sh,i)=>`<th>${esc(sh.name)} <span class="muted small">(plan shift ${i+1})</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
       <p class="small muted" style="margin-top:8px">Shifts are matched to the plan's shift numbers by their order below (first shift = plan shift 1). The work calendar and crews update as soon as the Labor Budget is saved.${lead?" Crew wages on each run are straight-time base wages: no overtime, raises or benefits.":""}</p>`}
   return `<div class="page-head"><div><h3>Labor Budget plan</h3></div></div><div class="stack" style="gap:8px;margin-bottom:22px">${head}${body}</div>`;
