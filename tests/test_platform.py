@@ -63,7 +63,7 @@ class Base(TestCase):
 class LaborBudgetTests(Base):
     def test_shift_leads_only(self):
         r = Client().get("/labor/")
-        self.assertContains(r, "Shift lead PIN")
+        self.assertContains(r, "Open Labor Budget")
         self.assertEqual(Client().get("/api/labor/state").status_code, 403)
         c = Client()
         login(c, "1111")  # an operator
