@@ -119,6 +119,21 @@ class LaborSyncTests(TestCase):
         c = lead()
         r = c.get("/labor/")
         boot = json.loads(r.content.decode().split('<script type="application/json" id="labor-boot">')[1].split("</script>")[0])
-        self.assertIsNone(boot["data"])
+        self.assertIsNone(boot["budgets"]["A"]["data"])
         self.assertEqual([ln["name"] for ln in boot["starter"]["lines"]], [m.name for m in Machine.objects.order_by("sort", "id")])
         self.assertIn('list="suite-people"', r.content.decode())
+
+
+    def test_budget_b_is_its_own(self):
+        c = lead()
+        data, _ = self.merged()
+        data["projectName"] = "What if"
+        sal = next(ln for ln in data["lines"] if ln["name"] == "Salvatore")
+        sal["activeShifts"]["2"] = False
+        r = post(c, "/api/labor/save", {"budget": "B", "version": 0, "data": data})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(LaborPlan.load("B").data["projectName"], "What if")
+        self.assertEqual(LaborPlan.load("A").version, 0)                            # A untouched
+        self.assertEqual(len(Machine.objects.get(name="Salvatore").shifts.all()), 2)  # only budget A changes the machines
+        self.assertEqual(len(c.get("/api/labor/history?budget=B").json()["items"]), 1)
+        self.assertEqual(c.get("/api/labor/history?budget=A").json()["items"], [])

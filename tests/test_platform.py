@@ -71,7 +71,7 @@ class LaborBudgetTests(Base):
         c = Client()
         login(c, "9999")
         r = c.get("/labor/")
-        self.assertContains(r, "MFG LABOR")
+        self.assertContains(r, "MFG Labor &amp; Production Budget")
         self.assertIn("'unsafe-inline'", r["Content-Security-Policy"])
         self.assertIn("connect-src 'self'", r["Content-Security-Policy"])
         self.assertNotIn(b"cdn.tailwindcss.com", r.content)

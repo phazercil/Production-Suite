@@ -195,13 +195,13 @@ def rename_machine(old, new):
     """A machine was renamed: the plan's line keeps its crew (it is linked by machineId; this covers a plan
     saved before lines were linked)."""
     from .models import LaborPlan
-    plan = LaborPlan.objects.filter(pk=1).first()
-    if not plan or not isinstance(plan.data, dict):
-        return
-    changed = False
-    for ln in plan.data.get("lines") or []:
-        if isinstance(ln, dict) and not ln.get("machineId") and str(ln.get("name") or "").strip().lower() == old.strip().lower():
-            ln["name"] = new
-            changed = True
-    if changed:
-        plan.save(update_fields=["data"])
+    for plan in LaborPlan.objects.all():   # budget A and budget B
+        if not isinstance(plan.data, dict):
+            continue
+        changed = False
+        for ln in plan.data.get("lines") or []:
+            if isinstance(ln, dict) and not ln.get("machineId") and str(ln.get("name") or "").strip().lower() == old.strip().lower():
+                ln["name"] = new
+                changed = True
+        if changed:
+            plan.save(update_fields=["data"])

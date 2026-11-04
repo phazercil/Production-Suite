@@ -15,7 +15,7 @@ from hmi.views import body, current_person, touch
 from plant.api import BadRequest, json_api, to_int
 from plant.models import PlantSettings
 
-from .models import LaborPlan, LaborPlanVersion
+from .models import BUDGETS, LaborPlan, LaborPlanVersion
 
 PAGE = Path(__file__).resolve().parent / "page" / "labor.html"
 MAX_BYTES = 4 * 1024 * 1024
@@ -61,13 +61,18 @@ def page(request):
     if html is None:
         html = PAGE.read_text(encoding="utf-8")
         _page_cache["html"] = html
-    from .sync import merge
-    plan = LaborPlan.load()
-    data, notes = merge(plan.data) if plan.version else (None, [])
+    from .sync import merge, suite_view
+    view = suite_view()
+    budgets, notes = {}, []
+    for b in BUDGETS:   # A: the plant's plan (the Scheduler uses it); B: a second budget to compare
+        plan = LaborPlan.load(b)
+        data, n = merge(plan.data, view) if plan.version else (None, [])
+        notes += n if b == "A" else []
+        budgets[b] = {"version": plan.version, "data": data, "updatedBy": plan.updated_by,
+                      "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None}
     # a plant with no plan yet starts from its own lines and shifts
-    starter = None if plan.version else merge({"lines": [], "schedules": [], "slotAssignments": {}})[0]
-    boot = {"version": plan.version, "data": data, "starter": starter, "syncNotes": notes, "user": me.name,
-            "updatedBy": plan.updated_by, "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
+    starter = merge({"lines": [], "schedules": [], "slotAssignments": {}}, view)[0]
+    boot = {"budgets": budgets, "starter": starter, "syncNotes": notes, "user": me.name,
             "timeoutMin": PlantSettings.load().config["rules"].get("adminTimeout", 10)}
     out = (html.replace("__LABOR_CSS__", static("labor/labor.css"))
                .replace("__SUITEBAR_CSS__", static("labor/suitebar.css"))
@@ -78,10 +83,14 @@ def page(request):
     # The calculator wires its buttons with inline handlers, so this one page allows inline script.
     # It still can't load or send anything outside the suite (default-src/connect-src 'self').
     resp["Content-Security-Policy"] = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-                                       "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; "
+                                       "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'none'; "
                                        "frame-ancestors 'self'; form-action 'self'; base-uri 'self'; object-src 'none'")
     resp["Cache-Control"] = "no-store"
     return resp
+
+
+def _budget(v):
+    return v if v in BUDGETS else "A"
 
 
 def _need_lead(request):
@@ -99,7 +108,7 @@ def state(request):
     if denied:
         return denied
     from .sync import merge
-    plan = LaborPlan.load()
+    plan = LaborPlan.load(_budget(request.GET.get("budget")))
     return JsonResponse({"ok": True, "version": plan.version, "data": merge(plan.data)[0] if plan.version else None,
                          "updatedBy": plan.updated_by, "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None})
 
@@ -127,14 +136,15 @@ def save(request):
     sent = json.dumps({k: v for k, v in data.items() if k != "suite"}, sort_keys=True, default=str)
     base = to_int(p.get("version"), "plan version")
     force = bool(p.get("force"))
+    budget = _budget(p.get("budget"))
     with transaction.atomic():
-        LaborPlan.load()
-        plan = LaborPlan.objects.select_for_update().get(pk=1)
+        LaborPlan.load(budget)
+        plan = LaborPlan.objects.select_for_update().get(pk=BUDGETS[budget])
         if plan.version != base and not force:
             return JsonResponse({"ok": False, "conflict": True, "version": plan.version, "updatedBy": plan.updated_by,
                                  "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
                                  "error": f"{plan.updated_by or 'Someone'} changed the labor plan on another screen."}, status=409)
-        for what in save_line_shifts(data):   # shifts turned on/off for a line here are the machine's shifts too
+        for what in (save_line_shifts(data) if budget == "A" else []):   # budget A's running shifts are the machines' shifts too
             from hmi.engine import Ctx, audit
             audit(Ctx(user=me), f"Labor Budget: {what}")
         data, _ = merge(data)   # lines, speeds, shifts and the work week always come from the suite
@@ -142,8 +152,8 @@ def save(request):
         plan.data, plan.version = data, plan.version + 1
         plan.updated_by, plan.updated_at = me.name[:120], timezone.now()
         plan.save()
-        LaborPlanVersion.objects.create(version=plan.version, data=data, saved_by=plan.updated_by, saved_at=plan.updated_at)
-        old = list(LaborPlanVersion.objects.values_list("id", flat=True)[KEEP_VERSIONS:])
+        LaborPlanVersion.objects.create(budget=budget, version=plan.version, data=data, saved_by=plan.updated_by, saved_at=plan.updated_at)
+        old = list(LaborPlanVersion.objects.filter(budget=budget).values_list("id", flat=True)[KEEP_VERSIONS:])
         if old:
             LaborPlanVersion.objects.filter(id__in=old).delete()
     PlantSettings.bump()  # the Scheduler uses the plan: let its screens refresh
@@ -156,7 +166,7 @@ def history(request):
     me, denied = _need_lead(request)
     if denied:
         return denied
-    rows = LaborPlanVersion.objects.values("id", "version", "saved_by", "saved_at")[:50]
+    rows = LaborPlanVersion.objects.filter(budget=_budget(request.GET.get("budget"))).values("id", "version", "saved_by", "saved_at")[:50]
     return JsonResponse({"ok": True, "items": [{"id": r["id"], "version": r["version"], "by": r["saved_by"],
                                                 "at": r["saved_at"].isoformat()} for r in rows]})
 
@@ -173,10 +183,11 @@ def restore(request):
         raise BadRequest("That saved version no longer exists.")
     from .sync import merge
     with transaction.atomic():
-        plan = LaborPlan.objects.select_for_update().get(pk=1)
+        LaborPlan.load(old.budget)
+        plan = LaborPlan.objects.select_for_update().get(pk=BUDGETS[old.budget])
         plan.data, plan.version = merge(old.data)[0], plan.version + 1
         plan.updated_by, plan.updated_at = f"{me.name} (restored v{old.version})"[:120], timezone.now()
         plan.save()
-        LaborPlanVersion.objects.create(version=plan.version, data=old.data, saved_by=plan.updated_by, saved_at=plan.updated_at)
+        LaborPlanVersion.objects.create(budget=old.budget, version=plan.version, data=plan.data, saved_by=plan.updated_by, saved_at=plan.updated_at)
     PlantSettings.bump()
     return JsonResponse({"ok": True, "version": plan.version})
