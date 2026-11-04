@@ -1,9 +1,12 @@
 from django.db import models
 
 
+BUDGETS = {"A": 1, "B": 2}   # budget A is the plant's plan (the Scheduler uses it); B is a second budget to compare
+
+
 class LaborPlan(models.Model):
-    """The labor & production budget (the Labor Calculator's whole plan, as it saves it). One row.
-    `version` goes up on every save, so two screens can't silently overwrite each other."""
+    """A labor & production budget (the Labor Calculator's whole plan, as it saves it): row 1 is budget A, row 2
+    budget B. `version` goes up on every save, so two screens can't silently overwrite each other."""
     data = models.JSONField(default=dict, blank=True)
     version = models.BigIntegerField(default=0)
     updated_by = models.CharField(max_length=120, blank=True)
@@ -13,13 +16,14 @@ class LaborPlan(models.Model):
         db_table = "labor_plan"
 
     @classmethod
-    def load(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def load(cls, budget="A"):
+        obj, _ = cls.objects.get_or_create(pk=BUDGETS.get(budget, 1))
         return obj
 
 
 class LaborPlanVersion(models.Model):
-    """Earlier saves, so a mistake can be undone (the last 200 are kept)."""
+    """Earlier saves, so a mistake can be undone (the last 200 of each budget are kept)."""
+    budget = models.CharField(max_length=1, default="A", db_index=True)
     version = models.BigIntegerField()
     data = models.JSONField(default=dict)
     saved_by = models.CharField(max_length=120, blank=True)
