@@ -337,3 +337,23 @@ class OutsideDatabaseTests(TestCase):
         env = {"MACHINE_DB_HOST": "aps.example", "MACHINE_DB_INTERNET": "1"}
         self.assertTrue(read_only_mysql(lambda k, d=None: env.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
         self.assertFalse(read_only_mysql(lambda k, d=None: {"MACHINE_DB_HOST": "x"}.get(k, d), "MACHINE_DB")["SUITE_INTERNET"])
+
+
+class TwilioErrorTests(TestCase):
+    def test_a_trial_account_gets_a_plain_explanation(self):
+        import io
+        import urllib.error
+
+        from django.conf import settings
+        from django.test import override_settings
+
+        from hmi import alerts
+        suite = dict(settings.SUITE, TWILIO_SID="AC1", TWILIO_TOKEN="t", TWILIO_FROM="+15550001111")
+        body = b'{"code": 572006, "message": "Invalid template name. Trial accounts can only use predefined SMS templates."}'
+        err = urllib.error.HTTPError("https://api.twilio.com", 400, "Bad Request", {}, io.BytesIO(body))
+        with override_settings(SUITE=suite), mock.patch.object(integrations._PUBLIC_OPENER, "open", side_effect=err), \
+                mock.patch.object(alerts.liveconfig, "refresh"):
+            with self.assertRaises(alerts.AlertError) as cm:
+                alerts.send_sms("+18045550000", "Line Barbara stopped")
+        self.assertIn("free trial", str(cm.exception))
+        self.assertIn("Upgrade", str(cm.exception))
