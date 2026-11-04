@@ -50,7 +50,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
 ) for k, l, h, r in items)
 
 # Admin tabs and the permission that changes them
-TAB_PERM = {"machines": "machines.edit", "connections": "connections.edit", "codata": "connections.edit", "shifts": "lists.edit",
+TAB_PERM = {"machines": "machines.edit", "connections": "connections.edit", "connector": "connections.edit", "codata": "connections.edit", "shifts": "lists.edit",
             "reasons": "lists.edit", "checklists": "lists.edit", "maintenance": "lists.edit", "qc": "lists.edit", "parts": "lists.edit",
             "rules": "lists.edit", "alerts": "alerts.edit", "network": "network.edit", "updates": "updates.install",
             "backup": "backup.manage", "permissions": "permissions.manage"}

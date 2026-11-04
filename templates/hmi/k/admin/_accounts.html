@@ -2,6 +2,8 @@
   <p class="sub" style="margin-top:4px">Add or change these any time; no reinstall or restart needed. Passwords are kept in the server's protected settings file, never shown here again, and never stored in the records database. The suite only reads from the asset and S2K databases: it signs in read-only and never creates or changes anything there.</p>
   <p class="note" style="margin-top:6px">Records database: {{ I.records.engine }}{% if I.records.host %} · {{ I.records.name }} on {{ I.records.host }} as {{ I.records.user }}{% endif %}. To move the records to another server, run Setup on the server.</p>
   {% if not I.writable %}<p class="note" style="margin-top:6px;color:var(--bad)">The server can't write its settings file, so changes can't be saved here. Re-run Setup to repair the folder permissions.</p>{% endif %}
+  <div class="panel row" style="background:var(--well-3);margin-top:10px"><div class="grow"><b>Connector builder</b><p class="note" style="margin-top:2px">See every piece of data the suite needs (each machine's speed and count, S2K's open MOs, changeover steps, specs, tooling) and link each one by dragging a column onto it.</p></div>
+    <a class="btn primary" href="/admin/?tab=connector">Open the connector builder</a></div>
   <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
   {% for b in dbBoxes %}<form class="panel" style="background:var(--well-3)" hx-post="/kiosk/do/connSave" hx-target="#accounts" hx-swap="outerHTML" autocomplete="off">
     <input type="hidden" name="group" value="{{ b.g }}">
