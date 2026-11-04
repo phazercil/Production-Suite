@@ -47,7 +47,8 @@ class LaborPlanView:
         row = LaborPlan.objects.filter(pk=1).values("data", "version").first()
         if not row or not row["version"]:
             return None
-        return cls(row["data"], row["version"])
+        from .sync import merge
+        return cls(merge(row["data"])[0], row["version"])   # with the suite's lines, shifts and work week
 
     # ---- calendar
     def day_status(self, d):

@@ -323,6 +323,8 @@ def rename_machine_records(old, new):
         else:
             c.machine = new
             c.save(update_fields=["machine"])
+    from labor.sync import rename_machine
+    rename_machine(old, new)   # the Labor Budget's line keeps its crew
 
 
 # ------------------------------------------------------------------ commands

@@ -104,7 +104,10 @@ class LaborBudgetTests(Base):
 class SchedulerLaborTests(Base):
     def setUp(self):
         super().setUp()
-        LaborPlan.objects.create(pk=1, data=PLAN, version=1)
+        c = Client()
+        login(c, "9999")   # saved the way the Labor Budget saves it: 2nd shift turned off for Barbara there
+        r = post(c, "/api/labor/save", {"version": 0, "data": json.loads(json.dumps(PLAN))}).json()
+        assert r["ok"], r
 
     def test_calendar_and_crews(self):
         from labor.plan import LaborPlanView
@@ -117,7 +120,8 @@ class SchedulerLaborTests(Base):
         self.assertTrue(crews[s1.id]["staffed"])
         self.assertEqual(crews[s1.id]["crew"], 3)
         self.assertEqual(crews[s1.id]["costPerHour"], 22 + 15 + 15)  # Ann's own wage, then the default wage
-        self.assertFalse(crews[s2.id]["staffed"])                   # 2nd shift turned off in the plan
+        self.assertFalse(s2.id in crews and crews[s2.id]["staffed"])  # 2nd shift turned off in the plan...
+        self.assertEqual(list(Machine.objects.get(name="Barbara").shifts.all()), [s1])  # ...is the machine's shifts too
         cal = Calendar(w["cfg"], w["labor"], w["laborLines"])
         from plant.util import ms
         holiday = cal.day_iv(m, ms(at(2030, 1, 1)))
@@ -127,7 +131,7 @@ class SchedulerLaborTests(Base):
         self.assertTrue(all(timezone.localtime(timezone.datetime.fromtimestamp(s / 1000, tz=timezone.get_current_timezone())).hour < 15 for s, e in normal))
         saturday_work = cal.day_iv(m, ms(at(2030, 1, 5)))            # extra work day in the plan
         self.assertTrue(saturday_work)
-        sal = next(x for x in w["cfg"]["machines"] if x["name"] == "Salvatore")  # not in the plan: unchanged
+        sal = next(x for x in w["cfg"]["machines"] if x["name"] == "Salvatore")  # added to the plan from the suite: unchanged
         self.assertEqual(len(cal.day_iv(sal, ms(at(2030, 1, 2)))), len(Calendar(w["cfg"]).day_iv(sal, ms(at(2030, 1, 2)))))
         self.assertEqual(LaborPlanView(PLAN).day_status(at(2030, 1, 6).date()), ("OFF", False))
 
