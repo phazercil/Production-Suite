@@ -2343,6 +2343,72 @@ def db_test(p, ctx):
         raise Need(str(e))
 
 
+@cmd("connectorSave", "connections.edit")
+def connector_save(p, ctx):
+    """Save one group of links from the connector builder: a machine's readings, S2K's open MOs, or a changeover query."""
+    from . import connector
+    gs = {g["key"]: g for g in connector.groups()}
+    g = gs.get(str(p.get("group") or ""))
+    need(g, "Unknown data need.")
+    db, table = str(p.get("db") or g["db"]), str(p.get("table") or "")
+    need(db in g["dbs"], f"{g['title']} needs a column from the {' or '.join(connector.DB_LABEL[d] for d in g['dbs'])}.")
+    need(db in connector.ready_dbs(), f"{connector.DB_LABEL[db]} isn't set up yet (Admin › Connections).")
+    mp = p.get("map") if isinstance(p.get("map"), dict) else {}
+    slots = {s_["k"]: s_ for s_ in g["slots"]}
+    mp = {k: str(v) for k, v in mp.items() if k in slots and str(v or "").strip()}
+    need(table, "Drag a column in first: the group takes its table from it.")
+    try:
+        sch = {t["name"]: {c["name"] for c in t["columns"]} for t in integrations.schema(db)["tables"]}
+    except integrations.ConnError as e:
+        raise Need(str(e))
+    need(table in sch, f'There is no table "{table}" in the {connector.DB_LABEL[db]}.')
+    bad = [c for c in mp.values() if c not in sch[table]]
+    need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{c}"' for c in bad) + ".")
+    miss = [slots[k]["label"] for k in slots if slots[k]["req"] and not mp.get(k)]
+    need(not miss, "Still needed: " + ", ".join(miss) + ".")
+    if g["kind"] == "machine":
+        m = Machine.objects.select_for_update().get(pk=int(g["key"][2:]))
+        key_val = str(p.get("keyVal") or "").strip()[:120]
+        need(not mp.get("keyCol") or key_val, "Type the value that marks this machine's rows.")
+        src = dict(m.feed_src or {}) if m.feed_type == "db" else {}
+        src.update(db=db, table=table, orderCol=mp["orderCol"], keyCol=mp.get("keyCol", ""), keyVal=key_val if mp.get("keyCol") else "")
+        src.setdefault("maxAge", 3)
+        m.feed_type, m.feed_src = "db", src
+        m.feed_ppm_field, m.feed_count_field, m.feed_recipe_field = mp["ppm"], mp.get("count", ""), mp.get("recipe", "")
+        up = dict(m.uptime_src or {})
+        if mp.get("run"):
+            m.uptime_src = {"type": "feed", "field": mp["run"], "runWhen": up.get("runWhen") or "high"}
+        elif up.get("type") == "feed":
+            m.uptime_src = {}
+        er = dict(m.error_src or {})
+        if mp.get("errCode") or mp.get("errText"):
+            m.error_src = {"type": "feed", "field": mp.get("errCode", ""), "textField": mp.get("errText", ""), "ok": er.get("ok", "")}
+        elif er.get("type") == "feed":
+            m.error_src = {}
+        m.save()
+        LineState.objects.filter(machine=m).update(feed={})
+        audit(ctx, f"Connector builder: {m.name} reads {table} in the {connector.DB_LABEL[db]} ("
+                   + ", ".join(f"{slots[k]['label'].split(' (')[0]} = {v}" for k, v in mp.items()) + ")")
+        return {"msg": f"{m.name} now reads its data from {table}"}
+    from . import kadmin
+    try:
+        if g["kind"] == "s2k":
+            fval = str(p.get("fval") or "").strip()
+            sql = kadmin.s2k_build_sql({"table": table, **mp, "fval": fval})
+            name = "s2k_mos"
+        else:
+            name = g["key"][2:]
+            sql = kadmin.build_codata_sql(name, {"table": table, **mp})
+    except ValueError as e:
+        raise Need(str(e))
+    db_save({"name": name, "sql": sql, "params": {}}, ctx)
+    if g["kind"] == "s2k":
+        st = settings_obj()
+        st.settings["s2kSource"] = "db"
+        st.save(update_fields=["settings"])
+    return {"msg": f"{g['title']} saved: {table}"}
+
+
 @cmd("dbSave", "connections.edit")
 def db_save(p, ctx):
     name = p.get("name")

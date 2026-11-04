@@ -19,7 +19,7 @@ from suite import thin
 from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
-TABS = [("machines", "Machines"), ("connections", "Connections"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
+TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("qc", "QC checks"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
@@ -137,6 +137,8 @@ def tab_data(s, tab, request):
         return {"I": r.get("data") if r.get("ok") else None}
     if tab == "connections":
         return connections_data(s, request)
+    if tab == "connector":
+        return connector_data(s, request.GET.get("db", ""), request.GET.get("table", ""), focus=request.GET.get("focus", ""))
     if tab == "permissions":
         return permissions_data(s, request)
     if tab == "qc":
@@ -469,6 +471,38 @@ def _need(request, s, perm):
         return None
     from .kviews import login_needed
     return login_needed(request, s, {"perm": perm})
+
+
+def connector_data(s, db="", table="", msg=None, focus=""):
+    from . import connector
+    dbs = connector.ready_dbs()
+    gs = connector.groups()
+    if not db or db not in dbs:   # start where the first unfinished need's data lives
+        first = next((g for g in gs if g["status"] in ("missing", "partial") and any(d in dbs for d in g["dbs"])), None)
+        db = (first["table"] and first["db"]) if first and first["table"] else next((d for d in (first or {}).get("dbs", []) if d in dbs), dbs[0] if dbs else "")
+        if first and not table:
+            table = first["table"]
+    return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "src": connector.source(db, table) if db else None,
+            "groups": gs, "sum": connector.summary(gs), "msg": msg, "focus": focus}
+
+
+@action("connectorSave")
+def a_connector_save(request, s, p):
+    import json as _json
+    deny = _need(request, s, "connections.edit")
+    if deny:
+        return deny
+    try:
+        mp = _json.loads(p.get("map") or "{}")
+    except ValueError:
+        mp = {}
+    r = run(request, s, "connectorSave", {"group": p.get("group", ""), "db": p.get("db", ""), "table": p.get("table", ""), "map": mp,
+                                           "keyVal": p.get("keyVal", ""), "fval": p.get("fval", "")})
+    msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"], "group": p.get("group", "")}
+    if r["ok"]:
+        _tables_cache.clear()
+    return render_panel(request, "hmi/k/admin/_connector.html", S=s,
+                        C=connector_data(s, p.get("srcDb", ""), p.get("srcTable", ""), msg=msg, focus=p.get("group", "")), tabCan=True)
 
 
 def accounts_panel(request, s, g=None, form=None, msg=None, key=None):

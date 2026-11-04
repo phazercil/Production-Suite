@@ -123,6 +123,13 @@ def get(d, k):
 
 
 @register.filter
+def jsonattr(v):
+    """Any value as JSON text for a data- attribute (autoescape makes it safe inside the quotes)."""
+    import json
+    return json.dumps(v)
+
+
+@register.filter
 def jsonlist(v):
     """A list as JSON text, for a hidden field that carries it back to the server."""
     import json
