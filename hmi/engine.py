@@ -2217,7 +2217,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_tooling": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):

@@ -57,6 +57,19 @@ class ToolingTests(TestCase):
             self.assertEqual((r["src"], r["why"]), ("stale", "off"))
 
 
+class ToolingQuerySaveTests(TestCase):
+    def test_the_tooling_query_can_be_saved(self):
+        from hmi import engine
+        seed_demo(reset=True)
+        from plant.models import Person
+        ctx = engine.Ctx(user=Person.objects.get(role="admin"))
+        with mock.patch("hmi.engine.integrations.run_saved", return_value={"columns": ["kind", "name"], "rows": []}), \
+                mock.patch("hmi.engine._which_db", return_value="assets"):
+            r = engine.execute("dbSave", {"name": "part_tooling", "sql": "SELECT a AS kind, b AS name FROM t WHERE p = :part"}, ctx)
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(SavedQuery.objects.filter(name="part_tooling").exists())
+
+
 class RunScreenTests(TestCase):
     def setUp(self):
         no_planned_time(self)
