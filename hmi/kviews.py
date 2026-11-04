@@ -102,8 +102,9 @@ def run(request, s, name, p):
 
 
 def login_needed(request, s, r, next_modal="", next_q=""):
-    """The command needs someone logged in (or a shift lead): ask for the PIN, then come back."""
-    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, admin_only=bool(r.get("admin")), people=kscreen.people_for_login(bool(r.get("admin"))),
+    """The command needs someone logged in (or a shift lead, or an Admin): ask for the PIN, then come back."""
+    level = "admin" if r.get("onlyAdmin") else "lead" if r.get("admin") else ""
+    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level=level, people=kscreen.people_for_login(level),
                                                                    next=next_modal, next_q=next_q))
 
 
@@ -174,7 +175,7 @@ def view_data(s, page, request):
         from . import kadmin
         tab = page_option(request, "tab", {k for k, _ in kadmin.TABS}, "machines")
         from .models import AuditLog
-        return {"tab": tab, "tabs": kadmin.TABS, "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
+        return {"tab": tab, "tabs": kadmin.TABS, "leadTab": tab in kadmin.LEAD_TABS, "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
     return {}
 
 
@@ -217,8 +218,8 @@ def dialog(request, name):
 
 @modal("login")
 def m_login(request, s):
-    admin = request.GET.get("admin") == "1"
-    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, admin_only=admin, people=kscreen.people_for_login(admin),
+    level = {"1": "lead", "2": "admin"}.get(request.GET.get("admin", ""), "")
+    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level=level, people=kscreen.people_for_login(level),
                                                                    next=request.GET.get("next", ""), next_q=request.GET.get("next_q", "")))
 
 
@@ -340,8 +341,8 @@ def m_drawing(request, s):
 
 @modal("override")
 def m_override(request, s):
-    if not s.is_admin:
-        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, admin_only=True, people=kscreen.people_for_login(True), next="override"))
+    if not s.is_lead:
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level="lead", people=kscreen.people_for_login("lead"), next="override"))
     if not s.shift_on:
         return thin.refused("Start a shift first.")
     p = s.part(s.current_item())
@@ -397,8 +398,8 @@ def m_paycom_fields(request, s):
 
 @modal("addPerson")
 def m_add_person(request, s):
-    if not s.is_admin:
-        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, admin_only=True, people=kscreen.people_for_login(True), next="addPerson"))
+    if not s.is_lead:
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, level="lead", people=kscreen.people_for_login("lead"), next="addPerson"))
     return modal_response(request, "hmi/k/m_add_person.html", **ctx_for(s))
 
 
@@ -484,8 +485,8 @@ def simple(cmd, toast=True, close=False, then=None):
 
 @action("login")
 def a_login(request, s, p):
-    admin = bool(p.get("admin"))
-    u, err = pin_login(request, p.get("pin"), p.get("user") or None, admin)
+    level = p.get("level") if p.get("level") in ("lead", "admin") else ""
+    u, err = pin_login(request, p.get("pin"), p.get("user") or None, level)
     if not u:
         return err_in_modal(err)
     nxt = p.get("next") or ""

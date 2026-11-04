@@ -41,7 +41,7 @@
   <p class="note" style="margin-top:8px">{% if pc.last %}Last import {{ pc.last|plan:S.t }}: {{ pc.msg }}{% elif pc.msg %}{{ pc.msg }}{% else %}Not imported yet.{% endif %}</p>
   {% if S.is_admin %}<div class="row" style="margin-top:8px"><button class="btn primary" hx-post="/kiosk/do/run" hx-vals='{"c": "paycomImport"}' {% if not A.srv.paycom %}disabled{% endif %}>Import now</button><button class="btn ghost" hx-get="/kiosk/m/paycomFields" hx-target="#modal" hx-swap="innerHTML" {% if not A.srv.paycom %}disabled{% endif %}>Show Paycom fields</button></div>{% endif %}</div>{% endwith %}
 {% if S.is_admin %}{% include "hmi/k/admin/_s2k.html" with K=A.s2k st=A.st srv_s2kdb=A.srv.s2kdb %}
-{% else %}<div class="panel"><h2 class="h2">S2K schedule</h2><p class="note" style="margin-top:6px">Log in as a shift lead to set up where open MOs come from.</p></div>{% endif %}
+{% else %}<div class="panel"><h2 class="h2">S2K schedule</h2><p class="note" style="margin-top:6px">Log in as an Admin to set up where open MOs come from.</p></div>{% endif %}
 <div class="panel"><h2 class="h2">People & training list</h2>
   <div class="grid2" style="margin-top:10px">
     <label class="f">URL (JSON)<input type="url" name="v" value="{{ A.st.peopleUrl }}" placeholder="http://hr.plant.local/api/line-operators" {% if not S.is_admin %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "peopleUrl"}' hx-params="c,k,v"></label>

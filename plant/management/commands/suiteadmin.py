@@ -104,14 +104,14 @@ class Command(BaseCommand):
         return r
 
     def do_pin_check(self, name, p):
-        """Is this an active shift lead's PIN? Used by the control service before Stop or any change."""
+        """Is this an active Admin's PIN? Used by the control service before Stop or any change."""
         from plant.models import Person
         pin = str(p.get("pin") or "").strip()
         if not pin:
-            return {"ok": False, "error": "Type a shift lead PIN."}
+            return {"ok": False, "error": "Type an Admin PIN."}
         m = [u for u in Person.objects.filter(active=True, role="admin", pin=pin) if u.pin == pin]
         if not m:
-            return {"ok": False, "error": "That is not a shift lead PIN."}
+            return {"ok": False, "error": "That is not an Admin PIN."}
         return {"ok": True, "name": m[0].name}
 
     def do_records_save(self, name, p):

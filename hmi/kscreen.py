@@ -64,12 +64,18 @@ class Screen:
 
     # ------------------------------------------------------------ who
     @property
+    def is_lead(self):
+        """A shift lead or an Admin: floor approvals, Team, the day-to-day Admin lists."""
+        return bool(self.me and self.me.is_lead)
+
+    @property
     def is_admin(self):
-        return bool(self.me and self.me.role == "admin")
+        """An Admin: system settings (Connections, Network, Alerts, Updates, Backup, Machines, Changeover data)."""
+        return bool(self.me and self.me.is_admin)
 
     @property
     def can_override(self):
-        return bool(self.me and self.me.role in ("admin", "maintenance"))
+        return bool(self.me and self.me.role in ("lead", "admin", "maintenance"))
 
     @property
     def shift_on(self):
@@ -186,7 +192,7 @@ class Screen:
                 continue
             f = flags.get(key, "")
             out.append({"key": key, "label": label, "on": key == page, "badge": f, "flag": key in ("schedule", "downtime", "qc-log") and bool(f),
-                        "locked": key in ADMIN_PAGES and not self.is_admin})
+                        "locked": key in ADMIN_PAGES and not self.is_lead})
         return out
 
     def banner(self):
@@ -205,7 +211,7 @@ class Screen:
         srv = server_info()
         return {"parts": parts, "state": state, "shiftName": w["name"] if w else "Off shift",
                 "operator": (sh.user_name if sh else (self.me.name if self.me else "")),
-                "storeOk": srv["storeOk"], "storeErr": srv["storeErr"], "demo": self.st.demo, "admin": self.is_admin,
+                "storeOk": srv["storeOk"], "storeErr": srv["storeErr"], "demo": self.st.demo, "admin": self.is_lead, "sysadmin": self.is_admin,
                 "choose": [m.name for m in self.active_lines] if not self.lock and len(self.active_lines) > 1 else []}
 
     # ------------------------------------------------------------ run screen
@@ -297,8 +303,12 @@ def plan_label(t, ref):
     return f"{lt.month}/{lt.day} {clock(t)}"
 
 
-def people_for_login(admin_only=False):
-    return list(Person.objects.filter(active=True).filter(role="admin") if admin_only else Person.objects.filter(active=True))
+def people_for_login(level=""):
+    """Who can log in for this: anyone, a shift lead or Admin ("lead", or True), or an Admin only ("admin")."""
+    qs = Person.objects.filter(active=True)
+    if level == "admin":
+        return list(qs.filter(role="admin"))
+    return list(qs.filter(role__in=Person.LEADS) if level else qs)
 
 
 # ------------------------------------------------------------------ the other operator pages
@@ -533,7 +543,9 @@ def team_page(s, show_inactive=False):
         if not show_inactive and not u.active:
             continue
         tr = {m.name for m in u.trained.all()}
-        rows.append({"u": u, "trained": [(m.name, m.name in tr) for m in lines], "you": bool(s.me and u.id == s.me.id)})
+        rows.append({"u": u, "trained": [(m.name, m.name in tr) for m in lines], "you": bool(s.me and u.id == s.me.id),
+                     # a shift lead manages everyone but Admins; an Admin manages everyone
+                     "edit": s.is_lead and (u.role != "admin" or s.is_admin)})
     act = [u for u in people if u.active]
     return {"rows": rows, "lines": lines, "inactive": sum(1 for u in people if not u.active), "showInactive": show_inactive,
             "needPin": sum(1 for u in act if not u.pin), "untrained": sum(1 for u in act if not u.trained.exists()),

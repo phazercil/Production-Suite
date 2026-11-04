@@ -42,7 +42,7 @@ python manage.py runserver 0.0.0.0:8000
 
 Open http://localhost:8000 on the same computer. (Other devices must be on 192.168.100.x, or run
 `python manage.py network --set <your range>` first.) Demo PINs: J. Ortiz `1111`, M. Lee `2222`, K. Patel `3333` (maintenance),
-Shift Lead `9999`. `runserver` also runs the machine ticker, so Barbara and Salvatore replay the PPM sheet
+S. Lead (shift lead) `4444`, Plant Admin `9999`. `runserver` also runs the machine ticker, so Barbara and Salvatore replay the PPM sheet
 one reading per minute.
 
 Run the checks with `python manage.py test tests`.

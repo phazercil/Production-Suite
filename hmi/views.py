@@ -39,7 +39,7 @@ def current_person(request):
     note = None
     timeout = PlantSettings.load().config["rules"].get("adminTimeout", 10)
     last = request.session.get("last_act", 0)
-    if u.role == "admin" and timeout and timezone.now().timestamp() - last > timeout * 60:
+    if u.role in Person.LEADS and timeout and timezone.now().timestamp() - last > timeout * 60:
         request.session.pop("pid", None)
         return None, f"Shift lead logged out after {timeout} min idle"
     return u, note
@@ -93,8 +93,10 @@ def pin_login(request, pin, user_id=None, admin_only=False):
     qs = Person.objects.filter(active=True, pin=pin).exclude(pin="")
     if user_id:
         qs = qs.filter(pk=to_int(user_id, "person"))
-    if admin_only:
+    if admin_only == "admin":
         qs = qs.filter(role="admin")
+    elif admin_only:   # "lead" or True: a shift lead or an Admin
+        qs = qs.filter(role__in=Person.LEADS)
     matches = [u for u in qs if u.pin == pin]  # exact match even where the database ignores letter case
     u = matches[0] if pin and matches else None
     if not u:
@@ -103,7 +105,7 @@ def pin_login(request, pin, user_id=None, admin_only=False):
             cache.set(ip_key, ip_fails + [t], 120)
         except Exception:
             log.exception("PIN limit store unavailable")
-        return None, ("That is not a shift lead PIN." if admin_only else "That PIN does not match. Try again or ask your shift lead.")
+        return None, ("That is not an Admin PIN." if admin_only == "admin" else "That is not a shift lead PIN." if admin_only else "That PIN does not match. Try again or ask your shift lead.")
     request.session.cycle_key()  # new session id at every login
     request.session["pid"] = u.id
     request.session["pin_fails"] = []
@@ -268,8 +270,8 @@ def update_upload(request):
     """A shift lead uploads an update file (Admin > Updates). It is checked, then waits in updates/ready."""
     from plant import updates
     me, _ = current_person(request)
-    if not me or me.role != "admin":
-        return JsonResponse({"ok": False, "error": "Log in as a shift lead to install updates."}, status=403)
+    if not me or not me.is_admin:
+        return JsonResponse({"ok": False, "error": "Log in as an Admin to install updates."}, status=403)
     touch(request)
     f = request.FILES.get("file")
     if not f:

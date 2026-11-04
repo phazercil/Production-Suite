@@ -18,6 +18,7 @@ from suite import thin
 
 from . import engine, integrations
 
+LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup")]
@@ -422,7 +423,7 @@ def _need_admin(request, s):
     if s.is_admin:
         return None
     from .kviews import login_needed
-    return login_needed(request, s, {"admin": True})
+    return login_needed(request, s, {"admin": True, "onlyAdmin": True})
 
 
 def accounts_panel(request, s, g=None, form=None, msg=None, key=None):

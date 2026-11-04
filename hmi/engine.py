@@ -640,7 +640,7 @@ def downtime_set(p, ctx):
     need(d, "That stop is no longer on file.")
     if "reason" in p:
         reason = str(p["reason"] or "").strip()[:120] or None
-        lead = ctx.user.role in ("maintenance", "admin")
+        lead = ctx.user.role in ("maintenance", "lead", "admin")
         # Operators pick from the list (Admin > Downtime reasons) and can't change a reason someone else entered.
         # Maintenance and shift leads can type their own reason or change one already entered.
         if not lead:
@@ -689,7 +689,7 @@ def get_drawing(p, ctx):
     return {"msg": msg or f"Rev {spec_for(key)['rev']} is current (checked {fmt_t(ctx.now)})."}
 
 
-@cmd("overrideSet", "admin")
+@cmd("overrideSet", "lead")
 def override_set(p, ctx):
     sh = shift_of(p, ctx)
     o = {}
@@ -709,7 +709,7 @@ def override_set(p, ctx):
     return {"msg": "Setting applied to this MO"}
 
 
-@cmd("overrideClear", "admin")
+@cmd("overrideClear", "lead")
 def override_clear(p, ctx):
     sh = shift_of(p, ctx)
     sh.override = None
@@ -754,7 +754,7 @@ def import_mos(ctx, rows, source="s2k"):
     return added
 
 
-@cmd("importMOs", "admin")
+@cmd("importMOs", "lead")
 def cmd_import(p, ctx):
     n = import_mos(ctx, p.get("list"), "import")
     return {"msg": f"{n} new MO{'s' if n != 1 else ''} added to the Scheduler" if n else "No new MOs found"}
@@ -783,7 +783,7 @@ def s2k_on(s):
     return bool(s.get("s2kUrl")) if s.get("s2kSource") != "db" else integrations.s2k_db_ready()
 
 
-@cmd("s2kPull", "admin")
+@cmd("s2kPull", "lead")
 def s2k_pull(p, ctx):
     try:
         rows = s2k_rows()
@@ -805,14 +805,14 @@ def apply_people(ctx, rows):
         r = dict(r, name=str(r["name"])[:120])
         if u:
             u.name = r["name"]
-            if r.get("role") in ("operator", "maintenance", "admin"):
+            if r.get("role") in ("operator", "maintenance", "lead", "admin"):
                 u.role = r["role"]
             if r.get("pin") and not Person.objects.filter(pin__iexact=str(r["pin"])).exclude(pk=u.pk).exists():
                 u.pin = str(r["pin"])[:12]
             u.save()
             upd += 1
         else:
-            u = Person.objects.create(ext_id=str(r["id"]), name=r["name"], role=r.get("role") if r.get("role") in ("operator", "maintenance", "admin") else "operator",
+            u = Person.objects.create(ext_id=str(r["id"]), name=r["name"], role=r.get("role") if r.get("role") in ("operator", "maintenance", "lead", "admin") else "operator",
                                       pin=str(r.get("pin") or "")[:12] if r.get("pin") and not Person.objects.filter(pin__iexact=str(r["pin"])[:12]).exists() else "",
                                       source="list")
             add += 1
@@ -822,7 +822,7 @@ def apply_people(ctx, rows):
     return f"{add} added, {upd} updated"
 
 
-@cmd("peoplePull", "admin")
+@cmd("peoplePull", "lead")
 def people_pull(p, ctx):
     url = settings_obj().settings.get("peopleUrl")
     need(url, "Set the people list URL in Admin › Connections first.")
@@ -884,7 +884,7 @@ def apply_paycom(ctx, employees, stale=False):
     return P["msg"]
 
 
-@cmd("paycomImport", "admin")
+@cmd("paycomImport", "lead")
 def paycom_import(p, ctx):
     need(integrations.paycom_ready(), "Paycom is not set up. Add PAYCOM_SID and PAYCOM_TOKEN to the server .env.")
     return {"msg": "Paycom: " + apply_paycom(ctx, integrations.paycom_employees())}
@@ -896,21 +896,24 @@ def paycom_fields(p, ctx):
     return {"data": integrations.paycom_fields()}
 
 
-@cmd("userAdd", "admin")
+@cmd("userAdd", "lead")
 def user_add(p, ctx):
     name, pin = str(p.get("name") or "").strip(), str(p.get("pin") or "").strip()
     need(name and pin, "Name and PIN are both needed.")
     need(re.match(r"^[A-Za-z0-9]{3,12}$", pin), "PINs are 3–12 letters or digits.")
     need(not Person.objects.filter(pin__iexact=pin).exists(), "That PIN is already used.")
-    Person.objects.create(name=name, pin=pin, role=p.get("role") if p.get("role") in ("operator", "maintenance", "admin") else "operator")
+    role = p.get("role") if p.get("role") in ("operator", "maintenance", "lead", "admin") else "operator"
+    need(role != "admin" or ctx.user.role == "admin", "Only an Admin can add an Admin.")
+    Person.objects.create(name=name, pin=pin, role=role)
     audit(ctx, f"Added {name}")
 
 
-@cmd("userSet", "admin")
+@cmd("userSet", "lead")
 def user_set(p, ctx):
     u = Person.objects.filter(pk=p.get("id")).first()
     need(u, "Person not found.")
     f, v = p.get("f"), p.get("v")
+    need(u.role != "admin" or ctx.user.role == "admin" or f == "train", "Only an Admin can change an Admin's login.")
     if f == "name":
         v = " ".join(str(v or "").split())
         need(v, "Type a name.")
@@ -919,11 +922,12 @@ def user_set(p, ctx):
             audit(ctx, f"Renamed {u.name} to {v}")
             u.name = v
     elif f == "role":
-        need(v in ("operator", "maintenance", "admin"), "Unknown role.")
-        need(not (u.pk == ctx.user.pk and v != "admin" and Person.objects.filter(role="admin", active=True).count() < 2),
-             "You are the only shift lead. Make someone else a shift lead first.")
+        need(v in ("operator", "maintenance", "lead", "admin"), "Unknown role.")
+        need(v != "admin" or ctx.user.role == "admin", "Only an Admin can make someone an Admin.")
+        need(not (u.role == "admin" and v != "admin" and Person.objects.filter(role="admin", active=True).count() < 2),
+             "This is the only Admin. Make someone else an Admin first.")
         u.role = v
-        audit(ctx, f"{u.name} role set to {'shift lead' if v == 'admin' else v}")
+        audit(ctx, f"{u.name} role set to {dict(Person.ROLES)[v].lower() if v != 'admin' else 'Admin'}")
     elif f == "train":
         m = Machine.objects.filter(name=(v or {}).get("line")).first()
         need(m, "Unknown machine.")
@@ -937,6 +941,8 @@ def user_set(p, ctx):
         audit(ctx, f"PIN {'set' if v else 'cleared'} for {u.name}")
     elif f == "active":
         need(u.pk != ctx.user.pk, "You cannot deactivate yourself.")
+        need(v or u.role != "admin" or Person.objects.filter(role="admin", active=True).count() > 1,
+             "This is the only Admin. Make someone else an Admin first.")
         u.active = bool(v)
         audit(ctx, f"{u.name} set {'active' if u.active else 'inactive'}")
     else:
@@ -954,7 +960,7 @@ def _list(k):
     return st, st.config[k]
 
 
-@cmd("listAdd", "admin")
+@cmd("listAdd", "lead")
 def list_add(p, ctx):
     st, L = _list(p.get("k"))
     v = str(p.get("v") or "").strip()
@@ -965,7 +971,7 @@ def list_add(p, ctx):
     audit(ctx, f'Added "{v}" to {p["k"]}')
 
 
-@cmd("listDel", "admin")
+@cmd("listDel", "lead")
 def list_del(p, ctx):
     st, L = _list(p.get("k"))
     need(len(L) > 1, "Keep at least one item on this list.")
@@ -975,7 +981,7 @@ def list_del(p, ctx):
     return {"msg": f'Removed "{v}"'}
 
 
-@cmd("listMove", "admin")
+@cmd("listMove", "lead")
 def list_move(p, ctx):
     st, L = _list(p.get("k"))
     i = int(p.get("i"))
@@ -986,7 +992,7 @@ def list_move(p, ctx):
     audit(ctx, f"Reordered {p['k']}")
 
 
-@cmd("listSet", "admin")
+@cmd("listSet", "lead")
 def list_set(p, ctx):
     st, L = _list(p.get("k"))
     i, v = int(p.get("i")), str(p.get("v") or "").strip()
@@ -1184,7 +1190,7 @@ def _shift(i):
     return sh[int(i)]
 
 
-@cmd("shiftAdd", "admin")
+@cmd("shiftAdd", "lead")
 def shift_add(p, ctx):
     s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count())
     for m in Machine.objects.all():
@@ -1192,7 +1198,7 @@ def shift_add(p, ctx):
     audit(ctx, "Added a shift")
 
 
-@cmd("shiftSet", "admin")
+@cmd("shiftSet", "lead")
 def shift_set(p, ctx):
     s = _shift(p.get("s"))
     f, v = p.get("f"), str(p.get("v") or "").strip()
@@ -1208,7 +1214,7 @@ def shift_set(p, ctx):
         refresh_schedule("a shift change")
 
 
-@cmd("shiftDel", "admin")
+@cmd("shiftDel", "lead")
 def shift_del(p, ctx):
     need(Shift.objects.count() > 1, "Keep at least one shift.")
     s = _shift(p.get("s"))
@@ -1223,7 +1229,7 @@ def _mins_to_hm(mins):
     return f"{mins // 60:02d}:{mins % 60:02d}"
 
 
-@cmd("breakAdd", "admin")
+@cmd("breakAdd", "lead")
 def break_add(p, ctx):
     from plant.util import hm
     s = _shift(p.get("s"))
@@ -1233,7 +1239,7 @@ def break_add(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("breakSet", "admin")
+@cmd("breakSet", "lead")
 def break_set(p, ctx):
     from plant.util import hm
     s = _shift(p.get("s"))
@@ -1259,7 +1265,7 @@ def break_set(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("breakDel", "admin")
+@cmd("breakDel", "lead")
 def break_del(p, ctx):
     s = _shift(p.get("s"))
     brs = list(s.breaks.all())
@@ -1270,7 +1276,7 @@ def break_del(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("partAdd", "admin")
+@cmd("partAdd", "lead")
 def part_add(p, ctx):
     k = part_key(p.get("k"))
     need(k, "Type a part number.")
@@ -1280,7 +1286,7 @@ def part_add(p, ctx):
     audit(ctx, f"Added part {k}")
 
 
-@cmd("partSet", "admin")
+@cmd("partSet", "lead")
 def part_set(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -1299,7 +1305,7 @@ def part_set(p, ctx):
     audit(ctx, f"{ps.key} {f} set to {v}")
 
 
-@cmd("partDel", "admin")
+@cmd("partDel", "lead")
 def part_del(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -1308,7 +1314,7 @@ def part_del(p, ctx):
     return {"msg": f"{p['k']} removed. Open MOs for it use the cost sheet pleat count and estimated specs until it is added back."}
 
 
-@cmd("ruleSet", "admin")
+@cmd("ruleSet", "lead")
 def rule_set(p, ctx):
     st = settings_obj()
     need(p.get("k") in st.config["rules"], "Unknown rule.")
@@ -1329,11 +1335,15 @@ SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2k
             "grafana.report": "j"}
 
 
-@cmd("settingSet", "admin")
+LEAD_SETTINGS = {"autoQC", "qcEvery"}   # floor settings; the rest are system settings for an Admin
+
+
+@cmd("settingSet", "lead")
 def setting_set(p, ctx):
     k = p.get("k")
     t = SETTINGS.get(k)
     need(t, "Unknown setting.")
+    need(k in LEAD_SETTINGS or ctx.user.role == "admin", "Only an Admin can change this setting.")
     v = p.get("v")
     if t == "b":
         v = bool(v)
@@ -1985,8 +1995,10 @@ def execute(name, p, ctx):
     role = ROLE[name]
     if role != "none" and not ctx.user:
         return {"ok": False, "error": "Log in first.", "login": True}
-    if role == "admin" and ctx.user.role != "admin":
+    if role == "lead" and ctx.user.role not in Person.LEADS:
         return {"ok": False, "error": "A shift lead needs to approve this. Log in as a shift lead.", "admin": True}
+    if role == "admin" and ctx.user.role != "admin":
+        return {"ok": False, "error": "Only an Admin can change this. Log in as an Admin.", "admin": True, "onlyAdmin": True}
     try:
         with transaction.atomic():
             r = fn(p or {}, ctx) or {}

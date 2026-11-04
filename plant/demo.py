@@ -82,7 +82,8 @@ def seed_demo(reset=True):
 
     people = {}
     for pid, name, pin, role, trained in (("jortiz", "J. Ortiz", "1111", "operator", [bar]), ("mlee", "M. Lee", "2222", "operator", [bar, sal]),
-                                          ("kpatel", "K. Patel", "3333", "maintenance", [bar, sal]), ("lead", "Shift Lead", "9999", "admin", [bar, sal])):
+                                          ("kpatel", "K. Patel", "3333", "maintenance", [bar, sal]), ("slead", "S. Lead", "4444", "lead", [bar, sal]),
+                                          ("lead", "Plant Admin", "9999", "admin", [bar, sal])):
         p = Person.objects.create(name=name, pin=pin, role=role, ext_id=pid)
         p.trained.set(trained)
         people[pid] = p

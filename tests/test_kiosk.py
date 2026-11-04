@@ -143,3 +143,33 @@ class KioskTests(TestCase):
         self.assertEqual(Person.objects.get(pk=lead.pk).name, "Caleb Smith")
         r = self.do("userSet", id=lead.id, f="name", v="   ")
         self.assertIn("Type a name", self.toast(r)["text"])
+
+    def test_shift_lead_and_admin(self):
+        """Admin: system settings. Shift lead: floor work and the day-to-day lists, never an Admin's login."""
+        from plant.models import Person
+        self.do("login", pin="4444")                           # S. Lead, a shift lead
+        r = self.do("run", c="listAdd", k="reasons", v="Glue skips")
+        self.assertNotIn("bad", json.dumps(self.toast(r)))
+        self.assertIn("Glue skips", PlantSettings.load().config["reasons"])
+        r = self.do("mdSet", id="Barbara", f="feed.type", v="none")
+        self.assertContains(r, "Admin approval")                # Machines need an Admin
+        self.assertNotEqual(Machine.objects.get(name="Barbara").feed_type, "none")
+        r = self.do("run", c="settingSet", k="webhook", v="http://192.168.100.9/x")
+        self.assertIn("Only an Admin", self.toast(r)["text"])
+        self.do("run", c="settingSet", k="qcEvery", v="45")
+        self.assertEqual(PlantSettings.load().settings["qcEvery"], 45)
+        admin = Person.objects.get(pin="9999")
+        r = self.do("userSet", id=admin.id, f="pin", v="123987")
+        self.assertIn("Only an Admin", self.toast(r)["text"])
+        op = Person.objects.get(pin="1111")
+        r = self.do("userSet", id=op.id, f="role", v="admin")
+        self.assertIn("Only an Admin", self.toast(r)["text"])
+        self.do("userSet", id=op.id, f="role", v="lead")
+        self.assertEqual(Person.objects.get(pk=op.pk).role, "lead")
+        r = self.c.get("/kiosk/v/admin?tab=connections")
+        self.assertContains(r, "only an Admin can change these")
+        self.assertNotContains(r, 'id="accounts"')               # logins and secrets are an Admin's
+        # the last Admin can't be demoted
+        self.do("logout"); self.do("login", pin="9999")
+        r = self.do("userSet", id=admin.id, f="role", v="lead")
+        self.assertIn("only Admin", self.toast(r)["text"])

@@ -591,8 +591,8 @@ class Command(BaseCommand):
         else:
             self.say("  Plant network (kept from Admin > Network): " + ", ".join(saved))
 
-        self.progress(90, "Shift lead login")
-        self.say("\n8. Shift lead login", self.style.MIGRATE_HEADING)
+        self.progress(90, "Admin login")
+        self.say("\n8. Admin login", self.style.MIGRATE_HEADING)
         fresh = not Machine.objects.exists() and not Person.objects.exists()
         demo = False
         if fresh:
@@ -600,7 +600,7 @@ class Command(BaseCommand):
             demo = self.yes("demo", "Load the demo plant for training (two pleaters, sample orders, PINs 1111 and 9999)", False)
         if demo:
             seed_demo(reset=True)
-            self.say("  Demo plant loaded. Demo PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · Shift Lead 9999.", self.style.WARNING)
+            self.say("  Demo plant loaded. Demo PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · S. Lead (shift lead) 4444 · Plant Admin 9999.", self.style.WARNING)
             self.say("  Before going live, use Operator Kiosk › Admin › Backup › Clear demo data and go live.")
         else:
             if not Shift.objects.exists():
@@ -608,14 +608,14 @@ class Command(BaseCommand):
             if Person.objects.filter(role="admin", active=True).exclude(pin="").exists():
                 self.say("  A shift lead login already exists.")
             else:
-                name = self.ask("lead_name", "Name for the first shift lead", "Shift Lead",
+                name = self.ask("lead_name", "Name for the first Admin (can change every setting)", "Plant Admin",
                                 check=lambda v: None if 0 < len(v) <= 120 else "Type a name.")
                 existing = {p.lower() for p in Person.objects.exclude(pin="").values_list("pin", flat=True)}
 
                 def pin_check(v):
                     return pin_problem(v, existing)
                 for _ in range(5):
-                    pin = self.ask("lead_pin", "Shift lead PIN (6-12 digits, not a run like 123456 or 111111; typing is hidden)", "", secret=True, check=pin_check)
+                    pin = self.ask("lead_pin", "Admin PIN (6-12 digits, not a run like 123456 or 111111; typing is hidden)", "", secret=True, check=pin_check)
                     again = self.answers.get("lead_pin") if "lead_pin" in self.answers else self.ask("lead_pin_again", "Type the PIN again", "", secret=True)
                     if pin == again:
                         break

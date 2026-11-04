@@ -8,8 +8,8 @@
   <div class="panel stat"><span>Scrap logged</span><b>{{ P.scrap }}</b></div>
   <div class="panel"><div class="stat"><span>Auto QC reminder</span></div>
     <div class="row" style="margin-top:6px"><div class="seg"><button class="{% if P.autoQC %}on{% endif %}" hx-post="/kiosk/do/settingSet" hx-vals='{"k": "autoQC", "v:b": "1"}'>On</button><button class="{% if not P.autoQC %}on{% endif %}" hx-post="/kiosk/do/settingSet" hx-vals='{"k": "autoQC", "v:b": "0"}'>Off</button></div>
-    <select name="v:n" hx-post="/kiosk/do/settingSet" hx-trigger="change" hx-vals='{"k": "qcEvery"}' style="width:auto" {% if not S.is_admin %}disabled{% endif %} aria-label="How often">{% for v in "15,30,45,60"|split %}<option value="{{ v }}" {% if P.every|stringformat:"s" == v %}selected{% endif %}>every {{ v }} min</option>{% endfor %}</select></div>
-    {% if not S.is_admin %}<p class="note">Shift lead can change these.</p>{% endif %}</div>
+    <select name="v:n" hx-post="/kiosk/do/settingSet" hx-trigger="change" hx-vals='{"k": "qcEvery"}' style="width:auto" {% if not S.is_lead %}disabled{% endif %} aria-label="How often">{% for v in "15,30,45,60"|split %}<option value="{{ v }}" {% if P.every|stringformat:"s" == v %}selected{% endif %}>every {{ v }} min</option>{% endfor %}</select></div>
+    {% if not S.is_lead %}<p class="note">Shift lead can change these.</p>{% endif %}</div>
 </div>
 <div class="tblwrap"><table class="xl"><thead><tr><th>Time</th><th>Line</th><th>MO</th><th>Item</th><th>Length</th><th>Width</th><th>Pleat ht</th><th>Side band L</th><th>Side band R</th><th>Glue</th><th>Cut</th><th>Scrap 30 min</th><th>By</th><th>Result</th></tr></thead><tbody>
 {% for r in P.rows %}<tr><td>{{ r.q.t|clock }}</td><td>{{ r.q.line }}</td><td>{{ r.q.mo }}</td><td>{{ r.q.item }}</td>{% for c in r.cells %}{% if c.v is None %}<td class="note">—</td>{% else %}<td class="{% if not c.ok %}oos{% endif %}">{{ c.v|floatformat:2 }}</td>{% endif %}{% endfor %}<td>{{ r.q.glue }}</td><td>{{ r.q.cut }}</td><td>{{ r.q.scrap }}</td><td>{{ r.q.by }}</td><td>{% if r.q.passed %}<span class="pill ok">PASS</span>{% else %}<span class="pill bad">FAIL</span>{% endif %}</td></tr>
