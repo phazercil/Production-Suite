@@ -187,6 +187,7 @@ runuser -u "$USER_NAME" -- "$DIR/.venv/bin/python" -m pip install --no-index --n
 say "  Done."
 
 # ---------------------------------------------------------------- 5. settings, records database, first login
+# (unbuffered: its output goes through tee, and a message like "That PIN is too easy to guess" must show before the next question)
 step "5. Settings, records database and first shift lead"
 args=(manage.py install_plant --behind-apache)
 tmpans=""
@@ -195,7 +196,7 @@ if [ -n "$ANSWERS" ]; then
     args+=(--answers "$tmpans")
 fi
 set +e
-( cd "$DIR" && runuser -u "$USER_NAME" -- env HOME="$DIR" PYTHONUTF8=1 "$DIR/.venv/bin/python" "${args[@]}" ) 2>&1 | tee -a "$LOG"
+( cd "$DIR" && runuser -u "$USER_NAME" -- env HOME="$DIR" PYTHONUTF8=1 PYTHONUNBUFFERED=1 "$DIR/.venv/bin/python" "${args[@]}" ) 2>&1 | tee -a "$LOG"
 code=${PIPESTATUS[0]}
 set -e
 [ -n "$tmpans" ] && rm -f "$tmpans"
