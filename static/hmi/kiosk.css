@@ -84,7 +84,7 @@ main{min-width:0;display:flex;flex-direction:column;overflow-y:auto}
 .seg button+button{border-left:1px solid var(--rule)}
 .seg button.on{background:var(--sel);color:var(--sel-ink)}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--ink-2);min-width:0}
-input[type=text],input[type=number],input[type=password],input[type=url],input[type=time],select,textarea{background:var(--well-3);border:1px solid var(--rule-2);border-radius:6px;padding:9px 10px;color:var(--ink);font-size:16px;min-height:44px;width:100%}
+input[type=text],input[type=number],input[type=password],input[type=url],input[type=time],input[type=tel],input[type=email],input[type=search],input[type=date],select,textarea{background:var(--well-3);border:1px solid var(--rule-2);border-radius:6px;padding:9px 10px;color:var(--ink);font-size:16px;min-height:44px;width:100%}
 textarea{min-height:80px;resize:vertical}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
