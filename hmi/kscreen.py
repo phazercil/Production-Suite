@@ -8,6 +8,7 @@ display what this returns; every button posts to hmi/kviews.py, which runs the p
 from datetime import timedelta
 from urllib.parse import quote, urlencode
 
+from django.db import models
 from django.db.models import Q
 
 from plant.models import MO, Machine, PartSpec, Person, PlantSettings, part_key
@@ -170,7 +171,14 @@ class Screen:
         return list(QCCheck.objects.filter(line=self.station, review="pending").order_by("-t")[:20]) if self.station else []
 
     def unread_notices(self):
-        return list(Notice.objects.filter(read=False).exclude(kind="team").order_by("-t")[:30])
+        """Notices for this machine's operators that this machine's screen hasn't acknowledged, newest first."""
+        if hasattr(self, "_notices"):
+            return self._notices
+        from .engine import OPERATOR_KINDS
+        since = self.t - timedelta(days=3)
+        qs = Notice.objects.filter(read=False, kind__in=OPERATOR_KINDS, t__gte=since).exclude(reads__line=self.station).order_by("-t")[:60]
+        self._notices = [n for n in qs if not n.lines or self.station in n.lines][:30]
+        return self._notices
 
     def open_tickets(self):
         return list(Ticket.objects.exclude(status="Closed").order_by("t"))
@@ -209,7 +217,7 @@ class Screen:
         if n:
             a.append({"sev": "bad", "text": f"{n} QC check{'s' if n > 1 else ''} out of spec: a supervisor needs to approve or disapprove", "go": "qc-log"})
         for n in self.unread_notices():
-            a.append({"sev": "warn", "text": n.text, "go": "schedule", "notice": n.id})
+            a.append({"sev": "warn", "text": n.text, "go": n.go or "schedule", "notice": n.id})
         for tk in self.open_tickets():
             if tk.priority == "High":
                 a.append({"sev": "bad", "text": f"Maintenance: {tk.machine} — {tk.type}", "go": "maintenance"})
@@ -217,7 +225,7 @@ class Screen:
 
     # ------------------------------------------------------------ shell
     def nav(self, page):
-        flags = {"schedule": "!" if self.unread_notices() else "", "downtime": len(self.need_reason()) if self.reason_due() else "",
+        flags = {"schedule": "!" if any(n.kind in ("schedule", "break") for n in self.unread_notices()) else "", "downtime": len(self.need_reason()) if self.reason_due() else "",
                  "qc-log": "!" if self.qc_due() else "", "maintenance": len(self.open_tickets()) or ""}
         out = []
         for p in PAGES:
@@ -233,13 +241,28 @@ class Screen:
                         "locked": key in ADMIN_PAGES and not self.is_lead})
         return out
 
+    def notibar(self, all_=False):
+        """The notification bar under the banner: the newest unread notice for this machine and how many more."""
+        ns = self.unread_notices()
+        now_brk = self.break_now()
+        return {"top": ns[0] if ns else None, "more": max(0, len(ns) - 1), "all": ns if all_ else [], "brk": now_brk,
+                "icon": {"schedule": "📅", "break": "☕", "maint": "🔧", "qc": "✔", "info": "ℹ"}}
+
+    def break_now(self):
+        """An extra break this machine is in right now, or the next one starting within 15 minutes."""
+        from plant.util import extra_breaks
+        if not self.machine:
+            return None
+        for w in extra_breaks(self.t - timedelta(hours=4), self.t + timedelta(minutes=15)):
+            if w["e"] > self.t and (w["machines"] is None or self.machine.pk in w["machines"]):
+                return {**w, "now": w["s"] <= self.t, "inMins": max(0, round((w["s"] - self.t).total_seconds() / 60))}
+        return None
+
     def banner(self):
         parts = []
         if self.reason_due():
             n = len(self.need_reason())
             parts.append({"modal": "downPrompt", "text": f"{n} downtime {'entries need' if n > 1 else 'entry needs'} a reason"})
-        if self.unread_notices():
-            parts.append({"page": "schedule", "pre": "The ", "text": "schedule", "post": " changed"})
         if self.qc_due():
             parts.append({"modal": "qc", "text": "QC check", "post": " due"})
         sh = self.shift
@@ -381,6 +404,11 @@ def _local_ms(t_ms):
     return timezone.localtime(datetime.fromtimestamp(t_ms / 1000, timezone.get_current_timezone()))
 
 
+def _dt_hm(hhmm):
+    from datetime import datetime
+    return datetime(2000, 1, 1, int(hhmm[:2]), int(hhmm[3:5]))
+
+
 def schedule_page(s, view="timeline", status="OPEN", sort=None):
     """Schedule page: today's timeline (positions in pixels), this month's due dates, and the MO list."""
     from datetime import date, timedelta as td
@@ -388,7 +416,15 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
     from plant.util import is_lunch, shift_windows, sod_ms
     from suite.templatetags.suite import clock
     t_ms = ms(s.t)
-    out = {"view": view, "status": status, "sort": sort, "notices": s.unread_notices()}
+    from plant.models import ExtraBreak
+    from plant.util import local
+    today = local(s.t).date()
+    up = []
+    for x in ExtraBreak.objects.filter(models.Q(until__gte=today) | models.Q(until__isnull=True, day__gte=today)).prefetch_related("machines")[:30]:
+        from suite.templatetags.suite import clock
+        up.append({"x": x, "lines": ", ".join(m.name for m in x.machines.all()) or "Every line",
+                   "from": clock(_dt_hm(x.start)), "to": clock(_dt_hm(x.start) + timedelta(minutes=x.minutes))})
+    out = {"view": view, "status": status, "sort": sort, "notices": s.unread_notices(), "extras": up}
     if view == "timeline":
         wins = shift_windows(sod_ms(t_ms))
         ds = wins[0]["s"] if wins else sod_ms(t_ms) + 360 * 60000
@@ -403,6 +439,8 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
         days = [{"x": X(w["s"]) + 4, "label": w["name"] + ("" if i else f" · {_local_ms(ds).month}/{_local_ms(ds).day}/{_local_ms(ds).year}")}
                 for i, w in enumerate(wins)]
         brks = [b for w in wins for b in w["brk"]]
+        from plant.util import extra_breaks
+        extras = extra_breaks(_local_ms(ds), _local_ms(end))
         lanes = []
         for m in s.active_lines:
             blocks = []
@@ -427,6 +465,12 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
                 lane_breaks.append({"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
                                     "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"])), "lunch": lunch, "thru": thru,
                                     "state": ("running" if busy else "relief cover") if thru else ("stopped" if lunch and busy else "")})
+            for w in extras:
+                if w["machines"] is not None and m.pk not in w["machines"]:
+                    continue
+                a, b2 = ms(w["s"]), ms(w["e"])
+                lane_breaks.append({"left": round(X(a) + 2), "width": round(max(24, X(b2) - X(a) - 4)), "name": w["label"], "extra": True,
+                                    "from": clock(w["s"]), "to": clock(w["e"]), "lunch": False, "thru": False, "state": f"{clock(w['s'])}"})
             lanes.append({"m": m, "blocks": blocks, "breaks": lane_breaks})
         out["gantt"] = {"total": total, "LW": LW, "SW": SW, "head": head, "days": days, "lanes": lanes,
                         "now": round(X(t_ms)) if ds < t_ms < end else None, "scrollTo": max(0, round(X(t_ms)) - 320) if ds < t_ms < end else 0}

@@ -233,14 +233,29 @@ class MoRun(models.Model):
 
 
 class Notice(models.Model):
+    """Something an operator should know: the schedule changed, a break was added, a maintenance request moved on.
+    `lines` are the machines it is for (empty = every line); each machine's screen marks it read on its own."""
     t = models.DateTimeField()
     text = models.CharField(max_length=300)
     kind = models.CharField(max_length=12, default="schedule")
     read = models.BooleanField(default=False)
+    lines = models.JSONField(default=list, blank=True)
+    go = models.CharField(max_length=20, blank=True, help_text="Operator page that shows more")
 
     class Meta:
         db_table = "hmi_notices"
         ordering = ["-t", "-id"]
+
+
+class NoticeRead(models.Model):
+    notice = models.ForeignKey(Notice, related_name="reads", on_delete=models.CASCADE)
+    line = models.CharField(max_length=60)
+    by = models.CharField(max_length=120, blank=True)
+    t = models.DateTimeField()
+
+    class Meta:
+        db_table = "hmi_notice_reads"
+        unique_together = [("notice", "line")]
 
 
 class AuditLog(models.Model):

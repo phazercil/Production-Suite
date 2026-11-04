@@ -1,0 +1,5 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Notifications · {{ station }}{% endblock %}
+{% block body %}<div class="notilist">{% for n in N.all %}<div class="rep"><div class="m"><b>{{ n.t|plan:S.t }}</b>{% if n.go %} · <a href="{{ base }}/{{ n.go }}/">open</a>{% endif %}</div><div class="x">{{ n.text }}</div></div>
+{% empty %}<p class="note">Nothing new for {{ station }}.</p>{% endfor %}</div>{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" data-close>Close</button>{% if N.all %}<button type="button" class="btn primary" hx-post="/kiosk/do/ackNotices" data-close>Got them all</button>{% endif %}{% endblock %}
