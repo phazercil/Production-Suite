@@ -115,6 +115,12 @@ class KioskTests(TestCase):
             r = self.do("codata", op="build", q="changeover_steps", b_table="co_steps", b_step="instruction", b_seq="step_no", b_f_part="part_no")
             self.assertContains(r, "WHERE `part_no` = :part")
             self.assertContains(r, "ORDER BY `step_no`")
+            r = self.c.get("/kiosk/v/admin?tab=codata")
+            self.assertContains(r, "Tooling for the part")
+            r = self.do("codata", op="build", q="part_tooling", b_table="co_steps", b_f_part="part_no")
+            self.assertContains(r, "Pick at least one column to show.")
+            r = self.do("codata", op="build", q="part_tooling", b_table="co_steps", b_f_part="part_no", b_kind="note", b_name="instruction")
+            self.assertContains(r, "`instruction` AS name")
 
     def test_data_source_editor(self):
         self.login_lead()

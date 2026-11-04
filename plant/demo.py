@@ -33,7 +33,7 @@ def wipe():
     from hmi import models as H
     from scheduler.models import Job
     for model in (H.PpmReading, H.Downtime, H.QCCheck, H.RollTag, H.Ticket, H.ShiftNote, H.MoRun, H.Notice, H.AuditLog, H.Event, H.MachineError,
-                  H.ChangeoverCache, H.LineState, H.ShiftRun, Job, MO, Person, PartSpec, ShiftBreak):
+                  H.ChangeoverCache, H.ToolingCache, H.LineState, H.ShiftRun, Job, MO, Person, PartSpec, ShiftBreak):
         model.objects.all().delete()
     Machine.objects.all().delete()
     Shift.objects.all().delete()
@@ -152,4 +152,48 @@ def seed_demo(reset=True):
         MachineError.objects.create(machine=bar, line="Barbara", start=d.start_time + timedelta(seconds=20), end=d.end_time, code=code,
                                     text=text, source="feed")
     Notice.objects.create(t=start + timedelta(minutes=120), text="MO 306856 (MG3686HP) moved from Barbara to Salvatore", kind="schedule")
+    ShiftRun.objects.filter(pk=sh.pk).update(issues="Side band guide on the left was loose at start-up; tightened it.")
+    _demo_history(bar, sal, people, start)
     PlantSettings.bump()
+
+
+def _demo_history(bar, sal, people, cur_start):
+    """Finished runs of the running part on both pleaters, so the run screen has averages and shift reports to show."""
+    import random
+
+    from hmi.models import Downtime, MoRun, PpmReading, ShiftRun
+    rnd = random.Random(7)
+    # (machine, hours before the current shift started, length in hours, speed share, scrap per 1000, stops)
+    runs = [(bar, 8.5, 8.0, 0.66, 30, 3), (bar, 32.5, 7.5, 0.70, 26, 2), (bar, 56.5, 8.0, 0.62, 35, 4),
+            (sal, 30.0, 7.0, 0.80, 44, 3), (sal, 78.0, 6.5, 0.78, 40, 5)]
+    who = [people["mlee"], people["jortiz"]]
+    reads = []
+    for i, (m, back, hrs, share, spk, stops) in enumerate(runs):
+        a = cur_start - timedelta(hours=back)
+        b = a + timedelta(hours=hrs)
+        p = who[i % 2]
+        sh = ShiftRun.objects.create(machine=m, line=m.name, person=p, user_name=p.name, shift_name="1st shift" if i % 2 else "2nd shift",
+                                     start=a, end=b, active=False, state="idle", safety=[True] * 5, pm=[True] * 5)
+        mins = int(hrs * 60)
+        down = set()
+        for k in range(stops):
+            s0 = rnd.randrange(20, mins - 30)
+            ln = rnd.randrange(4, 16)
+            Downtime.objects.create(shift=sh, line=m.name, mo="309001", start_time=a + timedelta(minutes=s0), end_time=a + timedelta(minutes=s0 + ln),
+                                    minutes=ln, reason=rnd.choice(["Jam or misfeed", "Material / media change", "Glue system"]), by=p.name)
+            down.update(range(s0, s0 + ln))
+        made = 0
+        for k in range(mins):
+            if k in down:
+                reads.append(PpmReading(machine=m, line=m.name, shift=sh, t=a + timedelta(minutes=k), ppm=0, units=0, run=False))
+                continue
+            ppm = int(m.ppm * share * rnd.uniform(0.9, 1.1))
+            u = round(ppm / 42)
+            made += u
+            reads.append(PpmReading(machine=m, line=m.name, shift=sh, t=a + timedelta(minutes=k), ppm=ppm, units=u, run=True))
+        sh.count = made
+        if i == 0:
+            sh.end_issues = "Glue bead ran thin on the left side late in the shift; cleaned the nozzle and it came back."
+        sh.save(update_fields=["count", "end_issues"])
+        MoRun.objects.create(shift=sh, line=m.name, mo="309001", item="MG4062HP", qty=made, scrap=round(made * spk / 1000), start_time=a, end_time=b)
+    PpmReading.objects.bulk_create(reads, batch_size=2000)

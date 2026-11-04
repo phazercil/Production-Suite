@@ -322,7 +322,32 @@ class Screen:
                 per = p["pleats"]
             out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0,
                        rate=f"{last_ppm / per:.1f}" if per else "—", eta=self.eta())
+        from . import runinfo
+        use_db = bool(self.settings.get("useDb"))
+        code = self.machine.code if self.machine else ""
+        if mo:
+            out["tool"] = runinfo.tooling(mo.part, self.station, code, self.t, use_db)
+            out["avg"] = runinfo.averages(mo.part, self.station, self.t)
+            if out["avg"]:
+                out["avg_rows"] = [(f"On {self.station}", out["avg"]["here"]), ("Any machine", out["avg"]["all"])]
+        nco = self.next_changeover(nx)
+        if nco:
+            nco["tool"] = runinfo.tooling(nco["m"].part, self.station, code, self.t, use_db)
+        out["nextCo"] = nco
+        out["reports"] = runinfo.report_history(self.station, self.t)
         return out
+
+    def next_changeover(self, nx):
+        """The next MO on this line that needs a changeover and is planned to start within a day."""
+        soon = self.t + timedelta(hours=24)
+        for i, x in enumerate(nx):
+            if not x["co"]:
+                continue
+            ps = x["m"].plan_start
+            if ps is None or ps <= soon:
+                return {**x, "n": i + 1, "unplanned": ps is None}
+            return None
+        return None
 
 
 def plan_label(t, ref):

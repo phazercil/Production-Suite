@@ -21,7 +21,7 @@ from plant.util import MIN, Catalog, default_ops, from_ms, iso_date, ms, now, pa
 
 from . import integrations
 from .models import (PlannedTime, AuditLog, ChangeoverCache, Downtime, Event, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag,
-                     SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError)
+                     SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError, ToolingCache)
 
 log = logging.getLogger("plant")
 
@@ -2109,7 +2109,7 @@ def data_reset(p, ctx):
         from plant.demo import seed_demo
         seed_demo(reset=True)
         return {"msg": "Demo data loaded", "relogin": True}
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, MachineError):
+    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, ToolingCache, MachineError):
         model.objects.all().delete()
     MO.objects.all().delete()
     Machine.objects.filter(feed_type="demo").update(feed_type="none")

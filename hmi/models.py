@@ -263,6 +263,18 @@ class SavedQuery(models.Model):
         db_table = "hmi_saved_queries"
 
 
+class ToolingCache(models.Model):
+    """Last tooling the asset database returned for a part on a machine (screws, helix, media, side bands)."""
+    part = models.CharField(max_length=40)
+    machine = models.CharField(max_length=60)
+    groups = models.JSONField(default=list)
+    t = models.DateTimeField()
+
+    class Meta:
+        db_table = "hmi_tooling_cache"
+        unique_together = [("part", "machine")]
+
+
 class ChangeoverCache(models.Model):
     """Last steps the asset database returned for a part on a machine, used when it is unreachable."""
     part = models.CharField(max_length=40)
