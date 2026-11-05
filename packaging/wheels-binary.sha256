@@ -7,3 +7,12 @@ a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09  pillow-12.3.0-
 1cca606cd25738df4ed873d5ad46bbdb3d83b5cbca291f6b4ff13a4df6b0bbe8  pillow-12.3.0-cp313-cp313-win_amd64.whl
 251bf95b67017e27b13d82f5b326234ca62d70f9cf4c2b9032de2358a3b12c7b  pillow-12.3.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 fdafc9cce40277e0f7a0feabce0ee50dd2fa1800f3b38015e51296b5e814048d  pillow-12.3.0-cp314-cp314-win_amd64.whl
+65d0c22249b7a1aa2d227d2a93dcd0224ee6eeb195b54dac5e07249d50ce7092  pymssql-2.4.6-cp310-cp310-win_amd64.whl
+3369b93e35d99cbdb428dd6a237b407abe825c889a7d983494e778c906d474b8  pymssql-2.4.6-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+76fccef34fced00b5b9bbe5e30bc6735f13add5a490f10228c2da804a62b7455  pymssql-2.4.6-cp311-cp311-win_amd64.whl
+dd1e5a1af9508033ef14bb8d074cfbf6cf2a4e04aab09207e63c9d4b37e3c485  pymssql-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+f1b1d1a67a447e995f9588018170fe3c940f74dd8703b829edaf7dc332debd32  pymssql-2.4.6-cp312-cp312-win_amd64.whl
+4bfb91d65576ac7a7df91c62d976357827dadd9894fd4ba62d78f8cc040a5540  pymssql-2.4.6-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+e4ff7d8c1adbbace3591c021149ddb8fcd82697eb2cf75dfab627b8df846b06a  pymssql-2.4.6-cp313-cp313-win_amd64.whl
+9a195e7b84ecb9436e5f49e4ad26dd0dd2ed4775512e649762c29fb05ea13da3  pymssql-2.4.6-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+4a3b54b881edc5f051f17fd897a1617ec2572f194ab224007a17495c8d03f1ae  pymssql-2.4.6-cp314-cp314-win_amd64.whl
