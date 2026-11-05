@@ -2392,6 +2392,16 @@ def connector_save(p, ctx):
         m = Machine.objects.select_for_update().get(pk=int(g["key"][2:]))
         key_val = str(p.get("keyVal") or "").strip()[:120]
         need(not mp.get("keyCol") or key_val, "Type the value that marks this machine's rows.")
+        # one table can log every machine: then each machine takes only its own rows
+        others = [o for o in Machine.objects.filter(active=True, feed_type="db").exclude(pk=m.pk)
+                  if (o.feed_src or {}).get("db", "machines") == db and (o.feed_src or {}).get("table") == table]
+        if others:
+            names = ", ".join(o.name for o in others)
+            need(mp.get("keyCol"), f"{names} also read{'s' if len(others) == 1 else ''} {table}. Wire \"Which machine\" to the column "
+                                   "that names the machine, so each machine takes only its own rows.")
+            same = [o.name for o in others if (o.feed_src or {}).get("keyCol") == mp["keyCol"]
+                    and str((o.feed_src or {}).get("keyVal", "")).strip().lower() == key_val.lower()]
+            need(not same, f"{', '.join(same)} already reads the rows where {mp['keyCol']} = {key_val}. Give each machine its own value.")
         src = dict(m.feed_src or {}) if m.feed_type == "db" else {}
         src.update(db=db, table=table, orderCol=mp["orderCol"], keyCol=mp.get("keyCol", ""), keyVal=key_val if mp.get("keyCol") else "")
         src.setdefault("maxAge", 3)

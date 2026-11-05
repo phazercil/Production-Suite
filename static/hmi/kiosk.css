@@ -470,9 +470,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
 .wbox .wh{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--rule)}
 .wbox .wh b{font-size:16px;display:block}
 .wbox .wh .note{display:block;font-size:12px}
-.cwire .src{grid-column:1;position:sticky;top:76px;max-height:calc(100vh - 100px);display:flex;flex-direction:column}
-.cwire .src .wsel{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-bottom:1px solid var(--rule)}
-.cwire .src .ports{overflow-y:auto;overflow-x:visible;padding:6px 0 8px;flex:1;min-height:0}
+.cwire .srcs{grid-column:1;position:sticky;top:76px;max-height:calc(100vh - 100px);overflow-y:auto;overflow-x:visible;display:flex;flex-direction:column;gap:12px;padding-right:12px;margin-right:-12px}
+#csrcs{display:flex;flex-direction:column;gap:12px}
+.cwire .srcard,.cwire .addsrc{display:flex;flex-direction:column;flex:none}
+.cwire .srcard .wh b.mono{font:600 15px var(--f-mono);overflow-wrap:anywhere}
+.cwire .srcard .wcount{font-size:11px;color:#7cc4f2;white-space:nowrap}
+.cwire .srcard.fl-ok{animation:flok .6s}.cwire .srcard.fl-no{animation:flno .6s}
+.cwire .wsel{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-bottom:1px solid var(--rule)}
+.cwire .addsrc .wsel{border-bottom:0}
+.cwire .addsrc .addmsg:empty{display:none}
+.cwire .srcard .ports{overflow-y:auto;overflow-x:visible;padding:6px 0 8px;max-height:min(420px,60vh)}
+.cwire .cgroup.nocard .gsrc .tb::after{content:" (add it on the left to see its wires)";font-family:var(--f-body,inherit);color:var(--ink-3)}
 .cwire .needs{grid-column:3;display:flex;flex-direction:column;gap:14px;min-width:0}
 .cwire .ports{display:flex;flex-direction:column}
 .port{position:relative;display:flex;align-items:center;gap:8px;min-height:40px;background:none;border:0;border-radius:0;color:var(--ink);text-align:left;width:100%;user-select:none;touch-action:none}
@@ -505,7 +513,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
 .cwire .cgroup.other-db .port .dot{background:#6b7480}
 .cwire .cgroup.focus{box-shadow:0 0 0 2px var(--accent)}
 body.c-dragging .port.out{cursor:grabbing}
-@media (max-width:1000px){.cwire{grid-template-columns:1fr}.cwire .src{position:relative;top:0;max-height:none}.cwire .needs{grid-column:1;margin-top:14px}.cwire .wires{display:none}}
+@media (max-width:1000px){.cwire{grid-template-columns:1fr}.cwire .srcs{position:relative;top:0;max-height:none;overflow:visible}.cwire .needs{grid-column:1;margin-top:14px}.cwire .wires{display:none}}
 .cwire .slot.port.in{flex-direction:row;align-items:center;gap:8px;text-align:left;justify-content:flex-start}
 .cwire .slot.port.in small{display:none}
 .cwire .port.out{flex-direction:row;align-items:center;justify-content:flex-start;border:0;border-radius:0;background:none;min-height:42px;padding:4px 10px 4px 14px;box-shadow:none}
