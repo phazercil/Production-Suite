@@ -1,10 +1,26 @@
-<section class="wbox srcard" data-db="{{ src.db }}" data-table="{{ src.table }}" aria-label="Columns of {{ src.table }}">
-  <div class="wh"><div class="grow"><b class="mono">{{ src.table }}</b><span class="note">{{ C.allDbs|get:src.db }} · {{ src.cols|length }} column{{ src.cols|length|pluralize }}</span></div>
-    <span class="wcount note" title="Wires from this table"></span>
-    <button type="button" class="btn ghost sm" data-close title="Close this card (only when no box reads it)" aria-label="Close {{ src.table }}">✕</button></div>
-  {% if src.err %}<p class="note" style="color:var(--bad);padding:6px 12px">{{ src.err }}</p>{% endif %}
-  {% if src.cols.0.err %}<p class="note" style="padding:6px 12px">Couldn't read sample values: {{ src.cols.0.err }}</p>{% endif %}
-  {% if src.cols|length > 8 %}<div class="wsel"><input type="search" class="cfilter" placeholder="Filter columns" aria-label="Filter the columns of {{ src.table }}" autocomplete="off"></div>{% endif %}
-  <div class="ports">{% for c in src.cols %}<button type="button" class="ctag port out" data-col="{{ c.name }}" data-table="{{ src.table }}" data-db="{{ src.db }}" title="{{ c.type }}{% if c.sample %} · e.g. {{ c.sample }}{% endif %}"><span class="pl"><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></span><span class="dot" aria-hidden="true"></span></button>
-  {% empty %}<p class="note" style="padding:8px 12px">{% if src.missing %}This table isn't in the {{ C.allDbs|get:src.db }} any more.{% else %}This table has no columns.{% endif %}</p>{% endfor %}</div>
+<section class="wbox srcard {% if C.edit == src.id %}editing{% endif %}" data-src="{{ src.id }}" data-db="{{ src.db }}" data-table="{{ src.table }}" aria-label="Source card {{ src.title }}">
+  <div class="wh"><div class="grow"><b class="ctitle">{{ src.title }}</b><span class="note"><span class="mono">{{ src.table }}</span> · {{ C.allDbs|get:src.db }}</span></div>
+    <span class="wcount note" title="Wires from this card"></span>
+    {% if tabCan %}<button type="button" class="btn ghost sm" data-edit title="Title, columns and filter" aria-label="Edit {{ src.title }}" aria-expanded="{% if C.edit == src.id %}true{% else %}false{% endif %}">✎</button>{% endif %}</div>
+  <div class="cfilters">{% for f in src.filters %}<span class="chip">{{ f.col }} = <b>{{ f.val }}</b></span>{% empty %}<span class="note">Every row of the table</span>{% endfor %}
+    {% if src.found and src.rows == 0 %}<span class="note badt">No rows match{% if src.filters %} this filter{% endif %} right now.</span>{% endif %}</div>
+  {% if C.msg and C.msg.card == src.id %}<p class="note {% if C.msg.ok %}okt{% else %}badt{% endif %}" style="padding:0 12px 6px" role="status">{{ C.msg.text }}</p>{% endif %}
+  {% if src.err %}<p class="note badt" style="padding:0 12px 6px">{{ src.err }}</p>{% endif %}
+  {% if not src.found %}<p class="note badt" style="padding:0 12px 6px">The table {{ src.table }} isn't in the {{ C.allDbs|get:src.db }} any more.</p>{% endif %}
+  {% if tabCan %}<form class="cedit" hx-post="/kiosk/do/sourceCardSave" hx-target="#connector" hx-swap="outerHTML" autocomplete="off" {% if C.edit != src.id %}hidden{% endif %}>
+    <input type="hidden" name="id" value="{{ src.id }}">
+    <label class="f">Title<input type="text" name="title" value="{{ src.title }}" maxlength="80" required placeholder="e.g. Barbara readings"></label>
+    <fieldset class="f"><legend>Only rows where <span class="note">(set this before wiring: e.g. machine = Barbara)</span></legend>
+      <div class="frows">{% for f in src.filters %}<div class="frow"><select name="fcol" aria-label="Column"><option value="">Column…</option>{% for c in src.all %}<option {% if c.name == f.col %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select><span>=</span><input type="text" name="fval" value="{{ f.val }}" maxlength="120" aria-label="Value"><button type="button" class="btn ghost sm" data-frm aria-label="Remove this filter">✕</button></div>{% endfor %}</div>
+      <template><div class="frow"><select name="fcol" aria-label="Column"><option value="">Column…</option>{% for c in src.all %}<option>{{ c.name }}</option>{% endfor %}</select><span>=</span><input type="text" name="fval" maxlength="120" aria-label="Value"><button type="button" class="btn ghost sm" data-frm aria-label="Remove this filter">✕</button></div></template>
+      <button type="button" class="btn sm" data-fadd>+ Add a filter</button></fieldset>
+    <fieldset class="f"><legend>Columns on this card <span class="note">(<button type="button" class="linkbtn" data-all>all</button> · <button type="button" class="linkbtn" data-none>none</button>)</span></legend>
+      <div class="cpick">{% for c in src.all %}<label class="chk"><input type="checkbox" name="col" value="{{ c.name }}" {% if c.on %}checked{% endif %}><span><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></span></label>{% endfor %}</div></fieldset>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn primary sm" type="submit">Save card</button><button type="button" class="btn sm" data-cancel>Cancel</button><span class="grow"></span>
+      <button type="button" class="btn ghost sm" hx-post="/kiosk/do/sourceCardCopy" hx-vals='{"id": "{{ src.id }}"}' hx-target="#connector" hx-swap="outerHTML" title="Another card with the same table, columns and filter, e.g. for the next machine">Duplicate</button>
+      <button type="button" class="btn ghost sm" hx-post="/kiosk/do/sourceCardDelete" hx-vals='{"id": "{{ src.id }}"}' hx-target="#connector" hx-swap="outerHTML" hx-confirm="Remove the card {{ src.title }}?" {% if src.users %}disabled title="In use by {{ src.users|join:', ' }}"{% endif %}>Remove</button></div>
+  </form>{% endif %}
+  {% if src.all|length > 8 and src.cols|length > 8 %}<div class="wsel"><input type="search" class="cfilter" placeholder="Filter columns" aria-label="Filter the columns of {{ src.title }}" autocomplete="off"></div>{% endif %}
+  <div class="ports">{% for c in src.cols %}<button type="button" class="ctag port out" data-col="{{ c.name }}" data-src="{{ src.id }}" data-table="{{ src.table }}" data-db="{{ src.db }}" title="{{ c.type }}{% if c.sample %} · e.g. {{ c.sample }}{% endif %}"><span class="pl"><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></span><span class="dot" aria-hidden="true"></span></button>
+  {% empty %}{% if src.found %}<p class="note" style="padding:8px 12px">No columns picked. Press ✎ to pick the ones you need.</p>{% endif %}{% endfor %}</div>
 </section>

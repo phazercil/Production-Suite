@@ -6,13 +6,13 @@
   <svg class="wires" aria-hidden="true"></svg>
   <aside class="srcs" aria-label="Tables you can take columns from">
     <div id="csrcs">{% for src in C.sources %}{% include "hmi/k/admin/_csrc.html" %}{% endfor %}</div>
-    <form class="wbox addsrc" hx-post="/kiosk/do/connectorSource" hx-target="#csrcs" hx-swap="beforeend" autocomplete="off" data-tables="{{ C.tables|jsonattr }}">
-      <div class="wh"><b>Add a source</b><span class="note">a table to take columns from</span></div>
+    {% if tabCan %}<form class="wbox addsrc" hx-post="/kiosk/do/sourceCardAdd" hx-target="#connector" hx-swap="outerHTML" autocomplete="off" data-tables="{{ C.tables|jsonattr }}">
+      <div class="wh"><div class="grow"><b>Add a source card</b><span class="note">a table, the columns you need and the rows to keep. A table can have several cards, e.g. one per machine.</span></div></div>
       <div class="wsel"><select name="db" aria-label="Database">{% for d, lbl in C.dbs %}<option value="{{ d }}" {% if forloop.first %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
         <select name="table" aria-label="Table"><option value="">Pick a table…</option></select>
-        <button class="btn sm" type="submit" disabled data-add>Show its columns</button><span class="htmx-indicator note">Reading the table…</span>
-        <p class="note addmsg" role="status"></p></div>
-    </form>
+        <button class="btn sm" type="submit" disabled data-add>Add the card</button><span class="htmx-indicator note">Reading the table…</span>
+        {% if C.msg and not C.msg.card %}<p class="note {% if C.msg.ok %}okt{% else %}badt{% endif %}" role="status">{{ C.msg.text }}</p>{% endif %}</div>
+    </form>{% endif %}
   </aside>
   <section class="needs" aria-label="What the suite needs">
     {% for g in C.groups %}{% include "hmi/k/admin/_cgroup.html" with msg=None %}{% endfor %}

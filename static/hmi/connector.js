@@ -22,8 +22,9 @@
   }
   const orig = g => { state(g); try { return JSON.parse(g._orig); } catch (e) { return {map: {}}; } };
   const label = sl => sl.querySelector(".sl").textContent.replace("*", "").trim();
-  const card = (root, db, table) => [...root.querySelectorAll(".srcard")].find(c => c.dataset.db === db && c.dataset.table === table);
-  const portOf = (root, db, table, col) => { const c = card(root, db, table); return c && c.querySelector(`.port.out[data-col="${CSS.escape(col)}"]`); };
+  const card = (root, src) => src ? root.querySelector(`.srcard[data-src="${CSS.escape(String(src))}"]`) : null;
+  const portOf = (root, src, col) => { const c = card(root, src); return c && c.querySelector(`.port.out[data-col="${CSS.escape(col)}"]`); };
+  const title = (root, src) => { const c = card(root, src); return c ? c.querySelector(".ctitle").textContent : ""; };
 
   function say(g, text, bad) {
     const m = g.querySelector(".gmsg");
@@ -39,18 +40,19 @@
       const x = sl.querySelector(".sx"); if (x) x.hidden = !col;
       sl.setAttribute("aria-label", label(sl) + ": " + (col || "empty"));
     });
-    const tb = g.querySelector(".gsrc .tb"); if (tb) tb.textContent = st.table || "none yet";
+    const tb = g.querySelector(".gsrc .tb"); if (tb) tb.textContent = title(root, st.src) || "none yet";
     const changed = JSON.stringify(st) !== g._orig;
     const save = g.querySelector("[data-save]"); if (save) save.disabled = !changed;
     const undo = g.querySelector("[data-undo]"); if (undo) undo.hidden = !changed;
     if (changed) g.dataset.dirty = "1"; else delete g.dataset.dirty;
     const missing = [...g.querySelectorAll(".slot.req")].filter(sl => !st.map[sl.dataset.slot]).map(label);
     if (changed) {
-      const shared = g.dataset.kind === "machine" && st.table && !st.map.keyCol &&
-        [...root.querySelectorAll('.cgroup[data-kind="machine"]')].some(o => o !== g && state(o).table === st.table && state(o).db === st.db);
-      say(g, missing.length ? "Still needed: " + missing.join(", ") :
-             shared ? "Other machines read this table too: wire \"Which machine\" and type this machine's value." : "Ready to save.",
-          !!missing.length || shared);
+      const shared = g.dataset.kind === "machine" && st.src &&
+        [...root.querySelectorAll('.cgroup[data-kind="machine"]')].filter(o => o !== g && String(state(o).src) === String(st.src)).map(o => o.querySelector(".wh b").textContent);
+      say(g, !st.src && Object.keys(st.map).length ? "Drag one column from this box's card to pick the card it reads." :
+             missing.length ? "Still needed: " + missing.join(", ") :
+             shared && shared.length ? shared.join(", ") + " read" + (shared.length > 1 ? "" : "s") + " this card too: give each machine its own card with a filter for its rows (✎ on the card, or Duplicate)." : "Ready to save.",
+          !!missing.length || !!(shared && shared.length) || !st.src);
     }
     soon(root);
   }
@@ -65,11 +67,13 @@
       say(g, "This needs a column from the " + dbs.map(d => DBN[d] || d).join(" or ") + ". Add a table from that database on the left.", true);
       flash(slot, "no"); return;
     }
-    if (st.table && (st.table !== tag.dataset.table || st.db !== tag.dataset.db) && Object.keys(st.map).length) {
-      st.map = {};   // one box reads one table: switching tables starts this box's wires over
-      say(g, "Switched to " + tag.dataset.table + ": this box's other wires were cleared.", false);
+    const same = st.table === tag.dataset.table && st.db === tag.dataset.db;
+    if (st.table && !same && Object.keys(st.map).length) {
+      st.map = {};   // one box reads one card: a card of another table starts this box's wires over
+      say(g, "Switched to " + title(g.closest(".connector"), tag.dataset.src) + ": this box's other wires were cleared.", false);
     }
-    st.db = tag.dataset.db; st.table = tag.dataset.table;
+    // a card of the same table (another machine's rows) keeps the wires: only the rows read change
+    st.src = Number(tag.dataset.src); st.db = tag.dataset.db; st.table = tag.dataset.table;
     st.map[slot.dataset.slot] = tag.dataset.col;
     paint(g); flash(slot, "ok");
   }
@@ -110,25 +114,25 @@
     const used = new Set(), count = new Map();
     root.querySelectorAll(".cgroup").forEach(g => {
       const st = state(g), o = orig(g);
-      if (!st.table) return;
-      const c = card(root, st.db, st.table);
+      if (!st.src) return;
+      const c = card(root, st.src);
       g.classList.toggle("nocard", !c);
       if (!c) return;
       for (const [k, col] of Object.entries(st.map)) {
-        const tag = portOf(root, st.db, st.table, col);
+        const tag = portOf(root, st.src, col);
         const sl = g.querySelector(`.slot[data-slot="${CSS.escape(k)}"]`);
         if (!tag || !sl) continue;
         used.add(tag); count.set(c, (count.get(c) || 0) + 1);
         if (tag.hidden) continue;
         const a = dotAt(tag, "r", box, true), b = dotAt(sl, "l", box);
         const p = document.createElementNS(NS, "path");
-        const saved = o.table === st.table && o.db === st.db && (o.map || {})[k] === col;
+        const saved = String(o.src) === String(st.src) && (o.map || {})[k] === col;
         p.setAttribute("d", curve(a, b));
         p.setAttribute("class", saved ? "saved" : "pending");
         if (a.out) p.setAttribute("opacity", ".4");
         p.dataset.group = g.dataset.group; p.dataset.slot = k; p.dataset.col = col;
         const t = document.createElementNS(NS, "title");
-        t.textContent = `${st.table}.${col} → ${label(sl)} (${g.querySelector(".wh b").textContent}). Click to unwire.`;
+        t.textContent = `${title(root, st.src)}: ${col} → ${label(sl)} (${g.querySelector(".wh b").textContent}). Click to unwire.`;
         p.appendChild(t);
         svg.appendChild(p);
       }
@@ -160,9 +164,23 @@
     form.querySelector("[data-add]").disabled = true;
   }
 
+  let stash = null;
+  document.addEventListener("htmx:beforeSwap", e => {
+    const t = e.detail.target;
+    if (!t || t.id !== "connector") return;
+    stash = {};
+    t.querySelectorAll(".cgroup[data-dirty]").forEach(g => { stash[g.dataset.group] = state(g); });
+  });
+
   function init(root) {
     if (root._ready) return; root._ready = true;
-    root.querySelectorAll(".cgroup").forEach(g => { state(g); paint(g); });
+    root.querySelectorAll(".cgroup").forEach(g => {
+      state(g);
+      if (stash && stash[g.dataset.group]) g._st = JSON.parse(JSON.stringify(stash[g.dataset.group]));   // unsaved wires survive a card change
+      paint(g);
+    });
+    stash = null;
+    const ed = root.querySelector(".srcard.editing"); if (ed) ed.scrollIntoView({block: "nearest"});
     const add = root.querySelector(".addsrc");
     if (add) {
       fillTables(add);
@@ -170,11 +188,6 @@
         if (e.target.name === "db") fillTables(add);
         if (e.target.name === "table") add.querySelector("[data-add]").disabled = !e.target.value;
         add.querySelector(".addmsg").textContent = "";
-      });
-      add.addEventListener("htmx:confirm", e => {   // a table that already has a card: just show it
-        const db = add.querySelector("select[name=db]").value, t = add.querySelector("select[name=table]").value;
-        const c = card(root, db, t);
-        if (c) { e.preventDefault(); c.scrollIntoView({behavior: "smooth", block: "nearest"}); flash(c, "ok"); add.querySelector(".addmsg").textContent = t + " is already on the left."; }
       });
       add.addEventListener("htmx:afterRequest", e => {
         if (e.detail.successful) { add.querySelector("select[name=table]").value = ""; add.querySelector("[data-add]").disabled = true; }
@@ -193,23 +206,29 @@
       e.target.value = "";
       if (!from || !state(from).table) { say(g, name + " isn't wired to a table yet.", true); return; }
       const f = state(from), st = state(g);
-      st.db = f.db; st.table = f.table; st.map = Object.assign({}, f.map);
-      const kv = g.querySelector("input[name=keyVal]");
-      if (kv && !kv.value.trim()) kv.value = g.querySelector(".wh b").textContent.trim();
+      st.db = f.db; st.table = f.table; st.map = Object.assign({}, f.map); st.src = null;
       paint(g);
-      say(g, `Copied ${name}'s wires (${f.table}).` + (st.map.keyCol ? ` Check "${kv ? kv.value : ""}" is this machine's value in ${st.map.keyCol}.` : ' Wire "Which machine" so each machine takes only its rows.'), !st.map.keyCol);
+      say(g, `Copied ${name}'s wires. Now drag any column from this machine's card (a card of the same table, with this machine's filter) to pick the rows it reads.`, false);
     });
     root.addEventListener("click", e => {
       const chip = e.target.closest("[data-goto]");
       if (chip) { const g = root.querySelector(`.cgroup[data-group="${CSS.escape(chip.dataset.goto)}"]`); if (g) { g.scrollIntoView({behavior: "smooth", block: "center"}); flash(g, "ok"); } return; }
-      const close = e.target.closest(".srcard [data-close]");
-      if (close) {
-        const c = close.closest(".srcard");
-        const users = [...root.querySelectorAll(".cgroup")].filter(g => state(g).table === c.dataset.table && state(g).db === c.dataset.db);
-        if (users.length) { c.querySelector(".wcount").textContent = "In use by " + users.map(g => g.querySelector(".wh b").textContent).join(", "); flash(c, "no"); return; }
-        if (picked && c.contains(picked)) unpick();
-        c.remove(); soon(root); return;
+      const ed = e.target.closest(".srcard [data-edit]"), cancel = e.target.closest(".srcard [data-cancel]");
+      if (ed || cancel) {
+        const c = (ed || cancel).closest(".srcard"), f = c.querySelector(".cedit");
+        const open = ed ? f.hidden : false;
+        if (!open) f.reset();
+        f.hidden = !open; c.classList.toggle("editing", open);
+        const b = c.querySelector("[data-edit]"); if (b) b.setAttribute("aria-expanded", String(open));
+        if (open) f.querySelector("input[name=title]").focus();
+        soon(root); return;
       }
+      const fadd = e.target.closest("[data-fadd]");
+      if (fadd) { const fs = fadd.closest("fieldset"); fs.querySelector(".frows").appendChild(fs.querySelector("template").content.cloneNode(true)); fs.querySelector(".frows .frow:last-child select").focus(); soon(root); return; }
+      const frm = e.target.closest("[data-frm]");
+      if (frm) { frm.closest(".frow").remove(); soon(root); return; }
+      const all = e.target.closest("[data-all],[data-none]");
+      if (all) { all.closest("fieldset").querySelectorAll("input[type=checkbox]").forEach(x => { x.checked = all.hasAttribute("data-all"); }); return; }
       const x = e.target.closest(".sx");
       if (x) { const sl = x.closest(".slot"), g = sl.closest(".cgroup"); delete state(g).map[sl.dataset.slot]; paint(g); e.stopPropagation(); return; }
       const undo = e.target.closest("[data-undo]");
@@ -221,7 +240,7 @@
       if (sl && !sl._dragged) {   // show where an input's wire goes
         const g = sl.closest(".cgroup"), st = state(g), col = st.map[sl.dataset.slot];
         root.querySelectorAll(".wires path").forEach(p => p.classList.toggle("hl", p.dataset.group === g.dataset.group && p.dataset.slot === sl.dataset.slot));
-        const t = col && portOf(root, st.db, st.table, col); if (t) t.scrollIntoView({block: "nearest"});
+        const t = col && portOf(root, st.src, col); if (t) t.scrollIntoView({block: "nearest"});
       }
       if (sl) sl._dragged = false;
     });
@@ -236,7 +255,7 @@
       if (e.key === "Escape") unpick();
     });
     root.addEventListener("pointerdown", e => {
-      if (e.button > 0 || e.target.closest(".sx,select,input,textarea,[data-close]")) return;
+      if (e.button > 0 || e.target.closest(".sx,select,input,textarea,.cedit,[data-edit]")) return;
       const from = e.target.closest(".port.out") || (e.target.closest(".slot .dot") && e.target.closest(".slot"));
       if (!from) return;
       e.preventDefault();   // no text selection while drawing a wire
@@ -247,10 +266,17 @@
       const g = e.detail.elt.closest && e.detail.elt.closest(".cgroup"); if (!g) return;
       const st = state(g);
       e.detail.parameters.map = JSON.stringify(st.map);
+      e.detail.parameters.src = st.src || "";
       e.detail.parameters.db = st.db || "";
       e.detail.parameters.table = st.table || "";
     });
     soon(root);
+  }
+
+  // what is under the pointer, looking through the wires drawn over the page (a wire ends on the input it feeds)
+  function under(x, y, sel) {
+    for (const el of document.elementsFromPoint(x, y)) { const hit = el.closest && el.closest(sel); if (hit) return hit; }
+    return null;
   }
 
   // dragging a wire (once for the page; the builder can be opened again and again)
@@ -260,8 +286,7 @@
     if (!drag.moved) { drag.moved = true; unpick(); document.body.classList.add("c-dragging"); }
     drag.end = {x: e.clientX, y: e.clientY};
     document.querySelectorAll(".port.over").forEach(s => s.classList.remove("over"));
-    const over = document.elementFromPoint(e.clientX, e.clientY);
-    const tgt = over && (drag.from.classList.contains("out") ? over.closest(".slot") : over.closest(".port.out"));
+    const tgt = under(e.clientX, e.clientY, drag.from.classList.contains("out") ? ".slot" : ".port.out");
     if (tgt) tgt.classList.add("over");
     redraw(drag.root);
     e.preventDefault();
@@ -273,9 +298,8 @@
     document.querySelectorAll(".port.over").forEach(s => s.classList.remove("over"));
     if (!d.moved) { redraw(d.root); return; }
     d.from._dragged = true;
-    const over = document.elementFromPoint(e.clientX, e.clientY);
-    if (d.from.classList.contains("out")) { const sl = over && over.closest(".slot"); if (sl) place(sl, d.from); }
-    else { const tag = over && over.closest(".port.out"); if (tag) place(d.from, tag); }
+    if (d.from.classList.contains("out")) { const sl = under(e.clientX, e.clientY, ".slot"); if (sl) place(sl, d.from); }
+    else { const tag = under(e.clientX, e.clientY, ".port.out"); if (tag) place(d.from, tag); }
     redraw(d.root);
   }
   window.addEventListener("pointerup", end);

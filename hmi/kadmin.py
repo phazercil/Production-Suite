@@ -313,13 +313,23 @@ def s2k_build_sql(b, kind=None):
     if miss:
         raise ValueError("Pick a column for: " + ", ".join(miss))
     sel = ",\n       ".join(f"{q(b[k])} AS {k}" for k, _, _ in S2K_ROLES if b.get(k))
-    where = ""
-    if b.get("fcol"):
-        v = str(b.get("fval") or "").strip()
+    w = where_sql(kind, b.get("where") if b.get("where") is not None else
+                  ([{"col": b["fcol"], "val": b.get("fval")}] if b.get("fcol") else []))
+    return f"SELECT {sel}\nFROM {qt(b['table'])}" + ("\nWHERE " + "\n  AND ".join(w) if w else "")
+
+
+def where_sql(kind, filters):
+    """Only rows where each column equals its value (a source card's filters)."""
+    from plant import dbkinds
+    out = []
+    for f in filters or []:
+        v = str(f.get("val") if f.get("val") is not None else "").strip()
+        if not f.get("col"):
+            continue
         if not v:
-            raise ValueError('Type the value to keep, or clear the "only rows where" column.')
-        where = f"\nWHERE {q(b['fcol'])} = '" + v.replace("\\", "\\\\" if kind == "mysql" else "\\").replace("'", "''") + "'"
-    return f"SELECT {sel}\nFROM {qt(b['table'])}{where}"
+            raise ValueError(f'Type the value to keep in "{f["col"]}", or remove that filter.')
+        out.append(f"{dbkinds.quote(kind, f['col'])} = {dbkinds.literal(kind, v)}")
+    return out
 
 
 # ------------------------------------------------------------------ changeover data (asset database queries)
@@ -374,6 +384,7 @@ def build_codata_sql(qname, b, kind=None):
         w.append(f"({q(b['f_machine'])} = :machine OR {q(b['f_machine'])} IS NULL)")
     if b.get("f_from"):
         w.append(f"({q(b['f_from'])} = :from_part OR {q(b['f_from'])} IS NULL)")
+    w += where_sql(kind, b.get("where"))
     order = f"\nORDER BY {q(b['seq'])}" if D.get("order") and b.get("seq") else ""
     return f"SELECT {sel}\nFROM {qt(b['table'])}\nWHERE " + "\n  AND ".join(w) + order
 
@@ -485,14 +496,21 @@ def _need(request, s, perm):
     return login_needed(request, s, {"perm": perm})
 
 
-def connector_data(s, focus=""):
-    """Every data need (the boxes on the right), and a card for each table any of them reads (on the left)."""
+def connector_data(s, focus="", edit=None, msg=None):
+    """Every data need (the boxes on the right) and every source card (on the left: a table, the columns picked from
+    it and the rows it keeps)."""
     from . import connector
     dbs = connector.ready_dbs()
     gs = connector.groups()
+    cards = connector.link_cards(gs) if dbs else []
     return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "groups": gs, "sum": connector.summary(gs),
-            "sources": [connector.source(d, t) for d, t in connector.in_use(gs) if d in dbs],
-            "tables": {d: [x["name"] for x in tables(d).get("tables", [])] for d in dbs}, "focus": focus}
+            "sources": [connector.card(c, gs) for c in cards if c.db in dbs],
+            "tables": {d: [x["name"] for x in tables(d).get("tables", [])] for d in dbs}, "focus": focus,
+            "edit": int(edit) if str(edit or "").isdigit() else None, "msg": msg}
+
+
+def _connector_page(request, s, edit=None, msg=None):
+    return render_panel(request, "hmi/k/admin/_connector.html", C=connector_data(s, edit=edit, msg=msg), tabCan=True, S=s)
 
 
 @action("connectorSave")
@@ -510,37 +528,65 @@ def a_connector_save(request, s, p):
     except ValueError:
         mp = {}
     key = p.get("group", "")
-    r = run(request, s, "connectorSave", {"group": key, "db": p.get("db", ""), "table": p.get("table", ""), "map": mp,
-                                           "keyVal": p.get("keyVal", ""), "fval": p.get("fval", "")})
+    r = run(request, s, "connectorSave", {"group": key, "src": p.get("src", ""), "map": mp})
     msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}
-    if r["ok"]:
-        _tables_cache.clear()
     gs = connector.groups()
+    connector.link_cards(gs, create=False)
     g = next((x for x in gs if x["key"] == key), None)
     if not g:
         return thin.refused(msg["text"])
     if not r["ok"]:   # keep what was wired, so it can be fixed and saved again
-        g = {**g, "state": {"db": p.get("db", ""), "table": p.get("table", ""), "map": mp}}
+        g = {**g, "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
+                            "table": p.get("table", ""), "map": mp}}
     C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
     html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
     html += render_to_string("hmi/k/admin/_csum.html", {"C": C, "oob": True}, request=request)
     return HttpResponse(html)
 
 
-@action("connectorSource")
-def a_connector_source(request, s, p):
-    """One more source card: a table's columns, with a sample value each."""
-    from . import connector
+def _card_run(request, s, cmd, args, edit_new=False, edit_same=None):
     deny = _need(request, s, "connections.edit")
     if deny:
         return deny
-    db, table = p.get("db", ""), p.get("table", "")
-    if db not in connector.ready_dbs():
-        return thin.refused("That database isn't set up (Admin › Connections).")
-    src = connector.source(db, table)
-    if not src["found"]:
-        return thin.refused(f'There is no table "{table}" in the {connector.DB_LABEL[db]}.')
-    return HttpResponse(render_to_string("hmi/k/admin/_csrc.html", {"src": src, "C": {"allDbs": connector.DB_LABEL}}, request=request))
+    r = run(request, s, cmd, args)
+    if not r["ok"]:
+        return _connector_page(request, s, edit=edit_same, msg={"ok": False, "text": r["error"], "card": edit_same})
+    edit = (r.get("data") or r).get("id") if edit_new else None
+    return _connector_page(request, s, edit=edit, msg={"ok": True, "text": r.get("msg", ""), "card": (r.get("data") or r).get("id")})
+
+
+@action("sourceCardAdd")
+def a_source_card_add(request, s, p):
+    """A new card for a table (another card for a table that already has one is fine: each keeps its own rows)."""
+    from .models import SourceCard
+    table = p.get("table", "")
+    n = SourceCard.objects.filter(db=p.get("db", ""), table=table).count()
+    return _card_run(request, s, "sourceCardSave", {"db": p.get("db", ""), "table": table, "title": f"{table} ({n + 1})" if n else table},
+                     edit_new=True)
+
+
+@action("sourceCardSave")
+def a_source_card_save(request, s, p):
+    cols = request.POST.getlist("col")
+    fc, fv = request.POST.getlist("fcol"), request.POST.getlist("fval")
+    return _card_run(request, s, "sourceCardSave", {"id": p.get("id", ""), "title": p.get("title", ""), "columns": cols,
+                                                    "filters": [{"col": c, "val": v} for c, v in zip(fc, fv)]}, edit_same=p.get("id"))
+
+
+@action("sourceCardCopy")
+def a_source_card_copy(request, s, p):
+    """Another card like this one (same table, columns and filters) to change, e.g. one per machine."""
+    from .models import SourceCard
+    c = SourceCard.objects.filter(pk=p.get("id") or 0).first() if str(p.get("id", "")).isdigit() else None
+    if not c:
+        return _connector_page(request, s, msg={"ok": False, "text": "That card was removed."})
+    return _card_run(request, s, "sourceCardSave", {"db": c.db, "table": c.table, "title": (c.title + " (copy)")[:80], "columns": c.columns,
+                                                    "filters": c.filters}, edit_new=True)
+
+
+@action("sourceCardDelete")
+def a_source_card_delete(request, s, p):
+    return _card_run(request, s, "sourceCardDelete", {"id": p.get("id", "")}, edit_same=p.get("id"))
 
 
 def accounts_panel(request, s, g=None, form=None, msg=None, key=None):

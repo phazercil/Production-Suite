@@ -127,13 +127,16 @@ def _q(name, db="machines"):
     return dbkinds.quote(integrations.kind_of(db), name)
 
 
-def latest_row(db, table, want, order_col, key_col="", key_val=""):
-    """The newest row (by order_col) of the table, limited to one machine when key_col is set.
-    want: column names to read. Returns ({column: value}, order value)."""
+def latest_row(db, table, want, order_col, key_col="", key_val="", where=None):
+    """The newest row (by order_col) of the table, limited to one machine when key_col is set, and to the rows of a
+    source card's filters (where: [{"col", "val"}]). want: column names to read. Returns ({column: value}, order value)."""
+    where = [f for f in (where or []) if f.get("col")]
+    if where:
+        key_col = key_val = ""
     if not table:
         raise ConnError("Pick the table the machine's readings are in.")
     cols = columns(db, table)
-    for c in [*want, order_col, *( [key_col] if key_col else [])]:
+    for c in [*want, order_col, *([key_col] if key_col else []), *(f["col"] for f in where)]:
         if c not in cols:
             raise ConnError(f'The table "{table}" has no column "{c}".' if c else "Pick the column that tells which row is newest.")
     from plant import dbkinds
@@ -142,15 +145,17 @@ def latest_row(db, table, want, order_col, key_col="", key_val=""):
     rest = f"{', '.join(qc(c) for c in pick)} FROM {qt(table)}"
     params = []
     if key_col:
-        rest += f" WHERE {qc(key_col)} = %s"
-        params.append(str(key_val))
+        where = [{"col": key_col, "val": key_val}]
+    if where:
+        rest += " WHERE " + " AND ".join(f"{qc(f['col'])} = %s" for f in where)
+        params += [str(f.get("val", "")) for f in where]
     sql = dbkinds.top(integrations.kind_of(db), rest + f" ORDER BY {qc(order_col)} DESC", 1)
     conn = integrations._db(db)
     with conn.cursor() as c:
         c.execute(sql, params)
         r = c.fetchone()
     if not r:
-        raise ConnError(f'No rows in "{table}"' + (f' where {key_col} is {key_val}' if key_col else ""))
+        raise ConnError(f'No rows in "{table}"' + (" where " + " and ".join(f"{f['col']} is {f.get('val', '')}" for f in where) if where else ""))
     row = dict(zip(pick, r))
     return row, row[order_col]
 
@@ -190,7 +195,7 @@ def fetch_feed(machine, prev, t_ms):
     if not s.get("orderCol"):
         raise ConnError("Pick the column that tells which row is newest (a time stamp or an ID).")
     try:
-        row, order_val = latest_row(s["db"], s.get("table", ""), want, s["orderCol"], s.get("keyCol", ""), s.get("keyVal", ""))
+        row, order_val = latest_row(s["db"], s.get("table", ""), want, s["orderCol"], s.get("keyCol", ""), s.get("keyVal", ""), s.get("where"))
     except ConnError:
         raise
     except Exception as e:  # the database's own error (timeout, lost connection, permissions)

@@ -261,13 +261,15 @@ def schema(db="assets"):
     return {"database": name, "tables": [{"name": t, "columns": cols} for t, cols in tables.items()]}
 
 
-def preview(table, db="assets"):
+def preview(table, db="assets", where=None):
+    """The first rows of a table (only those matching a source card's filters, when given)."""
     names = {t["name"] for t in schema(db)["tables"]}
     if table not in names:
         raise ConnError("Unknown table.")
     from plant import dbkinds
     k = kind_of(db)
-    return run_saved(dbkinds.top(k, f"* FROM {dbkinds.table(k, table)}", 20), {}, limit=20, db=db)
+    w = " AND ".join(f"{dbkinds.quote(k, f['col'])} = {dbkinds.literal(k, f.get('val', ''))}" for f in (where or []) if f.get("col"))
+    return run_saved(dbkinds.top(k, f"* FROM {dbkinds.table(k, table)}" + (f" WHERE {w}" if w else ""), 20), {}, limit=20, db=db)
 
 
 def s2k_db_rows(sql):

@@ -201,3 +201,11 @@ class _Cursor:
             except Exception:  # noqa: BLE001 - closing a broken connection
                 pass
         return False
+
+
+def literal(kind, v):
+    """A text value written into SQL (the suite's builders only; values typed by an Admin)."""
+    v = str(v)
+    if kind == "mysql":
+        v = v.replace("\\", "\\\\")
+    return "'" + v.replace("'", "''") + "'"
