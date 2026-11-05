@@ -641,9 +641,9 @@ __SUITEBAR__
           <div class="flex items-center space-x-3 bg-slate-50 p-2 rounded-xl border border-slate-200">
             <label class="text-xs font-bold text-slate-700">Total Shifts Operating:</label>
             <div class="flex items-center space-x-2">
-              <button onclick="adjustShiftCount(-1)" disabled style="opacity:.6;cursor:not-allowed" title="Set in the Scheduler (Lines &amp; Shifts) or Admin, and kept in step here." class="w-8 h-8 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700 hover:bg-slate-100 cursor-pointer shadow-2xs">-</button>
+              <button onclick="adjustShiftCount(-1)" class="w-8 h-8 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700 hover:bg-slate-100 cursor-pointer shadow-2xs">-</button>
               <span id="shift-count-display" class="font-extrabold text-sm text-blue-700 w-6 text-center">2</span>
-              <button onclick="adjustShiftCount(1)" disabled style="opacity:.6;cursor:not-allowed" title="Set in the Scheduler (Lines &amp; Shifts) or Admin, and kept in step here." class="w-8 h-8 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700 hover:bg-slate-100 cursor-pointer shadow-2xs">+</button>
+              <button onclick="adjustShiftCount(1)" class="w-8 h-8 rounded-lg bg-white border border-slate-300 font-extrabold text-slate-700 hover:bg-slate-100 cursor-pointer shadow-2xs">+</button>
             </div>
           </div>
         </div>
@@ -1544,7 +1544,7 @@ __SUITEBAR__
     // every labor total, but they make no units (so no rate/downtime/scrap).
     // Labor-only stages (no units). All three are handled identically: own wages, counted once, never spread.
     const STAGES = ['Stage 1', 'Stage 2', 'Stage 3', 'Glue Bead', 'Packaging Only', 'Non Production', 'Backup'];
-    const FROM_SUITE_TEXT = "Set in the Scheduler (Lines & Shifts) or Admin, and kept in step here.";
+    const FROM_SUITE_TEXT = "A machine setting: set in Admin \u203a Machines or the Scheduler (Lines & Shifts).";
     const LOCK_ATTR = 'style="opacity:.6;cursor:not-allowed" title="' + FROM_SUITE_TEXT.replace(/&/g, '&amp;') + '"';
     const isLaborOnly = (stage) => stage === 'Packaging Only' || stage === 'Non Production' || stage === 'Backup' || stage === 'Stage 3' || stage === 'Glue Bead';
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -3963,7 +3963,7 @@ __SUITEBAR__
         };
         const dayButtons = DAYS_SHORT.map((dName, dow) => {
           const active = s.daysOfWeek.includes(dow);
-          return `<button type="button" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onclick="toggleScheduleDay(${idx}, ${dow})" class="px-2.5 py-1 text-xs rounded-md border transition cursor-pointer ${active ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}">${dName}</button>`;
+          return `<button type="button" onclick="toggleScheduleDay(${idx}, ${dow})" class="px-2.5 py-1 text-xs rounded-md border transition cursor-pointer ${active ? 'bg-blue-600 text-white border-blue-600 font-semibold shadow-2xs' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}">${dName}</button>`;
         }).join('');
 
         const opacityClass = s.enabled ? '' : 'opacity-60 bg-slate-100';
@@ -3987,17 +3987,17 @@ __SUITEBAR__
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="block text-xs font-semibold text-slate-600 mb-1">Start Time</label>
-                  <input type="time" value="${s.startTime}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'startTime', this.value)" class="w-full bg-white">
+                  <input type="time" value="${s.startTime}" onchange="updateSchedule(${idx}, 'startTime', this.value)" class="w-full bg-white">
                 </div>
                 <div>
                   <label class="block text-xs font-semibold text-slate-600 mb-1">End Time</label>
-                  <input type="time" value="${s.endTime}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'endTime', this.value)" class="w-full bg-white">
+                  <input type="time" value="${s.endTime}" onchange="updateSchedule(${idx}, 'endTime', this.value)" class="w-full bg-white">
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-3 items-center">
                 <div>
                   <label class="block text-xs font-semibold text-slate-600 mb-1">Lunch Duration (Mins)</label>
-                  <input type="number" min="0" max="180" value="${s.lunchMins}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'lunchMins', Number(this.value))" class="w-full bg-white">
+                  <input type="number" min="0" max="180" value="${s.lunchMins}" onchange="updateSchedule(${idx}, 'lunchMins', Number(this.value))" class="w-full bg-white">
                 </div>
                 <div class="pt-4">
                   <label class="inline-flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
@@ -4207,21 +4207,21 @@ __SUITEBAR__
               <div class="flex flex-wrap items-center gap-2.5 flex-1">
                 <button type="button" onclick="toggleLineCollapsed(${jsArg(line.id)})" class="w-9 h-9 shrink-0 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold cursor-pointer" title="${collapsed ? 'Expand' : 'Collapse'} this line" aria-expanded="${!collapsed}">${collapsed ? '&#9656;' : '&#9662;'}</button>
                 <input type="color" value="${line.color || '#2563eb'}" ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'color', this.value)" class="w-9 h-9 p-0.5 bg-white rounded-lg cursor-pointer shrink-0" title="Choose Line Color Code">
-                <input type="text" value="${esc(line.name)}" ${line.machineId ? 'readonly ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'name', this.value)" class="font-bold text-base bg-white px-3 py-1.5 min-w-[240px]">
-                <select ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">
+                <input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)" class="font-bold text-base bg-white px-3 py-1.5 min-w-[240px]">
+                <select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">
                   ${STAGES.map(st => `<option value="${st}" ${line.stage === st ? 'selected' : ''}>${st}</option>`).join('')}
                 </select>
                 <span class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-200 text-slate-700">
                   Total Active Employees: ${totalActiveSlots}
                 </span>
                 ${thresholdLineBadge(line.id)}
-                ${line.machineId ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#e0f2fe;color:#075985" title="${FROM_SUITE_TEXT}">From the suite${line.inService === false ? ' · out of service' : ''}</span>`
-                  : line.suiteMissing ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#fee2e2;color:#991b1b" title="The Scheduler has no machine for this line, so it isn't planned there.">Not in the suite</span>` : ''}
+                ${line.machineId ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#e0f2fe;color:#075985" title="A machine in the Scheduler and the Operator Kiosk. Its name, stage and shifts are set here; its color and speed in Admin.">Machine${line.inService === false ? ' · out of service' : ''}</span>`
+                  : line.suiteMissing ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#fee2e2;color:#991b1b" title="Save the plan to add this line to the Scheduler and Admin.">New machine</span>` : ''}
                 ${collapsed ? `<span class="text-xs font-semibold text-emerald-700">Running: ${[1,2,3,4,5,6].filter(n => n <= maxShiftCount && line.activeShifts && line.activeShifts[n]).map(n => 'S' + n).join(', ') || 'none'}</span>` : ''}
               </div>
               <div class="flex items-center space-x-2">
                 <button onclick="promptCopyLine(${lIdx})" class="text-xs bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold px-3 py-1.5 rounded-lg shadow-2xs cursor-pointer transition">📋 Copy Line</button>
-                <button onclick="removeLine(${lIdx})" ${line.machineId ? 'hidden' : ''} class="text-xs text-red-600 hover:text-red-800 font-semibold px-2.5 py-1 rounded hover:bg-red-50 cursor-pointer">Delete Line</button>
+                <button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Deleting it takes the machine out of service when the plan is saved (its records are kept)"' : ''} class="text-xs text-red-600 hover:text-red-800 font-semibold px-2.5 py-1 rounded hover:bg-red-50 cursor-pointer">Delete Line</button>
               </div>
             </div>
 
