@@ -132,15 +132,25 @@ const SCALES={
   month:{px:2,start:t=>{const d=new Date(t);return new Date(d.getFullYear(),d.getMonth(),1).getTime()},end:s=>{const d=new Date(s);return new Date(d.getFullYear(),d.getMonth()+1,1).getTime()},step:"m",snap:2*HOUR}};
 function viewWindow(){const sc=SCALES[S.view.scale];const a=sc.start(S.view.anchor);return {sc,a,b:sc.end(a)}}
 /* Hours no shift covers (e.g. midnight to 6 am) are left off the board: every day shows only the hours from the
-   earliest shift start to the latest shift end of the shifts the lines use. A shift past midnight shows whole days. */
+   earliest shift start to the latest shift end of all the plant's shifts (also a shift no line is crewed for yet,
+   so a planner sees the whole working day). A shift past midnight shows whole days. */
 function shownHours(){
-  const used=new Set(S.cfg.machines.filter(m=>m.active!==false).flatMap(m=>m.shifts||[]));
-  const sh=S.cfg.shifts.filter(s=>used.has(s.id)&&(s.days||[]).length);
+  const sh=S.cfg.shifts.filter(s=>(s.days||[]).length);
   if(!sh.length)return [0,24];
   let lo=24*60,hi=0;
   for(const s of sh){const a=hm(s.start),e=hm(s.end);if(e<=a)return [0,24];lo=Math.min(lo,a);hi=Math.max(hi,e)}
   return [Math.floor(lo/60),Math.min(24,Math.ceil(hi/60))];
 }
+/* Each shift's stretch of every day in view, shaded on the board: 1st shift lightest, 2nd darker, 3rd darker still. */
+function shiftBands(a,b){
+  const sh=S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start));
+  const out=[];
+  for(let d=addDays(a,-1);d<b;d=addDays(d,1)){const dow=new Date(d).getDay();
+    sh.forEach((s,i)=>{if(!(s.days||[]).includes(dow))return;const s0=hm(s.start),L=(hm(s.end)-s0+1440)%1440||1440;
+      const st=d+s0*MIN,en=st+L*MIN;if(en>a&&st<b)out.push({s:Math.max(st,a),e:Math.min(en,b),n:i+1,name:s.name})})}
+  return out;
+}
+function bandHtml(bands,a,px){return bands.map(x=>`<div class="sband n${Math.min(x.n,3)}" style="left:${X(x.s,a,px)}px;width:${Math.max(0,X(x.e,a,px)-X(x.s,a,px))}px" title="${esc(x.name)}"></div>`).join("")}
 let TMAP=null;   // time <-> board position for the view on screen
 function makeMap(a,b,px){
   const [h0,h1]=shownHours(),days=[];let off=0;
@@ -178,6 +188,7 @@ function renderSchedule(){
     axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||hrsLbl}</div>`
       :`<div class="tick ${d.getDay()===1?"major":""} ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${d.getDate()}</span>${sp==="HOLIDAY"?"H":DOW[d.getDay()][0]}</div>`}}
   const bk=buckets(a,b);
+  const bands=bandHtml(shiftBands(a,b),a,px);
   const nowX=(now>=a&&now<b)?`<div class="nowline" style="left:${X(now,a,px)}px"></div>`:"";
   let rows="";
   for(const st of STAGE_ORDER){
@@ -185,7 +196,7 @@ function renderSchedule(){
     const all=ms.flatMap(m=>resultsFor(m.id));
     const gTot=all.reduce((s,r)=>s+qtyIn(r,a,b),0);
     const gcells=bk.map(([x,y])=>{const q=all.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
-    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot">${fmtN(gTot)} pcs in view</span></div><div class="g-track" style="width:${W}px">${gcells}</div></div>`;
+    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot">${fmtN(gTot)} pcs in view</span></div><div class="g-track" style="width:${W}px">${bands}${gcells}</div></div>`;
     for(const m of ms){
       const rs=resultsFor(m.id);
       const work=S.work[m.id]||[];let off="",cur=a;
@@ -195,33 +206,41 @@ function renderSchedule(){
       const bars=rs.filter(r=>r.end>a&&r.start<b).map(r=>{
         const mo=S.mos[r.moId];if(!mo)return "";
         const l=X(r.start,a,px),w=Math.max(4,X(r.end,a,px)-l),cw=r.coMin?Math.min(w,X(r.runStart,a,px)-l):0;
-        const tip=`${mo.mo} · ${mo.part} · ${fmtN(r.qty)} pcs\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\nChangeover ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
-        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}</b><span>${esc(mo.part)} · ${fmtK(r.qty)}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}</div>`}).join("");
+        const tip=`${mo.mo} · ${mo.part} · ${fmtN(r.qty)} pcs${r.running?" · RUNNING at the kiosk now":""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\nChangeover ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
+        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}</b><span>${esc(mo.part)} · ${fmtK(r.qty)}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}</div>`}).join("");
       const tot=rs.reduce((s,r)=>s+qtyIn(r,a,b),0);
       const cells=bk.map(([x,y])=>{const q=rs.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
       const sp=m.stage==="s1"?`${m.mode==="fixed"?m.ppm+" PPM":m.mode==="new"?"New-machine PPM":"Sheet PPM"}`:`${(S.modes[m.stage]||[]).find(x=>x[0]===m.mode)?.[1].split(" (")[0]||"Fixed"}`;
       const lab=(S.labor.lines||{})[m.id];
       const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} no crew`).join(" · "):"";
-      rows+=`<div class="g-row"><div class="g-lab"><span class="nm">${esc(m.name)}${m.stage==="s1"?' <span class="pill" title="Feeds the Operator Kiosk queue">kiosk</span>':""}</span><span class="ds">${esc(sp)} · ${m.scrap}% scrap · ${m.downtime}% down</span>${lab?`<span class="ds" title="Crew per shift from the Labor Budget plan">Crew: ${esc(crewTxt)}</span>`:""}<span class="tot">${fmtN(tot)} pcs in view</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${off}${grid}${bars}${cells}</div></div>`;
+      rows+=`<div class="g-row"><div class="g-lab"><span class="nm">${esc(m.name)}${m.stage==="s1"?' <span class="pill" title="Feeds the Operator Kiosk queue">kiosk</span>':""}</span><span class="ds">${esc(sp)} · ${m.scrap}% scrap · ${m.downtime}% down</span>${lab?`<span class="ds" title="Crew per shift from the Labor Budget plan">Crew: ${esc(crewTxt)}</span>`:""}<span class="tot">${fmtN(tot)} pcs in view</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${bars}${cells}</div></div>`;
     }
   }
-  const moList=mos.filter(mo=>{const q=S.view.q.trim().toLowerCase();if(q&&!(`${mo.mo} ${mo.part}`.toLowerCase().includes(q)))return false;
-    if(!S.view.showDone){const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]);if(ops.every(o=>(o==="s1"&&s1Done)||S.jobs[jobKey(mo.id,o)]))return false}return true})
+  /* Orders by stage: an MO with several stages is listed once in each stage it still needs, so each section is the
+     work waiting for that kind of line. A card drags (or opens) its own stage. */
+  const q=S.view.q.trim().toLowerCase();
+  const moList=mos.filter(mo=>!q||`${mo.mo} ${mo.part}`.toLowerCase().includes(q))
     .sort((x,y)=>(x.due||9e15)-(y.due||9e15)||String(x.mo).localeCompare(String(y.mo)));
-  const rail=moList.map(mo=>{
-    const item=mo.item;
+  const card=(mo,o)=>{
+    const item=mo.item,k=jobKey(mo.id,o),r=S.res[k],j=S.jobs[k];
     const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
-    const chips=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]).map(o=>{
-      const k=jobKey(mo.id,o),r=S.res[k];
-      if(o==="s1"&&s1Done)return `<span class="chip s1 done" title="Stage 1 finished at the pleater">S1 <span class="t">done</span></span>`;
-      const blocked=o!=="s1"&&!s1Done&&!S.jobs[jobKey(mo.id,"s1")];
-      return `<span class="chip ${o} ${r?"done":""} ${blocked&&!r?"blocked":""}" draggable="${blocked&&!r?"false":"true"}" data-mo="${esc(mo.id)}" data-op="${o}" tabindex="0" role="button" title="${blocked&&!r?"Schedule Stage 1 first":r?`${esc(machineById(r.machineId)?.name)}: ${fmtDT(r.start)} → ${fmtDT(r.end)}`:"Drag onto a "+STAGES[o].short+" line, or click to set a start time"}">${STAGES[o].tag}${r?` <span class="t">${fmtDT(r.end).slice(4)}</span>`:""}</span>`}).join("");
-    // the whole card drags the stage that most needs a place: the first one not on the board yet, else Stage 1
-    const can=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done)&&(o==="s1"||s1Done||S.jobs[jobKey(mo.id,"s1")]));
-    const cardOp=can.find(o=>!S.jobs[jobKey(mo.id,o)])||can[0]||"";
-    return `<div class="mo ${cardOp?"grab":""}" ${cardOp?`draggable="true" data-mo="${esc(mo.id)}" data-op="${cardOp}" title="Drag onto a ${esc(STAGES[cardOp].short)} line (or drag one stage below)"`:""}><div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater; later stages still to run">closed at S1</span>':""}</span><span class="mo-qty">${fmtN(mo.qty)}</span></div>
-      <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}${mo.produced?`<span>${fmtN(mo.produced)} made</span>`:""}</div>
-      <div class="chips">${chips}</div></div>`}).join("");
+    const blocked=o!=="s1"&&!s1Done&&!S.jobs[jobKey(mo.id,"s1")];
+    const others=STAGE_ORDER.filter(x=>x!==o&&mo.ops&&mo.ops[x]).map(x=>{const rx=S.res[jobKey(mo.id,x)];const dn=x==="s1"&&s1Done;
+      return `<span class="chip mini ${x} ${rx||dn?"done":""}" title="${esc(STAGES[x].name)}: ${dn?"finished at the pleater":rx?`${esc(machineById(rx.machineId)?.name||"")} ${fmtDT(rx.start)} → ${fmtDT(rx.end)}`:"not on the board yet"}">${STAGES[x].tag}</span>`}).join("");
+    const where=r?`<span class="on">${esc(machineById(r.machineId)?.name||"")} · ${fmtDT(r.start)} → ${fmtDT(r.end).slice(4)}</span>`:blocked?`<span class="muted">Schedule Stage 1 first</span>`:`<span class="muted">Not on the board yet</span>`;
+    return `<div class="mo ${o} ${blocked?"blocked":"grab"} ${j?"placed":""}" ${blocked?"":`draggable="true"`} data-mo="${esc(mo.id)}" data-op="${o}" tabindex="0" role="button" title="${blocked?"Schedule Stage 1 for this order first":`Drag onto a ${esc(STAGES[o].short)} line, or click to set a start time`}">
+      <div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${o!=="s1"&&mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater">S1 closed</span>':""}</span><span class="mo-qty">${fmtN(mo.qty)}</span></div>
+      <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}${o==="s1"&&mo.produced?`<span>${fmtN(mo.produced)} made</span>`:""}</div>
+      <div class="mo-where">${where}${others?`<span class="others">${others}</span>`:""}</div></div>`};
+  const sections=STAGE_ORDER.map(o=>{
+    const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
+      if(o==="s1"&&s1Done)return false;
+      return S.view.showDone||!S.jobs[jobKey(mo.id,o)]});
+    if(!list.length&&!S.cfg.machines.some(m=>m.stage===o))return "";
+    const open=!(S.view.closed||{})[o];
+    return `<section class="rail-sec ${o}"><button type="button" class="rail-sec-h" data-sec="${o}" aria-expanded="${open}"><span class="swatch" style="background:var(--${o==="s1"?"st1":o})"></span>${esc(STAGES[o].name)}<span class="n">${list.length}</span></button>
+      ${open?(list.map(mo=>card(mo,o)).join("")||`<p class="muted small" style="padding:6px 12px">${S.view.showDone?"No orders for this stage.":"Everything for this stage is on the board."}</p>`):""}</section>`}).join("");
+  const rail=moList.length?sections:"";
   main.innerHTML=`
   <div class="toolbar">
     <div class="seg" role="group" aria-label="Scale">${["day","week","month"].map(s=>`<button data-scale="${s}" aria-pressed="${S.view.scale===s}">${s}</button>`).join("")}</div>
@@ -229,7 +248,7 @@ function renderSchedule(){
     <input type="date" id="jump" aria-label="Jump to date" value="${isoDay(S.view.anchor)}">
     <span class="range">${esc(rangeLabel(a,b))}</span>
     <span class="spacer"></span>
-    <div class="legend"><span><i style="background:var(--st1)"></i>Stage 1</span><span><i style="background:var(--eb)"></i>End Band</span><span><i style="background:var(--ac)"></i>Arts &amp; Crafts</span><span><i style="background:var(--gb)"></i>Glue Bead</span><span><i class="hatch"></i>Changeover</span><span><i style="background:repeating-linear-gradient(135deg,var(--off) 0 3px,var(--off-stripe) 3px 6px);border:1px solid var(--line)"></i>Off shift / break</span></div>
+    <div class="legend"><span><i style="background:var(--st1)"></i>Stage 1</span><span><i style="background:var(--eb)"></i>End Band</span><span><i style="background:var(--ac)"></i>Arts &amp; Crafts</span><span><i style="background:var(--gb)"></i>Glue Bead</span><span><i class="hatch"></i>Changeover</span>${S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start)).slice(0,3).map((s,i)=>`<span><i class="sband-key n${i+1}"></i>${esc(s.name)}</span>`).join("")}<span><i style="background:repeating-linear-gradient(135deg,var(--off) 0 3px,var(--off-stripe) 3px 6px);border:1px solid var(--line)"></i>Off shift / break</span></div>
   </div>
   <div class="kpis">
     <span class="kpi"><b>${mos.length}</b> orders</span><span class="kpi"><b>${scheduled}</b> fully scheduled</span>
@@ -240,14 +259,14 @@ function renderSchedule(){
   <div class="board">
     <aside class="rail" aria-label="Manufacturing orders">
       <div class="rail-head">
-        <div class="row"><h3>Orders</h3><span class="muted small">drag a stage onto a line</span></div>
+        <div class="row"><h3>Orders</h3><span class="muted small">by stage · drag onto a line</span></div>
         <div class="row"><input type="search" id="q" placeholder="Find MO or part" value="${esc(S.view.q)}"></div>
-        <label class="check small"><input type="checkbox" id="showdone" ${S.view.showDone?"checked":""}> Show fully scheduled orders</label>
+        <label class="check small"><input type="checkbox" id="showdone" ${S.view.showDone?"checked":""}> Show stages already on the board</label>
       </div>
       <div class="rail-list">${rail||`<div class="empty"><b>No orders yet</b>Import your MO list on the <a href="#orders">Orders</a> page.</div>`}</div>
     </aside>
     <div class="gwrap"><div class="g" style="width:calc(var(--labw) + ${W}px)">
-      <div class="g-head"><div class="g-corner">Line</div><div class="g-axis" style="width:${W}px">${axis}</div></div>
+      <div class="g-head"><div class="g-corner">Line</div><div class="g-axis" style="width:${W}px">${bands}${axis}</div></div>
       ${rows||`<div class="empty"><b>No lines set up</b>Add machines on the <a href="#lines">Lines &amp; Shifts</a> page.</div>`}
       <div style="position:absolute;top:46px;bottom:0;left:var(--labw);width:${W}px;pointer-events:none">${nowX}</div>
     </div></div>
@@ -272,36 +291,43 @@ function wireSchedule(a,px){
   $("#jump").onchange=e=>{if(e.target.value){const [y,m,d]=e.target.value.split("-").map(Number);S.view.anchor=new Date(y,m-1,d).getTime();saveView();load(true)}};
   $("#q").oninput=e=>{S.view.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)};
   $("#showdone").onchange=e=>{S.view.showDone=e.target.checked;saveView();render()};
-  $$(".mo[data-op]").forEach(c=>{
-    c.addEventListener("dragstart",e=>{if(e.target.closest&&e.target.closest(".chip"))return;   // a stage chip drags its own stage
-      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grab:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging")});
+  $$(".rail-sec-h").forEach(h=>h.onclick=()=>{S.view.closed=Object.assign({},S.view.closed,{[h.dataset.sec]:h.getAttribute("aria-expanded")==="true"});render()});
+  $$(".rail .mo[data-op]").forEach(c=>{
+    const blocked=c.classList.contains("blocked");
+    c.addEventListener("dragstart",e=>{if(blocked){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
+      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grabPx:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging")});
     c.addEventListener("dragend",()=>c.classList.remove("dragging"));
-  });
-  $$(".chip").forEach(c=>{
-    c.addEventListener("dragstart",e=>{if(c.classList.contains("blocked")){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
-      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grab:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move"});
-    const open=()=>{if(c.classList.contains("blocked")){toast("Schedule Stage 1 for this order first.");return}openJobDialog(+c.dataset.mo,c.dataset.op)};
+    const open=()=>{if(blocked){toast("Schedule Stage 1 for this order first.");return}openJobDialog(+c.dataset.mo,c.dataset.op)};
     c.addEventListener("click",open);c.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open()}});
   });
   $$(".bar").forEach(bEl=>{
     bEl.addEventListener("dragstart",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;const rect=bEl.getBoundingClientRect();
-      DRAG={moId:j.moId,op:j.op,grab:(e.clientX-rect.left)/px*HOUR};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move"});
+      DRAG={moId:j.moId,op:j.op,grabPx:e.clientX-rect.left,w:rect.width,from:j.id};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move";
+      bEl.classList.add("dragging")});
+    bEl.addEventListener("dragend",()=>bEl.classList.remove("dragging"));
     bEl.addEventListener("click",()=>{const j=S.jobs[bEl.dataset.job];if(j)openJobDialog(j.moId,j.op)});
   });
-  const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();let t=(TMAP?TMAP.t(e.clientX-rect.left):a+(e.clientX-rect.left)/px*HOUR)-(DRAG?DRAG.grab:0);const sn=SCALES[S.view.scale].snap;return Math.round(t/sn)*sn};
+  /* where the MO would start: the dragged bar's left edge (a bar keeps the spot it was grabbed by), snapped */
+  const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();const x=Math.max(0,e.clientX-rect.left-(DRAG&&DRAG.grabPx||0));
+    const t=TMAP?TMAP.t(x):a+x/px*HOUR;const sn=SCALES[S.view.scale].snap;return Math.round(t/sn)*sn};
   $$(".g-track[data-m]").forEach(tr=>{
     const m=machineById(+tr.dataset.m);
     tr.addEventListener("dragover",e=>{if(!DRAG)return;const ok=m.stage===DRAG.op;tr.classList.toggle("drop-ok",ok);tr.classList.toggle("drop-no",!ok);
       if(ok){e.preventDefault();e.dataTransfer.dropEffect="move";let g=tr.querySelector(".ghost-line");if(!g){g=document.createElement("div");g.className="ghost-line";g.innerHTML="<span></span>";tr.appendChild(g)}
-        const t=tAt(tr,e);g.style.left=X(t,a,px)+"px";g.firstChild.textContent=fmtDT(t)}});
+        const t=tAt(tr,e);g.style.left=X(t,a,px)+"px";g.style.width=(DRAG.w?Math.max(2,DRAG.w):2)+"px";g.classList.toggle("box",!!DRAG.w);g.firstChild.textContent="Starts "+fmtDT(t)}});
     tr.addEventListener("dragleave",e=>{if(!tr.contains(e.relatedTarget)){tr.classList.remove("drop-ok","drop-no");tr.querySelector(".ghost-line")?.remove()}});
     tr.addEventListener("drop",async e=>{e.preventDefault();tr.classList.remove("drop-ok","drop-no");tr.querySelector(".ghost-line")?.remove();
       if(!DRAG)return;const d=DRAG;DRAG=null;
       if(m.stage!==d.op){toast(`${STAGES[d.op].short} work can only go on a ${STAGES[d.op].short} line.`);return}
       if(d.op!=="s1"&&!S.jobs[jobKey(d.moId,"s1")]){toast("Schedule Stage 1 for this order first.");return}
-      const k=jobKey(d.moId,d.op);
-      const r=await putJob({moId:d.moId,op:d.op,machineId:m.id,reqStart:tAt(tr,e)});
-      if(r.ok&&d.op!=="s1"){const x=S.res[k];if(x&&x.paced)toast(`Held back to ${fmtDT(x.start)} so it doesn't run out of Stage 1 parts.`)}
+      const k=jobKey(d.moId,d.op),want=tAt(tr,e);
+      const was=S.res[k];
+      if(was&&was.running&&was.machineId===m.id){toast(`${S.mos[d.moId]?.mo||"This MO"} is running on ${m.name} now, so it stays at now until the operator ends it at the kiosk.`);return}
+      const r=await putJob({moId:d.moId,op:d.op,machineId:m.id,reqStart:want});
+      const x=S.res[k];
+      if(r.ok&&x){
+        if(x.paced)toast(`Held back to ${fmtDT(x.start)} so it doesn't run out of Stage 1 parts.`);
+        else if(x.start-want>SCALES[S.view.scale].snap)toast(`Starts ${fmtDT(x.start)}: the first time ${m.name} is crewed and free from ${fmtDT(want)}.`)}
     });
   });
 }
