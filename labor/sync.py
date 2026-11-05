@@ -183,9 +183,13 @@ def apply_to_suite(data, old=None):
         return data, []
     changes = []
     # ---- shifts: the plan's shift k is the suite's k-th shift
-    count = max(1, min(MAX_SHIFTS, int(_num(data.get("shiftCount")) or 1)))
     scheds = [x for x in (data.get("schedules") or []) if isinstance(x, dict)]
     suite = list(Shift.objects.prefetch_related("breaks").order_by("sort", "id"))
+    if data.get("shiftCount") in (None, ""):   # a plan without a shift count leaves the suite's shifts as they are
+        count = max([len(suite)] + [int(_num(x.get("shift"))) for x in scheds if _num(x.get("shift"))])
+    else:
+        count = int(_num(data.get("shiftCount")) or 1)
+    count = max(1, min(MAX_SHIFTS, count))
     by_num = {}
     for k in range(1, count + 1):
         a = next((x for x in scheds if x.get("shift") == k and str(x.get("code") or "").upper() == "A"), None) or \
