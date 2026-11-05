@@ -90,6 +90,7 @@ def groups():
         out.append({"key": f"m:{m.pk}", "kind": "machine", "title": m.name, "sub": "Machine readings", "color": m.color,
                     "dbs": ["machines", "assets"], "db": src.get("db") or "machines", "table": src.get("table", "") if m.feed_type == "db" else "",
                     "slots": _slots(MACHINE_SLOTS, cur), "other": other,
+                    "slotWhere": clean_slot_where(src.get("slotWhere")) if m.feed_type == "db" else {},
                     "src": src.get("source") if m.feed_type == "db" else None,
                     "filters": (src.get("where") or ([{"col": src["keyCol"], "val": src.get("keyVal", "")}] if src.get("keyCol") else []))
                     if m.feed_type == "db" else []})
@@ -117,7 +118,26 @@ def groups():
         g["missing"] = [s["label"] for s in req if not s["col"]]
         g["status"] = ("custom" if g.get("custom") else "other" if g["other"] else
                        "done" if g["table"] and not g["missing"] else "partial" if done else "missing")
-        g["state"] = {"src": g["src"], "db": g["db"], "table": g["table"], "map": {s["k"]: s["col"] for s in g["slots"] if s["col"]}}
+        g["state"] = {"src": g["src"], "db": g["db"], "table": g["table"], "map": {s["k"]: s["col"] for s in g["slots"] if s["col"]},
+                      "where": g.get("slotWhere") or {}}
+    return out
+
+
+SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "errCode", "errText"}   # (not "Newest row")
+
+
+def clean_slot_where(raw, cols=None):
+    """Each machine input's own rows: {input: [{"col", "val"}]} for a table that keeps one value per row with a tag
+    (e.g. tag = Salvatore_Speed for the speed and tag = Salvatore_Count for the count, both in the value column).
+    Inputs with no filter are left out. cols: the table's columns, to drop any it doesn't have."""
+    out = {}
+    for k, fs in (raw or {}).items() if isinstance(raw, dict) else []:
+        if k not in SLOT_FILTERABLE or not isinstance(fs, list):
+            continue
+        keep = [{"col": str(f.get("col")), "val": str(f.get("val") if f.get("val") is not None else "").strip()[:120]}
+                for f in fs if isinstance(f, dict) and f.get("col") and (cols is None or f.get("col") in cols)]
+        if keep:
+            out[k] = keep
     return out
 
 
@@ -184,3 +204,91 @@ def summary(gs):
     return {"total": len(gs), "done": len(done), "pct": round(len(done) / len(gs) * 100) if gs else 100,
             "missing": [{"title": g["title"], "sub": g["sub"], "key": g["key"], "need": g["missing"] or ["a table"]}
                         for g in need if g["status"] != "done"]}
+
+
+def test_data(g, card, mp, rows=5, slot_where=None):
+    """What the box would read now with these wires, without saving anything: the newest few rows of its card (its
+    filters applied), one column per wired input. Machines: newest first by their "Newest row" column. S2K and
+    changeover queries: the SQL their builders make, run for real (changeover queries for the first open MO's part)."""
+    from plant import dbkinds
+
+    from . import kadmin
+    db, table = card.db, card.table
+    slots = {s["k"]: s for s in g["slots"]}
+    mp = {k: str(v) for k, v in (mp or {}).items() if k in slots and str(v or "").strip()}
+    if not mp:
+        raise integrations.ConnError("Wire at least one column first.")
+    sch = {t["name"]: {c["name"] for c in t["columns"]} for t in integrations.schema(db)["tables"]}
+    if table not in sch:
+        raise integrations.ConnError(f'There is no table "{table}" in the {DB_LABEL[db]}.')
+    bad = [c for c in mp.values() if c not in sch[table]]
+    if bad:
+        raise integrations.ConnError(f'The table "{table}" has no column ' + ", ".join(f'"{c}"' for c in bad) + ".")
+    kind = integrations.kind_of(db)
+    note = ""
+    params = {}
+    if g["kind"] == "machine":
+        qc, qt = integrations.quoters(db)
+        keys = [k for k in slots if k in mp]
+        sel = ", ".join(f"{qc(mp[k])} AS {qc(k)}" for k in keys)
+        w = [f"{dbkinds.quote(kind, f['col'])} = {dbkinds.literal(kind, f.get('val', ''))}" for f in card.filters or [] if f.get("col")]
+        rest = f"{sel} FROM {qt(table)}" + (" WHERE " + " AND ".join(w) if w else "")
+        if mp.get("orderCol"):
+            rest += f" ORDER BY {qc(mp['orderCol'])} DESC"
+            note = f"Newest {rows} rows by {mp['orderCol']}, the way the suite reads them each minute."
+        else:
+            note = "Wire “Newest row” to see the rows in the order the suite reads them."
+        sql = dbkinds.top(kind, rest, rows)
+    else:
+        filters = [{"col": f["col"], "val": str(f.get("val", ""))} for f in card.filters or []]
+        try:
+            if g["kind"] == "s2k":
+                sql = kadmin.s2k_build_sql({"table": table, **mp, "where": filters}, kind)
+                note = "The open MOs the Scheduler would get (first rows)."
+            else:
+                sql = kadmin.build_codata_sql(g["key"][2:], {"table": table, **mp, "where": filters}, kind)
+                from plant.models import MO
+                mo = MO.objects.filter(status="OPEN").exclude(part="").order_by("due", "id").first()
+                m = Machine.objects.filter(stage="s1", active=True).order_by("sort", "id").first()
+                params = {"part": mo.part if mo else "", "machine": m.name if m else "", "from_part": ""}
+                note = f"For part {params['part'] or '(none)'} on {params['machine'] or '(no machine)'}, as a changeover would ask."
+        except ValueError as e:
+            raise integrations.ConnError(str(e))
+    labels = {k: slots[k]["label"].split(" (")[0] for k in slots}
+    now = []
+    sw = {k: v for k, v in clean_slot_where(slot_where).items() if mp.get(k)}
+    if g["kind"] == "machine" and mp.get("orderCol") and mp.get("ppm"):
+        # what the suite reads each minute: per input, the newest row of its own rows (the card's filter, and the
+        # input's own filter when the table keeps one value per row with a tag)
+        from . import machinedata
+        m = Machine(name=g["title"], feed_type="db", feed_ppm_field=mp["ppm"], feed_count_field=mp.get("count", ""),
+                    feed_recipe_field=mp.get("recipe", ""),
+                    feed_src={"db": db, "table": table, "orderCol": mp["orderCol"], "where": card.filters or [], "slotWhere": sw},
+                    uptime_src={"type": "feed", "field": mp["run"]} if mp.get("run") else {},
+                    error_src={"type": "feed", "field": mp.get("errCode", ""), "textField": mp.get("errText", "")}
+                    if mp.get("errCode") or mp.get("errText") else {})
+        for k, v in machinedata.read_slots(m).items():
+            now.append({"label": labels.get(k, k), "col": v["col"], "own": sw.get(k) or [], "value": v["value"],
+                        "newest": v["newest"], "err": v["err"]})
+    if sw:   # rows of a tag table mix every input, so the plain newest rows aren't shown
+        return {"cols": [], "rows": [], "now": now, "note": f"Each input reads the newest row of its own rows, by {mp.get('orderCol', '?')}.",
+                "ms": 0, "card": card.title, "filters": card.filters or [], "sql": "", "tags": True}
+    r = integrations.run_saved(sql, params, limit=rows if g["kind"] == "machine" else 10, db=db)
+    cols = [{"k": c, "label": labels.get(c.lower(), labels.get(c, c)), "col": mp.get(c.lower(), mp.get(c, ""))} for c in r["columns"]]
+    return {"cols": cols, "rows": [[row.get(c["k"]) for c in cols] for row in r["rows"]], "note": note, "ms": r["ms"],
+            "card": card.title, "filters": card.filters or [], "sql": sql, "now": now}
+
+
+def column_values(card, col, limit=200):
+    """The different values a column has in a card's rows (its filters applied), for the filter value dropdowns."""
+    from plant import dbkinds
+    sch = {t["name"]: {c["name"] for c in t["columns"]} for t in integrations.schema(card.db)["tables"]}
+    if col not in sch.get(card.table, set()):
+        raise integrations.ConnError(f'The table "{card.table}" has no column "{col}".')
+    kind = integrations.kind_of(card.db)
+    qc, qt = integrations.quoters(card.db)
+    w = [f"{dbkinds.quote(kind, f['col'])} = {dbkinds.literal(kind, f.get('val', ''))}" for f in card.filters or []
+         if f.get("col") and f.get("col") != col]
+    rest = f"DISTINCT {qc(col)} AS v FROM {qt(card.table)}" + (" WHERE " + " AND ".join(w) if w else "") + f" ORDER BY {qc(col)}"
+    r = integrations.run_saved(dbkinds.top(kind, rest, limit), {}, limit=limit, db=card.db)
+    return [str(x["v"]) for x in r["rows"] if x.get("v") not in (None, "")]

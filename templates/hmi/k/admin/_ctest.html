@@ -1,0 +1,15 @@
+<div class="ctest">
+  <div class="row" style="align-items:baseline"><b class="grow">Test data</b><button type="button" class="btn ghost sm" data-ctest-close aria-label="Close the test data">✕</button></div>
+  {% if err %}<p class="note badt">{{ err }}</p>
+  {% else %}
+  <p class="note">From card <b>{{ T.card }}</b>{% for f in T.filters %}{% if forloop.first %} ({% endif %}{{ f.col }} = {{ f.val }}{% if forloop.last %}){% else %}, {% endif %}{% endfor %} · {{ T.note }}{% if T.ms %} <span class="num">{{ T.ms }} ms</span>{% endif %}</p>
+  {% if T.now %}<b class="note" style="color:var(--ink)">What the suite reads now</b>
+  <div class="tblwrap"><table class="xl"><thead><tr><th>Input</th><th>Column</th><th>Its rows</th><th>Newest value</th><th>Newest row</th></tr></thead><tbody>
+    {% for x in T.now %}<tr><td>{{ x.label }}</td><td class="mono">{{ x.col }}</td><td class="mono">{% for f in x.own %}{{ f.col }} = {{ f.val }}{% if not forloop.last %}, {% endif %}{% empty %}<span class="note">the card's</span>{% endfor %}</td>
+      <td class="mono">{% if x.err %}<span class="badt">{{ x.err }}</span>{% elif x.value is None %}<span class="note">empty</span>{% else %}<b>{{ x.value }}</b>{% endif %}</td><td class="mono">{{ x.newest|default_if_none:"" }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  {% if T.tags %}{% elif T.rows %}<div class="tblwrap"><table class="xl"><thead><tr>{% for c in T.cols %}<th>{{ c.label }}{% if c.col %}<small class="mono">{{ c.col }}</small>{% endif %}</th>{% endfor %}</tr></thead>
+    <tbody>{% for r in T.rows %}<tr>{% for v in r %}<td class="mono">{% if v is None %}<span class="note">empty</span>{% else %}{{ v }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="note badt">No rows came back{% if T.filters %}: no rows match the card's filter{% endif %}.</p>{% endif %}
+  {% if T.sql %}<details><summary class="note">SQL</summary><pre class="mono note" style="white-space:pre-wrap">{{ T.sql }}</pre></details>{% endif %}
+  {% endif %}
+</div>

@@ -526,7 +526,11 @@ def a_connector_save(request, s, p):
     except ValueError:
         mp = {}
     key = p.get("group", "")
-    r = run(request, s, "connectorSave", {"group": key, "src": p.get("src", ""), "map": mp})
+    try:
+        where = _json.loads(p.get("where") or "{}")
+    except ValueError:
+        where = {}
+    r = run(request, s, "connectorSave", {"group": key, "src": p.get("src", ""), "map": mp, "where": where})
     msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}
     gs = connector.groups()
     connector.link_cards(gs, create=False)
@@ -535,7 +539,7 @@ def a_connector_save(request, s, p):
         return thin.refused(msg["text"])
     if not r["ok"]:   # keep what was wired, so it can be fixed and saved again
         g = {**g, "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
-                            "table": p.get("table", ""), "map": mp}}
+                            "table": p.get("table", ""), "map": mp, "where": where}}
     C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
     html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
     html += render_to_string("hmi/k/admin/_csum.html", {"C": C, "oob": True}, request=request)
@@ -1192,3 +1196,54 @@ def a_calc_undo(request, s, p):
 def a_calc_reset(request, s, p):
     from labor import calcupdate
     return _calc(request, s, calcupdate.reset, lambda m: "Labor Calculator back to the one that came with the suite")
+
+
+@action("connectorTest")
+def a_connector_test(request, s, p):
+    """Test data: what a box would read now with the wires on screen (nothing is saved)."""
+    import json as _json
+
+    from . import connector
+    from .models import SourceCard
+    deny = _need(request, s, "connections.edit")
+    if deny:
+        return deny
+    try:
+        mp = _json.loads(p.get("map") or "{}")
+    except ValueError:
+        mp = {}
+    g = next((x for x in connector.groups() if x["key"] == p.get("group", "")), None)
+    c = SourceCard.objects.filter(pk=p["src"]).first() if str(p.get("src", "")).isdigit() else None
+    ctx = {"T": None, "err": ""}
+    if not g:
+        ctx["err"] = "Unknown data need."
+    elif not c:
+        ctx["err"] = "Drag a column in from a card first."
+    else:
+        try:
+            try:
+                where = _json.loads(p.get("where") or "{}")
+            except ValueError:
+                where = {}
+            ctx["T"] = connector.test_data(g, c, mp, slot_where=where)
+        except Exception as e:  # noqa: BLE001 - the database's own error, shown as it is
+            ctx["err"] = str(e)[:300]
+    return HttpResponse(render_to_string("hmi/k/admin/_ctest.html", ctx, request=request))
+
+
+@action("connectorValues")
+def a_connector_values(request, s, p):
+    """The values a column has in a card's rows: options for a filter's value box (a <datalist>)."""
+    from . import connector
+    from .models import SourceCard
+    deny = _need(request, s, "connections.edit")
+    if deny:
+        return deny
+    c = SourceCard.objects.filter(pk=p["src"]).first() if str(p.get("src", "")).isdigit() else None
+    vals = []
+    if c and p.get("col"):
+        try:
+            vals = connector.column_values(c, p["col"])
+        except Exception:  # noqa: BLE001 - no suggestions is fine; the value can still be typed
+            vals = []
+    return HttpResponse("".join(f'<option value="{escape(v)}"></option>' for v in vals))

@@ -16,7 +16,7 @@ SCHEMA = {"database": "dashboard", "tables": [
     {"name": "tools", "columns": [{"name": n, "type": "varchar"} for n in ("part_no", "tool_type", "tool")]}]}
 
 
-class ConnectorTests(TestCase):
+class Base(TestCase):
     def setUp(self):
         cache.clear()
         kadmin._tables_cache.clear()
@@ -38,6 +38,7 @@ class ConnectorTests(TestCase):
         self.assertTrue(r["ok"], r)
         return (r.get("data") or r)["id"]
 
+class ConnectorTests(Base):
     def test_every_need_is_listed(self):
         keys = [g["key"] for g in connector.groups()]
         self.assertIn(f"m:{Machine.objects.get(name='Barbara').pk}", keys)
@@ -175,3 +176,123 @@ class ConnectorTests(TestCase):
         self.assertContains(r, 'data-group="s2k"')
         self.assertNotContains(r, f'data-group="m:{bar.pk}"')
         self.assertContains(r, 'id="csum" hx-swap-oob="true"')
+
+    def test_test_data_reads_what_the_wires_would(self):
+        bar = Machine.objects.get(name="Barbara")
+        c = self.card("machines", "pleater_log", "Barbara readings", [{"col": "machine", "val": "Barbara"}])
+        g = next(x for x in connector.groups() if x["key"] == f"m:{bar.pk}")
+        seen = {}
+
+        def fake(sql, params, limit=500, db="assets"):
+            seen.update(sql=sql, db=db, limit=limit)
+            return {"columns": ["orderCol", "ppm"], "rows": [{"orderCol": 42, "ppm": 188}], "ms": 3, "truncated": False}
+        card = SourceCard.objects.get(pk=c)
+        with mock.patch.object(connector.integrations, "run_saved", side_effect=fake), \
+                mock.patch.object(connector.integrations, "kind_of", return_value="mysql"):
+            t = connector.test_data(g, card, {"orderCol": "id", "ppm": "ppm"})
+        self.assertIn("`id` AS `orderCol`", seen["sql"])
+        self.assertIn("WHERE `machine` = 'Barbara'", seen["sql"])
+        self.assertIn("ORDER BY `id` DESC LIMIT 5", seen["sql"])
+        self.assertEqual(seen["db"], "machines")
+        self.assertEqual([x["label"][:5] for x in t["cols"]], ["Newes", "Speed"])
+        self.assertEqual(t["rows"], [[42, 188]])
+        with self.assertRaises(connector.integrations.ConnError):
+            connector.test_data(g, card, {"ppm": "nope"})
+        # the button on the box: nothing is saved
+        cl = Client(HTTP_HX_REQUEST="true")
+        cl.post("/kiosk/do/login", {"pin": "9999"})
+        with mock.patch.object(connector.integrations, "run_saved", side_effect=fake), \
+                mock.patch.object(connector.integrations, "kind_of", return_value="mysql"):
+            r = cl.post("/kiosk/do/connectorTest", {"group": f"m:{bar.pk}", "src": c, "map": json.dumps({"orderCol": "id", "ppm": "ppm"})})
+        self.assertContains(r, "Test data")
+        self.assertContains(r, "188")
+        self.assertContains(r, "Barbara readings")
+        bar.refresh_from_db()
+        self.assertNotEqual(bar.feed_type, "db")
+
+
+class TagTableTests(Base):
+    """One table with one value per row and a tag: Salvatore_Speed and Salvatore_Count in the same value column."""
+
+    def test_each_input_reads_its_own_tagged_rows(self):
+        from hmi import machinedata
+        sal, bar = Machine.objects.get(name="Salvatore"), Machine.objects.get(name="Barbara")
+        c = self.card("machines", "pleater_log", "Tag log")   # columns: id, logged_at, machine (the tag), ppm (the value)
+        where = {"ppm": [{"col": "machine", "val": "Salvatore_Speed"}], "count": [{"col": "machine", "val": "Salvatore_Count"}]}
+        r = self.save(group=f"m:{sal.pk}", src=c, map={"orderCol": "id", "ppm": "ppm", "count": "ppm"}, where=where)
+        self.assertTrue(r["ok"], r)
+        sal.refresh_from_db()
+        self.assertEqual(sal.feed_src["slotWhere"], where)
+        gs = connector.groups()
+        self.assertEqual(next(g for g in gs if g["key"] == f"m:{sal.pk}")["state"]["where"], where)
+        # another machine on the same card is told apart by its own speed tag
+        r = self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm"}, where={"ppm": [{"col": "machine", "val": "Salvatore_Speed"}]})
+        self.assertIn("exactly these rows", r["error"])
+        r = self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm"})
+        self.assertIn("also reads pleater_log", r["error"])
+        r = self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm"}, where={"ppm": [{"col": "machine", "val": ""}]})
+        self.assertIn("Type the value", r["error"])
+        r = self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm"}, where={"ppm": [{"col": "machine", "val": "Barbara_Speed"}]})
+        self.assertTrue(r["ok"], r)
+        # the minute reading: each input from the newest row of its own tag
+        calls = []
+
+        def fake_latest(db, table, want, order_col, key_col="", key_val="", where=None):
+            calls.append((tuple(want), tuple((f["col"], f["val"]) for f in where or [])))
+            tag = (where or [{}])[-1].get("val")
+            return {w: {"Salvatore_Speed": 186, "Salvatore_Count": 51234}[tag] for w in want}, 7
+        with mock.patch.object(machinedata, "latest_row", side_effect=fake_latest):
+            out, st = machinedata.fetch_feed(sal, {}, 0)
+        self.assertEqual((out["ppm"], out["count"]), (186.0, 51234))
+        self.assertEqual(sorted(calls), [(("ppm",), (("machine", "Salvatore_Count"),)), (("ppm",), (("machine", "Salvatore_Speed"),))])
+
+    def test_test_data_per_input_and_value_suggestions(self):
+        sal = Machine.objects.get(name="Salvatore")
+        c = self.card("machines", "pleater_log", "Tag log")
+        from hmi import machinedata
+        g = next(x for x in connector.groups() if x["key"] == f"m:{sal.pk}")
+        with mock.patch.object(machinedata, "latest_row", side_effect=lambda db, t, want, o, k="", v="", where=None: (
+                {w: 99 if where[-1]["val"].endswith("Speed") else 5000 for w in want}, 12)):
+            t = connector.test_data(g, SourceCard.objects.get(pk=c), {"orderCol": "id", "ppm": "ppm", "count": "ppm"},
+                                    slot_where={"ppm": [{"col": "machine", "val": "Salvatore_Speed"}],
+                                                "count": [{"col": "machine", "val": "Salvatore_Count"}]})
+        self.assertTrue(t["tags"])
+        self.assertEqual([(x["label"][:5], x["value"]) for x in t["now"]], [("Speed", 99), ("Filte", 5000)])
+        seen = {}
+
+        def fake(sql, params, limit=500, db="assets"):
+            seen["sql"] = sql
+            return {"columns": ["v"], "rows": [{"v": "Salvatore_Count"}, {"v": "Salvatore_Speed"}, {"v": None}], "ms": 1, "truncated": False}
+        cl = Client(HTTP_HX_REQUEST="true")
+        cl.post("/kiosk/do/login", {"pin": "9999"})
+        with mock.patch.object(connector.integrations, "run_saved", side_effect=fake), \
+                mock.patch.object(connector.integrations, "kind_of", return_value="mysql"):
+            r = cl.post("/kiosk/do/connectorValues", {"src": c, "col": "machine"})
+        self.assertContains(r, '<option value="Salvatore_Speed">')
+        self.assertIn("SELECT DISTINCT `machine`", seen["sql"])
+
+
+class DisconnectTests(Base):
+    def test_taking_every_wire_off_disconnects(self):
+        bar = Machine.objects.get(name="Barbara")
+        c = self.card("machines", "pleater_log", "Barbara", [{"col": "machine", "val": "Barbara"}])
+        self.assertTrue(self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm", "run": "run_bit"})["ok"])
+        r = self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id"})
+        self.assertIn("still needed", r["error"])                 # a required input can't just go
+        r = self.save(group=f"m:{bar.pk}", src="", map={})
+        self.assertTrue(r["ok"], r)
+        self.assertIn("disconnected", r.get("msg") or r["data"]["msg"] if "data" in r else r["msg"])
+        bar.refresh_from_db()
+        self.assertEqual((bar.feed_type, bar.feed_src, bar.uptime_src), ("none", {}, {}))
+        g = next(x for x in connector.groups() if x["key"] == f"m:{bar.pk}")
+        self.assertEqual(g["status"], "missing")
+        # a machine fed some other way is left alone
+        Machine.objects.filter(pk=bar.pk).update(feed_type="http", feed_url="http://10.0.0.5/feed")
+        r = self.save(group=f"m:{bar.pk}", map={})
+        self.assertEqual(Machine.objects.get(pk=bar.pk).feed_type, "http")
+        # S2K's open MOs
+        s2k = self.card("s2k", "open_orders")
+        self.assertTrue(self.save(group="s2k", src=s2k, map={"mo": "mo_number", "item": "item_number", "qty": "qty_open"})["ok"])
+        self.assertTrue(self.save(group="s2k", map={})["ok"])
+        self.assertFalse(SavedQuery.objects.filter(name="s2k_mos").exists())
+        self.assertNotEqual(engine.settings_obj().settings.get("s2kSource"), "db")
