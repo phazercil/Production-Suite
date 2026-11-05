@@ -884,3 +884,12 @@ def db_backup_file(request, name):
     if not p:
         raise Http404("No such backup")
     return FileResponse(open(p, "rb"), as_attachment=True, filename=p.name, content_type="application/gzip")
+
+
+@action("ackStop")
+def a_ack_stop(request, s, p):
+    """The operator saw a stop pop-up: don't show that stop again on this screen."""
+    key = str(p.get("key") or "")[:40]
+    acked = [k for k in (request.session.get("stopAck") or []) if k != key][-50:] + ([key] if key else [])
+    request.session["stopAck"] = acked
+    return render(request, "hmi/k/_notibar.html", ctx_for(s, N=s.notibar(), page=p.get("page", "")))

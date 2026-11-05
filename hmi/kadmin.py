@@ -535,7 +535,8 @@ def a_connector_save(request, s, p):
         where = _json.loads(p.get("where") or "{}")
     except ValueError:
         where = {}
-    r = run(request, s, "connectorSave", {"group": key, "src": p.get("src", ""), "map": mp, "where": where})
+    r = run(request, s, "connectorSave", {"group": key, "src": p.get("src", ""), "map": mp, "where": where,
+                                          "run2Name": p.get("run2Name", "")})
     msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}
     gs = connector.groups()
     connector.link_cards(gs, create=False)
@@ -544,7 +545,7 @@ def a_connector_save(request, s, p):
         return thin.refused(msg["text"])
     if not r["ok"]:   # keep what was wired, so it can be fixed and saved again
         g = {**g, "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
-                            "table": p.get("table", ""), "map": mp, "where": where}}
+                            "table": p.get("table", ""), "map": mp, "where": where, "run2Name": p.get("run2Name", "")}}
     C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
     html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
     html += render_to_string("hmi/k/admin/_csum.html", {"C": C, "oob": True}, request=request)

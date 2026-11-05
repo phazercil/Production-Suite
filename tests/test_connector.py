@@ -296,3 +296,22 @@ class DisconnectTests(Base):
         self.assertTrue(self.save(group="s2k", map={})["ok"])
         self.assertFalse(SavedQuery.objects.filter(name="s2k_mos").exists())
         self.assertNotEqual(engine.settings_obj().settings.get("s2kSource"), "db")
+
+
+class SecondRunSignalTests(Base):
+    def test_named_second_run_signal(self):
+        bar = Machine.objects.get(name="Barbara")
+        c = self.card("machines", "pleater_log", "Barbara", [{"col": "machine", "val": "Barbara"}])
+        mp = {"orderCol": "id", "ppm": "ppm", "run": "run_bit", "run2": "cut_count"}
+        r = self.save(group=f"m:{bar.pk}", src=c, map=mp)
+        self.assertIn("Name the second run signal", r["error"])
+        r = self.save(group=f"m:{bar.pk}", src=c, map=mp, run2Name="  Barbara   folder ")
+        self.assertTrue(r["ok"], r)
+        bar.refresh_from_db()
+        self.assertEqual(bar.feed_src["run2"], {"field": "cut_count", "name": "Barbara folder", "runWhen": "high"})
+        g = next(x for x in connector.groups() if x["key"] == f"m:{bar.pk}")
+        self.assertEqual((g["state"]["map"]["run2"], g["state"]["run2Name"]), ("cut_count", "Barbara folder"))
+        mp.pop("run2")
+        self.assertTrue(self.save(group=f"m:{bar.pk}", src=c, map=mp)["ok"])
+        bar.refresh_from_db()
+        self.assertNotIn("run2", bar.feed_src)

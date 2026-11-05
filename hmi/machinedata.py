@@ -72,6 +72,12 @@ def text(v, n=80):
     return str(v).strip()[:n]
 
 
+def run2_of(machine):
+    """The second run signal, for two machines that run together as one line (feed_src.run2: field, name, runWhen)."""
+    r = (machine.feed_src or {}).get("run2") or {}
+    return r if r.get("field") else None
+
+
 def add_extras(machine, out, get, slot=None):
     """Recipe, errors and the run signal when they are fields of the same reading. get(field) reads the source's
     record; slot(name, field) instead when each input has its own row (a table with a tag per value)."""
@@ -91,6 +97,10 @@ def add_extras(machine, out, get, slot=None):
         out["run"] = is_running(val("run", u["field"]), u.get("runWhen"))
         if out["run"] is None:
             out["runErr"] = f'The run signal "{u["field"]}" is missing or isn\'t High/Low'
+    r2 = run2_of(machine)
+    if r2:
+        out["run2"] = is_running(val("run2", r2["field"]), r2.get("runWhen"))
+        out["run2Name"] = r2.get("name") or "Second machine"
     return out
 
 
@@ -185,7 +195,7 @@ def _src(machine):
     return s
 
 
-SLOTS = ("ppm", "count", "recipe", "run", "errCode", "errText")
+SLOTS = ("ppm", "count", "recipe", "run", "run2", "errCode", "errText")
 
 
 def slot_fields(machine):
@@ -198,6 +208,9 @@ def slot_fields(machine):
     u, e = machine.uptime_src or {}, machine.error_src or {}
     if u.get("type") == "feed" and u.get("field"):
         out["run"] = u["field"]
+    r2 = run2_of(machine)
+    if r2:
+        out["run2"] = r2["field"]
     if e.get("type") == "feed":
         if e.get("field"):
             out["errCode"] = e["field"]

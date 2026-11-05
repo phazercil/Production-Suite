@@ -555,3 +555,13 @@ body.c-dragging .port.out{cursor:grabbing}
 .cwire .sfil[hidden]{display:none}
 .cwire .sfil select,.cwire .sfil input{min-width:0;min-height:34px;font-size:13px}
 .cwire .sfil .sfx{width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--ink-2);cursor:pointer}
+/* a machine of this operator stopped: a pop-up until they press OK */
+.stoppop{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:150;width:min(640px,calc(100vw - 32px))}
+.stoppop-card{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:14px;background:#4a1d19;border:2px solid var(--bad,#e06c5b);
+  box-shadow:0 12px 32px rgba(0,0,0,.45);color:#fff;animation:stoppulse 1.6s ease-in-out infinite}
+.stoppop-card .ic{font-size:30px;flex:none}
+.stoppop-card b{display:block;font-size:20px}
+.stoppop-card .sub{display:block;color:#f3c9c3;font-size:14px;margin-top:2px}
+.stoppop-card .btn{min-width:96px;min-height:52px;font-size:17px}
+@keyframes stoppulse{0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.45),0 0 0 0 rgba(224,108,91,.55)}50%{box-shadow:0 12px 32px rgba(0,0,0,.45),0 0 0 10px rgba(224,108,91,0)}}
+@media (prefers-reduced-motion:reduce){.stoppop-card{animation:none}}
