@@ -24,6 +24,7 @@ urlpatterns = [
     path("kiosk/r/<str:name>", kv.part),
     path("kiosk/m/<str:name>", kv.dialog),
     path("kiosk/do/<str:name>", kv.act),
+    path("kiosk/backup/<str:name>", kv.db_backup_file),
     path("kiosk/", RedirectView.as_view(url="/operator/", permanent=False, query_string=True)),
     path("api/hmi/state", hmi.state),
     path("api/hmi/login", hmi.login),

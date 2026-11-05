@@ -9,6 +9,7 @@ import json
 import time
 from urllib.parse import quote
 
+from django.conf import settings
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils.html import escape
@@ -122,7 +123,9 @@ def tab_data(s, tab, request):
         snap = build(s.me)
         exp = {"app": "pleat-line-hmi", "exported": s.t.isoformat(), "config": snap["config"], "lines": snap["lines"],
                "users": [{k: v for k, v in u.items() if k != "pin"} for u in snap["users"]]}
-        return {"export": json.dumps(exp, indent=1, default=str)}
+        from plant import dbbackup
+        return {"export": json.dumps(exp, indent=1, default=str), "DB": {"list": dbbackup.listing(), "engine": dbbackup.engine(),
+                                                                       "keep": dbbackup.KEEP, "name": settings.DATABASES["default"].get("NAME")}}
     if tab == "network":
         from .snapshot import network_info
         return {"N": network_info(s.st), "ip": request.META.get("REMOTE_ADDR", ""), "port": request.get_port()}
@@ -1146,3 +1149,21 @@ def a_calc_undo(request, s, p):
 def a_calc_reset(request, s, p):
     from labor import calcupdate
     return _calc(request, s, calcupdate.reset, lambda m: "Labor Calculator back to the one that came with the suite")
+
+
+@action("dbBackup")
+def a_db_backup(request, s, p):
+    from plant import dbbackup
+    deny = _need(request, s, "backup.manage")
+    if deny:
+        return deny
+    # not inside a transaction: the backup reads the database from its own consistent snapshot
+    try:
+        x = dbbackup.make()
+        engine.audit(engine.Ctx(user=s.actor), f"Backed up the database: {x['name']} ({x['size'] / 1e6:.1f} MB)")
+        msg = {"ok": True, "text": f"Database backed up: {x['name']} ({x['size'] / 1e6:.1f} MB)."}
+    except dbbackup.BackupError as e:
+        msg = {"ok": False, "text": str(e)}
+    return render_panel(request, "hmi/k/admin/_dbbackup.html", S=s, msg=msg,
+                        DB={"list": dbbackup.listing(), "engine": dbbackup.engine(), "keep": dbbackup.KEEP,
+                            "name": settings.DATABASES["default"].get("NAME")})

@@ -869,3 +869,18 @@ def a_downtime(request, s, p):
             return thin.done(toast="Thanks — every stop has a reason.", close=True)
         return thin.trigger(m_down_prompt(request, s2), changed=True)
     return thin.done(changed=True)
+
+
+@require_GET
+def db_backup_file(request, name):
+    """Download one of the database backups (Admin › Backup); only for people who manage backups."""
+    from django.http import FileResponse
+
+    from plant import dbbackup
+    s = screen(request)
+    if not s.can("backup.manage"):
+        raise Http404("No such backup")
+    p = dbbackup.path_of(name)
+    if not p:
+        raise Http404("No such backup")
+    return FileResponse(open(p, "rb"), as_attachment=True, filename=p.name, content_type="application/gzip")
