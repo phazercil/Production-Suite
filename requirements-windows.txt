@@ -6,6 +6,13 @@ asgiref==3.11.1
 sqlparse==0.5.5
 tzdata==2026.6
 PyMySQL==1.1.2
+# Outside databases that aren't MariaDB/MySQL: Microsoft SQL Server (pymssql, compiled, one wheel per Python
+# version) and PostgreSQL (pg8000 and what it needs, pure Python)
+pymssql==2.4.6
+pg8000==1.31.6
+scramp==1.5.0
+asn1crypto==1.5.1
+python-dateutil==4.0.0
 waitress==3.0.2
 whitenoise==6.9.0
 openpyxl==3.1.5

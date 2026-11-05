@@ -18,7 +18,7 @@ def read_only_mysql(env, prefix):
     return {
         "ENGINE": "django.db.backends.mysql",
         "HOST": env(f"{prefix}_HOST"),
-        "PORT": env(f"{prefix}_PORT", "3306"),
+        "PORT": env(f"{prefix}_PORT", "") or {"mssql": "1433", "postgres": "5432"}.get(str(env(f"{prefix}_KIND", "") or "").lower(), "3306"),
         "NAME": env(f"{prefix}_NAME", ""),
         "USER": env(f"{prefix}_USER", ""),
         "PASSWORD": env(f"{prefix}_PASSWORD", ""),
@@ -27,6 +27,8 @@ def read_only_mysql(env, prefix):
         "CONN_MAX_AGE": 0,
         # opt-in: this database is outside the plant network (Admin > Connections tick box)
         "SUITE_INTERNET": str(env(f"{prefix}_INTERNET", "") or "") == "1",
+        # what kind of database it is (Admin › Connections detects it): mysql, mssql or postgres
+        "SUITE_KIND": str(env(f"{prefix}_KIND", "") or "mysql").lower() if str(env(f"{prefix}_KIND", "") or "mysql").lower() in ("mysql", "mssql", "postgres") else "mysql",
         "TEST": {"MIRROR": "default"},  # tests never touch the real outside databases
     }
 

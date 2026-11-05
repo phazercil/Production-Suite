@@ -67,10 +67,14 @@ def refresh():
 
 
 def connection(alias):
-    """This thread's connection for alias, reopened if its settings changed since it was opened."""
+    """This thread's connection for alias, reopened if its settings changed since it was opened. A SQL Server or
+    PostgreSQL database gets a plain driver connection per query instead (plant/dbkinds.py)."""
     refresh()
-    conn = connections[alias]
     want = connections.settings.get(alias) or {}
+    if want.get("SUITE_KIND", "mysql") != "mysql":
+        from .dbkinds import Outside
+        return Outside(want["SUITE_KIND"], want)
+    conn = connections[alias]
     if any(conn.settings_dict.get(k) != want.get(k) for k in ("HOST", "PORT", "NAME", "USER", "PASSWORD")):
         conn.close()
         del connections[alias]
@@ -86,7 +90,7 @@ def info():
     for group, (prefix, what) in DB_GROUPS.items():
         out[group] = {"on": bool(v.get(f"{prefix}_HOST")), "host": v.get(f"{prefix}_HOST", ""), "port": v.get(f"{prefix}_PORT", "3306") or "3306",
                       "name": v.get(f"{prefix}_NAME", ""), "user": v.get(f"{prefix}_USER", ""), "hasPassword": bool(v.get(f"{prefix}_PASSWORD")),
-                      "internet": v.get(f"{prefix}_INTERNET") == "1"}
+                      "internet": v.get(f"{prefix}_INTERNET") == "1", "kind": v.get(f"{prefix}_KIND", "") or ("mysql" if v.get(f"{prefix}_HOST") else "")}
     out["paycom"] = {"on": bool(v.get("PAYCOM_SID") and v.get("PAYCOM_TOKEN")), "sid": v.get("PAYCOM_SID", ""), "hasToken": bool(v.get("PAYCOM_TOKEN"))}
     out["feed"] = {"on": bool(v.get("FEED_KEY"))}
     out["smtp"] = {"on": bool(v.get("ALERT_SMTP_HOST")), "host": v.get("ALERT_SMTP_HOST", ""), "port": v.get("ALERT_SMTP_PORT", "") or "25",

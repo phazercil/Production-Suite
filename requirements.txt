@@ -4,6 +4,9 @@ whitenoise>=6.6
 # MariaDB driver: PyMySQL is pure Python and needs nothing else. mysqlclient (faster, needs the
 # MariaDB client libraries) is used instead when it is installed.
 PyMySQL>=1.1.1
+# Outside databases that aren't MariaDB/MySQL (asset, S2K, machine data): SQL Server and PostgreSQL drivers
+pymssql>=2.3
+pg8000>=1.31
 # Pictures on maintenance tickets: turned upright, shrunk and thumbnailed on the server
 pillow>=12.0
 # Pick one web server for production:

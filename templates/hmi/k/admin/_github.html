@@ -20,7 +20,7 @@
     <form hx-post="/kiosk/do/ghSave" hx-target="#github" hx-swap="outerHTML" autocomplete="off" style="margin-top:8px">
       <div class="grid3">
         <label class="f">Repository<input type="text" name="repo" value="{% if f %}{{ f.repo }}{% else %}{{ G.repo }}{% endif %}" spellcheck="false" placeholder="phazercil/Production-Suite"></label>
-        <label class="f">GitHub token<input type="password" name="token" autocomplete="new-password" placeholder="{% if G.hasToken %}Leave blank to keep the saved one{% else %}github_pat_…{% endif %}"></label>
+        <label class="f">GitHub token<input type="password" id="pw-github" hx-preserve name="token" autocomplete="new-password" placeholder="{% if G.hasToken %}Leave blank to keep the saved one{% else %}github_pat_…{% endif %}"></label>
         <label class="chk"><input type="checkbox" name="daily" value="1" {% if f %}{% if f.daily %}checked{% endif %}{% elif G.daily %}checked{% endif %}> Check once a day and show a notice when there's a newer release</label>
       </div>
       <p class="note" style="margin-top:6px">Make the token on GitHub: Settings › Developer settings › Fine-grained tokens › Generate. Repository access: only this repository. Permissions › Contents: Read-only. It is kept in the server's protected settings file and never shown again. The server needs to reach api.github.com over HTTPS (through the company proxy if there is one).</p>

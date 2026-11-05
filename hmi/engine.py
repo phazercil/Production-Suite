@@ -1637,7 +1637,8 @@ def _db_fields(group, f):
     saved = read_env(liveconfig.env_path())
     f = f if isinstance(f, dict) else {}
     out = {"host": str(f.get("host") or "").strip(), "port": str(f.get("port") or "3306").strip(), "name": str(f.get("name") or "").strip(),
-           "user": str(f.get("user") or "").strip(), "password": str(f.get("password") or ""), "internet": f.get("internet") in (True, "1", "on", "true")}
+           "user": str(f.get("user") or "").strip(), "password": str(f.get("password") or ""), "internet": f.get("internet") in (True, "1", "on", "true"),
+           "kind": str(f.get("kind") or "auto") if str(f.get("kind") or "auto") in ("auto", "mysql", "mssql", "postgres") else "auto"}
     if not out["password"] and saved.get(f"{prefix}_HOST"):
         out["password"] = saved.get(f"{prefix}_PASSWORD", "")
     need("\n" not in out["password"] and "\r" not in out["password"] and '"' not in out["password"],
@@ -1652,7 +1653,8 @@ def _db_test(group, f):
     prefix, what, v = _db_fields(group, f)
     db = connections.settings.get("default", {})
     records = (db.get("HOST", ""), str(db.get("PORT", "")), str(db.get("NAME", ""))) if "mysql" in db.get("ENGINE", "") else None
-    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=records, internet=v["internet"])
+    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=records, internet=v["internet"],
+                                           kind=v["kind"])
 
 
 @cmd("connInfo", "connections.edit")
@@ -1713,9 +1715,11 @@ def conn_save(p, ctx):
         prefix, what, v, r = _db_test(group, f)
         need(r["ok"], r["msg"])
         liveconfig.save({f"{prefix}_HOST": v["host"], f"{prefix}_PORT": v["port"], f"{prefix}_NAME": v["name"],
-                         f"{prefix}_USER": v["user"], f"{prefix}_PASSWORD": v["password"], f"{prefix}_INTERNET": "1" if v["internet"] else None})
+                         f"{prefix}_USER": v["user"], f"{prefix}_PASSWORD": v["password"], f"{prefix}_INTERNET": "1" if v["internet"] else None,
+                         f"{prefix}_KIND": r.get("kind") or "mysql"})
         integrations.set_conn(group, True, f"{r.get('tables', 0)} tables (read-only)")
-        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']}"
+        from plant.dbkinds import KINDS
+        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']} ({KINDS[r.get('kind') or 'mysql']['label']})"
                    + (" (outside the plant network, allowed by this login)" if v["internet"] else ""))
         return {"msg": f"{what} saved. {r['msg']}" + (" Note: this login is allowed to change data; a read-only login is safer." if r.get("writable") else ""),
                 "data": liveconfig.info()}
@@ -1781,9 +1785,9 @@ def conn_save(p, ctx):
 def conn_remove(p, ctx):
     from plant import liveconfig
     group = p.get("group")
-    keys = {"assets": ["ASSET_DB_HOST", "ASSET_DB_PORT", "ASSET_DB_NAME", "ASSET_DB_USER", "ASSET_DB_PASSWORD", "ASSET_DB_INTERNET"],
-            "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD", "S2K_DB_INTERNET"],
-            "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD", "MACHINE_DB_INTERNET"],
+    keys = {"assets": ["ASSET_DB_HOST", "ASSET_DB_PORT", "ASSET_DB_NAME", "ASSET_DB_USER", "ASSET_DB_PASSWORD", "ASSET_DB_INTERNET", "ASSET_DB_KIND"],
+            "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD", "S2K_DB_INTERNET", "S2K_DB_KIND"],
+            "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD", "MACHINE_DB_INTERNET", "MACHINE_DB_KIND"],
             "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
             "github": ["GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK"],
             "influx": ["INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET"]}.get(group)

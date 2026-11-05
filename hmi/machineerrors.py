@@ -100,7 +100,9 @@ def new_log_rows(machine, mark):
     e = check_names(machine)
     db, table, order = e["db"], e.get("table", ""), e["orderCol"]
     want = [c for c in (e.get("codeCol"), e.get("textCol"), e.get("timeCol")) if c]
-    q = machinedata._q
+    from plant import dbkinds
+    q, qt = integrations.quoters(db)
+    kind = integrations.kind_of(db)
     where, params = [], []
     if e.get("keyCol"):
         where.append(f"{q(e['keyCol'])} = %s")
@@ -108,15 +110,15 @@ def new_log_rows(machine, mark):
     conn = integrations._db(db)
     with conn.cursor() as c:
         if mark is None:
-            c.execute(f"SELECT MAX({q(order)}) FROM {q(table)}" + (f" WHERE {' AND '.join(where)}" if where else ""), params)
+            c.execute(f"SELECT MAX({q(order)}) FROM {qt(table)}" + (f" WHERE {' AND '.join(where)}" if where else ""), params)
             top = c.fetchone()[0]
             return [], ("" if top is None else machinedata.text(top, 60))
         if mark != "":
             where.append(f"{q(order)} > %s")
             params.append(mark)
         pick = list(dict.fromkeys([*want, order]))
-        c.execute(f"SELECT {', '.join(q(x) for x in pick)} FROM {q(table)}" + (f" WHERE {' AND '.join(where)}" if where else "")
-                  + f" ORDER BY {q(order)} LIMIT {LOG_BATCH}", params)
+        c.execute(dbkinds.top(kind, f"{', '.join(q(x) for x in pick)} FROM {qt(table)}" + (f" WHERE {' AND '.join(where)}" if where else "")
+                              + f" ORDER BY {q(order)}", LOG_BATCH), params)
         rows = [dict(zip(pick, r)) for r in c.fetchall()]
     if rows:
         mark = machinedata.text(rows[-1][order], 60)
@@ -189,7 +191,8 @@ def for_downtime(downs, limit=20):
 def preview(machine, n=5):
     """Admin > Machine data > Test alarm log: the newest rows, as the suite would store them. Changes nothing."""
     e = check_names(machine)
-    q = machinedata._q
+    from plant import dbkinds
+    q, qt = integrations.quoters(e["db"])
     want = [c for c in (e.get("codeCol"), e.get("textCol"), e.get("timeCol")) if c]
     pick = list(dict.fromkeys([*want, e["orderCol"]]))
     where, params = "", []
@@ -197,7 +200,7 @@ def preview(machine, n=5):
         where, params = f" WHERE {q(e['keyCol'])} = %s", [str(e.get("keyVal", ""))]
     conn = integrations._db(e["db"])
     with conn.cursor() as c:
-        c.execute(f"SELECT {', '.join(q(x) for x in pick)} FROM {q(e['table'])}{where} ORDER BY {q(e['orderCol'])} DESC LIMIT {int(n)}", params)
+        c.execute(dbkinds.top(integrations.kind_of(e["db"]), f"{', '.join(q(x) for x in pick)} FROM {qt(e['table'])}{where} ORDER BY {q(e['orderCol'])} DESC", int(n)), params)
         rows = [dict(zip(pick, r)) for r in c.fetchall()]
     now = timezone.now()
     return [{"code": machinedata.text(r.get(e.get("codeCol"))) if e.get("codeCol") else "",
