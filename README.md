@@ -380,6 +380,14 @@ From 1.3.0 on, updates come as a small signed file, `ProductionSuite-Update-<ver
 
 The version and revision show in the bottom-right corner of every page, and at `/api/version`.
 
+**Linux servers and "Check for updates".** The update file the Windows release job builds contains code-signed
+Windows programs, so it needs the code-signing certificate. Linux servers get their own update file,
+`ProductionSuite-Update-<version>-r<revision>-linux[-with-packages].zip`, which the release's Linux job builds and
+attaches whenever the repository has the `UPDATE_SIGNING_KEY` secret (Settings › Secrets and variables › Actions;
+the whole `production-suite-signing-key.txt`). It carries the Linux Python packages when `requirements-windows.txt`
+or `packaging/wheels` changed since the previous release. Admin › Updates › Check for updates on a Linux server
+finds it; Windows servers never take a `-linux` file. Without the secret, Linux servers update with `get.sh`.
+
 **The Labor Calculator on its own.** The Labor Budget page is the Labor Calculator (its own repository,
 `phazercil/Labor-Calculator`) with the suite's sync, A/B budgets and login added. With updates from GitHub set
 up, **Admin › Updates › Labor Calculator** checks that repository for a newer calculator and installs it without

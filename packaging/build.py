@@ -3,6 +3,11 @@
     python packaging/build.py                       -> dist/ProductionSuite-Setup.zip (Windows) and
                                                        dist/ProductionSuite-Linux.tar.gz (Rocky / Alma / CentOS Stream / RHEL 9, Fedora)
     python packaging/build.py --key KEYFILE         -> also dist/ProductionSuite-Update-<version>-r<revision>.zip
+    python packaging/build.py --linux-update --key KEYFILE [--packages]
+                                                    -> only dist/ProductionSuite-Update-<version>-r<revision>-linux.zip: the update
+                                                       file for Linux servers (Linux packages only; its Windows programs aren't
+                                                       code-signed, so Windows servers never take it). The Release workflow
+                                                       builds it when the UPDATE_SIGNING_KEY secret is set.
     python packaging/build.py --sign ...            -> code-signs every .exe and PowerShell script first (Windows only):
         --sign                                         the one code-signing certificate in your certificate store
         --sign --thumbprint 1A2B...                    a certificate in the store, by thumbprint
@@ -37,7 +42,10 @@ def main():
     ap.add_argument("--sign", action="store_true", help="code-sign the .exe and PowerShell files (Windows, needs a code-signing certificate)")
     ap.add_argument("--thumbprint", default="", help="with --sign: the certificate's thumbprint in the Windows certificate store")
     ap.add_argument("--pfx", default="", help="with --sign: a .pfx file; its password in CODESIGN_PFX_PASSWORD")
+    ap.add_argument("--linux-update", action="store_true", help="only build the update file for Linux servers (needs --key)")
     a = ap.parse_args()
+    if a.linux_update and (a.sign or not a.key):
+        sys.exit("--linux-update needs --key (the update signing key) and no --sign.")
     if a.sign and os.name != "nt":
         sys.exit("Code signing runs on Windows (Set-AuthenticodeSignature). Run the build there, or use the Release workflow on GitHub.")
     version, revision = updatefile.read_version(ROOT)
@@ -54,6 +62,12 @@ def main():
         t = stage / "app" / rel
         t.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / rel, t)
+    if a.linux_update:
+        wheels = dist / "linux-wheels"
+        shutil.rmtree(wheels, ignore_errors=True)
+        shutil.copytree(PKG / "wheels", wheels, ignore=lambda d, names: [n for n in names if "win_amd64" in n or "win32" in n])
+        signed_update(a, dist, stage / "app", version, revision, wheels, "-linux")
+        return
     shutil.copytree(PKG / "installer", stage / "installer")
     # compiled wheels: Windows ones in the Windows package, Linux ones in the Linux package
     shutil.copytree(PKG / "wheels", stage / "wheels", ignore=lambda d, names: [n for n in names if "manylinux" in n])
@@ -102,18 +116,23 @@ def main():
         t.add(PKG / "linux" / "templates", f"{top}/templates", filter=mode)
     print(f"{lin}  v{version} rev {revision}, {lin.stat().st_size / 1e6:.1f} MB")
     if a.key:
-        import base64
-        from plant import ed25519
-        from plant.update_key import PUBLIC_KEYS
-        secret = next((base64.b64decode(x[7:].strip()) for x in Path(a.key).read_text(encoding="utf-8").splitlines()
-                       if x.startswith("SECRET=")), None)
-        if not secret:
-            sys.exit(f"No SECRET= line in {a.key}")
-        if base64.b64encode(ed25519.public_key(secret)).decode() not in PUBLIC_KEYS:
-            sys.exit("That update key isn't one the suite trusts (plant/update_key.py). Servers would refuse the file.")
-        upd = dist / f"ProductionSuite-Update-{version}-r{revision}{'-with-packages' if a.packages else ''}.zip"
-        m = updatefile.build(stage / "app", upd, secret, (PKG / "wheels") if a.packages else None, a.notes)
-        print(f"{upd}  v{version} rev {revision}, {len(m['files'])} files, {upd.stat().st_size / 1e6:.1f} MB")
+        signed_update(a, dist, stage / "app", version, revision, PKG / "wheels", "")
+
+
+def signed_update(a, dist, app, version, revision, wheels, suffix):
+    import base64
+    from plant import ed25519
+    from plant.update_key import PUBLIC_KEYS
+    secret = next((base64.b64decode(x[7:].strip()) for x in Path(a.key).read_text(encoding="utf-8").splitlines()
+                   if x.startswith("SECRET=")), None)
+    if not secret:
+        sys.exit(f"No SECRET= line in {a.key}")
+    if base64.b64encode(ed25519.public_key(secret)).decode() not in PUBLIC_KEYS:
+        sys.exit("That update key isn't one the suite trusts (plant/update_key.py). Servers would refuse the file.")
+    upd = dist / f"ProductionSuite-Update-{version}-r{revision}{suffix}{'-with-packages' if a.packages else ''}.zip"
+    upd.unlink(missing_ok=True)
+    m = updatefile.build(app, upd, secret, wheels if a.packages else None, a.notes)
+    print(f"{upd}  v{version} rev {revision}, {len(m['files'])} files, {upd.stat().st_size / 1e6:.1f} MB")
 
 
 if __name__ == "__main__":

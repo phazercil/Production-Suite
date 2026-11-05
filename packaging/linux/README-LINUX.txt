@@ -69,7 +69,8 @@ Day to day
   Restart:   sudo systemctl restart production-suite-web production-suite-ticker
   Logs:      /opt/production-suite/logs (web.log, ticker.log, update.log), /var/log/httpd/production-suite-*.log
   Settings:  Operator Kiosk > Admin (Connections, Network, Alerts, Updates) from any plant screen
-  Updates:   Operator Kiosk > Admin > Updates (upload the update file), or run the newer ./install.sh
+  Updates:   Operator Kiosk > Admin > Updates (Check for updates on GitHub, or upload the -linux update file),
+             or run the newer ./install.sh
 
 Production Suite Admin and the tray icon are Windows programs; on Linux everything they do is in
 Operator Kiosk > Admin, plus the systemctl commands above.
