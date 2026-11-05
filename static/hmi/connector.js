@@ -187,7 +187,7 @@
       add.addEventListener("change", e => {
         if (e.target.name === "db") fillTables(add);
         if (e.target.name === "table") add.querySelector("[data-add]").disabled = !e.target.value;
-        add.querySelector(".addmsg").textContent = "";
+        const am = add.querySelector(".addmsg"); if (am) am.textContent = "";
       });
       add.addEventListener("htmx:afterRequest", e => {
         if (e.detail.successful) { add.querySelector("select[name=table]").value = ""; add.querySelector("[data-add]").disabled = true; }
