@@ -139,7 +139,7 @@ def tab_data(s, tab, request):
     if tab == "connections":
         return connections_data(s, request)
     if tab == "connector":
-        return connector_data(s, request.GET.get("db", ""), request.GET.get("table", ""), focus=request.GET.get("focus", ""))
+        return connector_data(s, focus=request.GET.get("focus", ""))
     if tab == "permissions":
         return permissions_data(s, request)
     if tab == "qc":
@@ -483,22 +483,23 @@ def _need(request, s, perm):
     return login_needed(request, s, {"perm": perm})
 
 
-def connector_data(s, db="", table="", msg=None, focus=""):
+def connector_data(s, focus=""):
+    """Every data need (the boxes on the right), and a card for each table any of them reads (on the left)."""
     from . import connector
     dbs = connector.ready_dbs()
     gs = connector.groups()
-    if not db or db not in dbs:   # start where the first unfinished need's data lives
-        first = next((g for g in gs if g["status"] in ("missing", "partial") and any(d in dbs for d in g["dbs"])), None)
-        db = (first["table"] and first["db"]) if first and first["table"] else next((d for d in (first or {}).get("dbs", []) if d in dbs), dbs[0] if dbs else "")
-        if first and not table:
-            table = first["table"]
-    return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "src": connector.source(db, table) if db else None,
-            "groups": gs, "sum": connector.summary(gs), "msg": msg, "focus": focus}
+    return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "groups": gs, "sum": connector.summary(gs),
+            "sources": [connector.source(d, t) for d, t in connector.in_use(gs) if d in dbs],
+            "tables": {d: [x["name"] for x in tables(d).get("tables", [])] for d in dbs}, "focus": focus}
 
 
 @action("connectorSave")
 def a_connector_save(request, s, p):
+    """Save one box; the answer is that box again (with its message) and the summary, so the other boxes keep
+    their unsaved wires."""
     import json as _json
+
+    from . import connector
     deny = _need(request, s, "connections.edit")
     if deny:
         return deny
@@ -506,13 +507,38 @@ def a_connector_save(request, s, p):
         mp = _json.loads(p.get("map") or "{}")
     except ValueError:
         mp = {}
-    r = run(request, s, "connectorSave", {"group": p.get("group", ""), "db": p.get("db", ""), "table": p.get("table", ""), "map": mp,
+    key = p.get("group", "")
+    r = run(request, s, "connectorSave", {"group": key, "db": p.get("db", ""), "table": p.get("table", ""), "map": mp,
                                            "keyVal": p.get("keyVal", ""), "fval": p.get("fval", "")})
-    msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"], "group": p.get("group", "")}
+    msg = {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}
     if r["ok"]:
         _tables_cache.clear()
-    return render_panel(request, "hmi/k/admin/_connector.html", S=s,
-                        C=connector_data(s, p.get("srcDb", ""), p.get("srcTable", ""), msg=msg, focus=p.get("group", "")), tabCan=True)
+    gs = connector.groups()
+    g = next((x for x in gs if x["key"] == key), None)
+    if not g:
+        return thin.refused(msg["text"])
+    if not r["ok"]:   # keep what was wired, so it can be fixed and saved again
+        g = {**g, "state": {"db": p.get("db", ""), "table": p.get("table", ""), "map": mp}}
+    C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
+    html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
+    html += render_to_string("hmi/k/admin/_csum.html", {"C": C, "oob": True}, request=request)
+    return HttpResponse(html)
+
+
+@action("connectorSource")
+def a_connector_source(request, s, p):
+    """One more source card: a table's columns, with a sample value each."""
+    from . import connector
+    deny = _need(request, s, "connections.edit")
+    if deny:
+        return deny
+    db, table = p.get("db", ""), p.get("table", "")
+    if db not in connector.ready_dbs():
+        return thin.refused("That database isn't set up (Admin › Connections).")
+    src = connector.source(db, table)
+    if not src["found"]:
+        return thin.refused(f'There is no table "{table}" in the {connector.DB_LABEL[db]}.')
+    return HttpResponse(render_to_string("hmi/k/admin/_csrc.html", {"src": src, "C": {"allDbs": connector.DB_LABEL}}, request=request))
 
 
 def accounts_panel(request, s, g=None, form=None, msg=None, key=None):

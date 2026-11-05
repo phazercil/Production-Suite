@@ -85,17 +85,48 @@ class ConnectorTests(TestCase):
         g = next(x for x in connector.groups() if x["key"] == "q:part_spec")
         self.assertEqual(g["status"], "custom")
 
-    def test_tab_and_button(self):
+    def test_tab_cards_and_save(self):
+        bar = Machine.objects.get(name="Barbara")
+        self.assertTrue(self.save(group=f"m:{bar.pk}", db="machines", table="pleater_log", keyVal="Barbara",
+                                  map={"orderCol": "logged_at", "keyCol": "machine", "ppm": "ppm"})["ok"])
         c = Client(HTTP_HX_REQUEST="true")
         c.post("/kiosk/do/login", {"pin": "9999"})
-        with mock.patch.object(connector, "ready_dbs", return_value=["machines"]), \
+        with mock.patch.object(connector, "ready_dbs", return_value=["machines", "s2k"]), \
                 mock.patch.object(connector.integrations, "preview", return_value={"rows": [{"cut_count": 5}]}), \
                 mock.patch.object(kadmin, "tables", return_value={"err": "", "ready": True, "tables": SCHEMA["tables"]}):
-            r = c.get("/kiosk/v/admin?tab=connector&db=machines&table=pleater_log")
-        self.assertContains(r, 'data-col="cut_count"')
-        self.assertContains(r, "What the suite needs")
+            r = c.get("/kiosk/v/admin?tab=connector")
+            # the table Barbara reads has its own card, open as soon as the tab is: its wires show without picking it
+            self.assertContains(r, 'class="wbox srcard" data-db="machines" data-table="pleater_log"')
+            self.assertContains(r, 'data-col="cut_count"')
+            self.assertContains(r, "Add a source")
+            self.assertContains(r, "What the suite needs")
+            r = c.post("/kiosk/do/connectorSource", {"db": "s2k", "table": "open_orders"})
+            self.assertContains(r, 'data-table="open_orders"')
+            self.assertContains(r, 'data-col="mo_number"')
+            r = c.post("/kiosk/do/connectorSource", {"db": "s2k", "table": "nope"})
+            self.assertNotContains(r, "srcard")
+            r = c.post("/kiosk/do/connectorSave", {"group": "s2k", "db": "s2k", "table": "open_orders",
+                                                    "map": json.dumps({"mo": "mo_number", "item": "item_number", "qty": "qty_open"})})
+        # the answer is just that box (the others keep their unsaved wires) and the summary
+        self.assertContains(r, "Open MOs saved")
+        self.assertContains(r, 'data-group="s2k"')
+        self.assertNotContains(r, f'data-group="m:{bar.pk}"')
+        self.assertContains(r, 'id="csum" hx-swap-oob="true"')
         r = c.get("/kiosk/v/admin?tab=connections")
         self.assertContains(r, "Open the connector builder")
-        r = c.post("/kiosk/do/connectorSave", {"group": "s2k", "db": "s2k", "table": "open_orders",
-                                                "map": json.dumps({"mo": "mo_number", "item": "item_number", "qty": "qty_open"})})
-        self.assertContains(r, "Open MOs saved")
+
+    def test_one_table_for_every_machine(self):
+        bar, sal = Machine.objects.get(name="Barbara"), Machine.objects.get(name="Salvatore")
+        base = {"orderCol": "logged_at", "ppm": "ppm"}
+        self.assertTrue(self.save(group=f"m:{bar.pk}", db="machines", table="pleater_log", keyVal="Barbara",
+                                  map={**base, "keyCol": "machine"})["ok"])
+        r = self.save(group=f"m:{sal.pk}", db="machines", table="pleater_log", map=base)
+        self.assertFalse(r["ok"])
+        self.assertIn("Barbara also reads pleater_log", r["error"])
+        r = self.save(group=f"m:{sal.pk}", db="machines", table="pleater_log", keyVal="barbara", map={**base, "keyCol": "machine"})
+        self.assertIn("Barbara already reads the rows where machine = barbara", r["error"])
+        r = self.save(group=f"m:{sal.pk}", db="machines", table="pleater_log", keyVal="Salvatore", map={**base, "keyCol": "machine"})
+        self.assertTrue(r["ok"], r)
+        gs = connector.groups()
+        self.assertEqual(connector.in_use(gs), [("machines", "pleater_log")])   # one card for the shared table
+        self.assertEqual(next(g for g in gs if g["key"] == f"m:{sal.pk}")["sharedWith"], ["Barbara"])

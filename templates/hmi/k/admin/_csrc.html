@@ -1,0 +1,10 @@
+<section class="wbox srcard" data-db="{{ src.db }}" data-table="{{ src.table }}" aria-label="Columns of {{ src.table }}">
+  <div class="wh"><div class="grow"><b class="mono">{{ src.table }}</b><span class="note">{{ C.allDbs|get:src.db }} · {{ src.cols|length }} column{{ src.cols|length|pluralize }}</span></div>
+    <span class="wcount note" title="Wires from this table"></span>
+    <button type="button" class="btn ghost sm" data-close title="Close this card (only when no box reads it)" aria-label="Close {{ src.table }}">✕</button></div>
+  {% if src.err %}<p class="note" style="color:var(--bad);padding:6px 12px">{{ src.err }}</p>{% endif %}
+  {% if src.cols.0.err %}<p class="note" style="padding:6px 12px">Couldn't read sample values: {{ src.cols.0.err }}</p>{% endif %}
+  {% if src.cols|length > 8 %}<div class="wsel"><input type="search" class="cfilter" placeholder="Filter columns" aria-label="Filter the columns of {{ src.table }}" autocomplete="off"></div>{% endif %}
+  <div class="ports">{% for c in src.cols %}<button type="button" class="ctag port out" data-col="{{ c.name }}" data-table="{{ src.table }}" data-db="{{ src.db }}" title="{{ c.type }}{% if c.sample %} · e.g. {{ c.sample }}{% endif %}"><span class="pl"><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></span><span class="dot" aria-hidden="true"></span></button>
+  {% empty %}<p class="note" style="padding:8px 12px">{% if src.missing %}This table isn't in the {{ C.allDbs|get:src.db }} any more.{% else %}This table has no columns.{% endif %}</p>{% endfor %}</div>
+</section>

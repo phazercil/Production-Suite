@@ -1,0 +1,7 @@
+<div class="panel csum" id="csum" {% if oob %}hx-swap-oob="true"{% endif %}>
+  <div class="row" style="align-items:flex-end"><div class="grow"><h2 class="h2">Connector builder</h2>
+    <p class="sub" style="margin-top:4px">Each table in use has its own card on the left; add another with <b>Add a source</b>. <b>Drag from a column's dot to the dot of what the suite needs</b> to wire them (or tap a column, then tap the input). Click a wire to unwire it. One table can feed many boxes, e.g. one table that logs every machine: wire each machine's <b>Which machine</b> column and type its value. Nothing changes until you press a box's Save.</p></div>
+    <div class="cprog"><b class="num">{{ C.sum.done }} / {{ C.sum.total }}</b><span>data needs connected</span><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ C.sum.pct }}" aria-label="Data needs connected"><i style="width:{{ C.sum.pct }}%"></i></div></div></div>
+  {% if C.sum.missing %}<div class="cmiss"><span class="eyebrow">Still needed</span>{% for x in C.sum.missing %}<button type="button" class="chip warn" data-goto="{{ x.key }}" title="{{ x.need|join:', ' }}">{{ x.title }}{% if x.sub and x.sub != "Machine readings" %}{% else %} · readings{% endif %}</button>{% endfor %}</div>
+  {% else %}<p class="note" style="margin-top:8px;color:var(--ok)">Everything the suite can take from a database is connected.</p>{% endif %}
+</div>

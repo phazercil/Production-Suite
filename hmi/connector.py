@@ -110,7 +110,12 @@ def groups():
         defs += [(r[0], r[1], bool(len(r) > 2 and r[2]), "") for r in D["roles"]]
         out.append({"key": f"q:{name}", "kind": "query", "title": D["title"], "sub": D["help"], "color": "", "dbs": ["assets"], "db": "assets",
                     "table": p["table"], "slots": _slots(defs, p["map"]), "custom": bool(sv and not p["table"]), "other": ""})
+    by_table = {}
     for g in out:
+        if g["kind"] == "machine" and g["table"]:
+            by_table.setdefault((g["db"], g["table"]), []).append(g["title"])
+    for g in out:
+        g["sharedWith"] = [t for t in by_table.get((g["db"], g["table"]), []) if t != g["title"]] if g["kind"] == "machine" else []
         req = [s for s in g["slots"] if s["req"]]
         done = [s for s in g["slots"] if s["col"]]
         g["missing"] = [s["label"] for s in req if not s["col"]]
@@ -140,7 +145,18 @@ def source(db, table):
         cols = [{"name": c["name"], "type": c.get("type", ""), "sample": sample.get(c["name"], "")} for c in info["columns"]]
         if "__err" in sample:
             cols and cols[0].update(err=sample["__err"])
-    return {"db": db, "table": table if table in names else "", "tables": names, "cols": cols, "err": t.get("err", ""), "ready": t.get("ready", False)}
+    ok = table in names
+    return {"db": db, "table": table, "tables": names, "cols": cols, "err": t.get("err", ""),
+            "ready": t.get("ready", False), "missing": bool(table) and bool(names) and not ok, "found": ok}
+
+
+def in_use(gs):
+    """The tables the data needs read now, each once, in the order of the boxes (a card for each on the left)."""
+    seen = []
+    for g in gs:
+        if g["table"] and (g["db"], g["table"]) not in seen:
+            seen.append((g["db"], g["table"]))
+    return seen
 
 
 def summary(gs):
