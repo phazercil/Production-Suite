@@ -1,0 +1,20 @@
+{% load suite %}<div id="laborcalc" class="panel" {% if hold %}data-hold{% endif %}>{% with I=LC.installed L=LC.latest %}
+  <div class="row"><h2 class="h2 grow">Labor Calculator</h2>{% if I.stale %}<span class="pill bad">DOESN'T FIT</span>{% elif I %}<span class="pill ok">FROM GITHUB {{ I.short }}</span>{% else %}<span class="pill idle">CAME WITH THE SUITE</span>{% endif %}</div>
+  <p class="sub" style="margin-top:4px">The Labor Budget page is the Labor Calculator from <code>{{ LC.repo }}</code> with the suite's sync, A/B budgets and login added. A newer calculator can be installed here without waiting for a suite update. The names and wages stored inside the calculator file are stripped first, and if a calculator change moved the parts the suite hooks into, it is refused rather than installed. Saved budgets are not touched.</p>
+  {% if I.stale %}<p style="margin-top:6px;color:var(--bad)">After the suite update, calculator {{ I.short }} no longer fits this suite version ({{ I.staleWhy }}), so the one that came with the suite is in use. Install a newer calculator, or use the one that came with the suite.</p>
+  {% elif I %}<p style="margin-top:6px">In use: <b>{{ I.short }}</b>{% if I.message %} · {{ I.message }}{% endif %}{% if I.date %} <span class="note">(committed {{ I.date|slice:":10" }})</span>{% endif %} <span class="note">· installed {{ I.installed|slice:":16" }}{% if I.by %} by {{ I.by }}{% endif %}</span></p>{% endif %}
+  {% if not LC.ready %}<p class="note" style="margin-top:8px">Set up updates from GitHub above first. The same token is used; it needs Contents: Read-only on <code>{{ LC.repo }}</code> as well.</p>
+  {% else %}
+    <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary" hx-post="/kiosk/do/calcCheck" hx-target="#laborcalc" hx-swap="outerHTML">Check for a newer calculator</button><span class="htmx-indicator note">Asking GitHub…</span>
+      {% if L.checked %}<span class="note">Last checked {{ L.checked|slice:":16" }}</span>{% endif %}</div>
+    {% if L.sha %}{% if I.sha == L.sha %}<p style="margin-top:8px;color:var(--ok)">Up to date: {{ L.short }} is the newest calculator on {{ L.branch }}.</p>
+      {% if L.behind %}<p class="note" style="margin-top:4px;color:var(--warn-ink)">Labor_Calculator.html was changed after the offline build. Run <code>tools/build_desktop.py</code> in the calculator's repository and push, then check again.</p>{% endif %}
+    {% else %}<div class="panel" style="background:var(--well-3);margin-top:10px">
+      <p><b>{{ L.short }}</b> · {{ L.message }} <span class="note">(committed {{ L.date|slice:":10" }} on {{ L.branch }})</span></p>
+      {% if L.behind %}<p class="note" style="margin-top:4px;color:var(--warn-ink)">Labor_Calculator.html was changed after this offline build. Run <code>tools/build_desktop.py</code> in the calculator's repository and push, then check again, to get those changes.</p>{% endif %}
+      <div class="row" style="margin-top:8px"><button class="btn primary" hx-post="/kiosk/do/calcInstall" hx-vals='{"sha": "{{ L.sha }}"}' hx-target="#laborcalc" hx-swap="outerHTML" hx-confirm="Install calculator {{ L.short }} as the Labor Budget page? Anyone with the page open gets it when they reload.">Install</button><span class="htmx-indicator note">Downloading and building…</span></div></div>{% endif %}{% endif %}
+  {% endif %}
+  {% include "hmi/k/admin/_msg.html" with m=msg %}
+  {% if I %}<div class="row" style="margin-top:10px;flex-wrap:wrap">{% if LC.prev %}<button class="btn" hx-post="/kiosk/do/calcUndo" hx-target="#laborcalc" hx-swap="outerHTML" hx-confirm="Go back to the calculator that was in use before {{ I.short }}?">Undo last install</button>{% endif %}
+    <button class="btn ghost" hx-post="/kiosk/do/calcReset" hx-target="#laborcalc" hx-swap="outerHTML" hx-confirm="Go back to the calculator that came with this suite version?">Use the one that came with the suite</button></div>{% endif %}
+{% endwith %}</div>

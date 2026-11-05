@@ -23,7 +23,7 @@
         <label class="f">GitHub token<input type="password" name="token" autocomplete="new-password" placeholder="{% if G.hasToken %}Leave blank to keep the saved one{% else %}github_pat_…{% endif %}"></label>
         <label class="chk"><input type="checkbox" name="daily" value="1" {% if f %}{% if f.daily %}checked{% endif %}{% elif G.daily %}checked{% endif %}> Check once a day and show a notice when there's a newer release</label>
       </div>
-      <p class="note" style="margin-top:6px">Make the token on GitHub: Settings › Developer settings › Fine-grained tokens › Generate. Repository access: only this repository. Permissions › Contents: Read-only. It is kept in the server's protected settings file and never shown again. The server needs to reach api.github.com over HTTPS (through the company proxy if there is one).</p>
+      <p class="note" style="margin-top:6px">Make the token on GitHub: Settings › Developer settings › Fine-grained tokens › Generate. Repository access: only this repository (and the Labor Calculator's, to update the Labor Budget page from it). Permissions › Contents: Read-only. It is kept in the server's protected settings file and never shown again. The server needs to reach api.github.com over HTTPS (through the company proxy if there is one).</p>
       <div class="row" style="margin-top:8px"><button class="btn primary" type="submit">Test and save</button>{% if G.on %}<button type="button" class="btn ghost" hx-post="/kiosk/do/ghRemove" hx-target="#github" hx-swap="outerHTML" hx-confirm="Turn off updates from GitHub and remove the token?">Turn off</button>{% endif %}<span class="htmx-indicator note">Checking the token with GitHub…</span></div>
     </form></details>
 {% endwith %}</div>
