@@ -63,19 +63,23 @@ class ExtraBreakTests(TestCase):
             before = Downtime.objects.filter(shift=sh).count()
             engine.add_down(sh, a + timedelta(minutes=2), a + timedelta(minutes=12))      # all inside the break
             self.assertEqual(Downtime.objects.filter(shift=sh).count(), before)
-        # the scheduler takes the break out of run time
+        # the scheduler takes the break out of run time: put a 20-minute break inside a stretch of run time that
+        # has no break of its own (so the test doesn't depend on the time of day it runs)
         from scheduler.engine import Calendar, load_world
-        from plant.util import ms, sod_ms
+        from plant.util import from_ms, sod_ms
         world = load_world()
         m = next(x for x in world["cfg"]["machines"] if x["name"] == "Barbara")
-        b0 = ms(t + timedelta(hours=1))
-        ExtraBreak.objects.create(day=(t + timedelta(hours=1)).date(), start=(t + timedelta(hours=1)).strftime("%H:%M"), minutes=20)
+        for k in range(1, 8):
+            day = sod_ms(timezone.now().timestamp() * 1000) + k * 86400000
+            iv1 = Calendar(world["cfg"], extra=world["extraBreaks"]).day_iv(m, day)
+            gap = next(((s, e) for s, e in iv1 if e - s >= 60 * 60000), None)
+            if gap:
+                break
+        at = local(from_ms(gap[0] + 10 * 60000))
+        ExtraBreak.objects.create(day=at.date(), start=at.strftime("%H:%M"), minutes=20)
         w2 = load_world()
-        day = sod_ms(b0)
-        iv1 = Calendar(world["cfg"], extra=world["extraBreaks"]).day_iv(m, day)
         iv2 = Calendar(w2["cfg"], extra=w2["extraBreaks"]).day_iv(m, day)
-        if any(s <= b0 < e for s, e in iv1):                         # only when the break falls in a shift
-            self.assertEqual(sum(e - s for s, e in iv1) - sum(e - s for s, e in iv2), 20 * 60000)
+        self.assertEqual(sum(e - s for s, e in iv1) - sum(e - s for s, e in iv2), 20 * 60000)
 
     def test_timeline_and_list_and_cancel(self):
         self.login("4444")
