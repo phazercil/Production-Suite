@@ -13,6 +13,7 @@
   {% if st.log %}<pre class="num" style="white-space:pre-wrap;background:var(--well-3);padding:8px;border-radius:6px;margin:8px 0 0;font-size:12px;max-height:240px;overflow:auto">{{ st.log|join:"
 " }}</pre>{% endif %}</div>
 {% include "hmi/k/admin/_github.html" with GH=A.GH %}
+{% include "hmi/k/admin/_laborcalc.html" with LC=A.LC %}
 <form class="panel" hx-post="/kiosk/do/updUpload" hx-encoding="multipart/form-data" hx-swap="none"><h2 class="h2">Install an update file</h2>
   <p class="sub" style="margin-top:4px">Choose a <code>ProductionSuite-Update-….zip</code>. It is checked before anything changes: only update files signed for this suite, newer than what's installed, with every file intact, are accepted.</p>
   <div class="grid3" style="margin-top:8px"><label class="f">Update file<input type="file" name="file" accept=".zip"></label>

@@ -1,4 +1,4 @@
-"""Labor Budget page changes that keep it in step with the rest of the suite (used by tools/build_labor.py).
+"""Labor Budget page changes that keep it in step with the rest of the suite (used by labor/build.py).
 
 labor/sync.py does the work on the server. Budget A is the master of the lines and the shifts: lines (added,
 renamed, removed, their stage and shifts) and shifts (how many, times, days, lunch) are changed on this page and

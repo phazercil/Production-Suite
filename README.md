@@ -380,6 +380,17 @@ From 1.3.0 on, updates come as a small signed file, `ProductionSuite-Update-<ver
 
 The version and revision show in the bottom-right corner of every page, and at `/api/version`.
 
+**The Labor Calculator on its own.** The Labor Budget page is the Labor Calculator (its own repository,
+`phazercil/Labor-Calculator`) with the suite's sync, A/B budgets and login added. With updates from GitHub set
+up, **Admin › Updates › Labor Calculator** checks that repository for a newer calculator and installs it without
+a suite release: it downloads the offline build (`desktop/app/index.html`, made by the calculator's
+`tools/build_desktop.py`), strips the names and wages stored in it, adds the suite's changes and switches the page.
+If a calculator change moved the parts the suite hooks into, it is refused and the page stays as it was. **Undo**
+goes back one install; the page that came with the suite can always be restored. After a suite update the
+installed calculator is built again with the new suite's changes (or, if it no longer fits, the shipped one is
+used and the panel says so). The GitHub token needs Contents: Read-only on both repositories. Set
+`LABOR_CALC_REPO` in `.env` to use another repository.
+
 **Building an update** (whoever holds the signing key, kept off the server):
 raise `REVISION` in `suite/version.py` (and `VERSION` for a release), then
 `python tools/make_update.py --key production-suite-signing-key.txt --notes "what changed"`. Add

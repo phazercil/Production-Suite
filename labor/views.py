@@ -67,10 +67,15 @@ def page(request, only=False):
     if not me:
         return render(request, "labor/login.html", {"mode": "labor", "note": note, "kiosk_lock": only, "home": "/budget/" if only else "/labor/"})
     touch(request)
-    html = _page_cache.get("html")
-    if html is None:
-        html = PAGE.read_text(encoding="utf-8")
-        _page_cache["html"] = html
+    from .calcupdate import page_path
+    src = page_path()   # a calculator installed from GitHub (Admin › Updates), else the one that came with the suite
+    try:
+        key = (str(src), src.stat().st_mtime_ns)
+    except OSError:
+        src, key = PAGE, (str(PAGE), 0)
+    if _page_cache.get("key") != key:
+        _page_cache.update(key=key, html=src.read_text(encoding="utf-8"))
+    html = _page_cache["html"]
     from .sync import merge, suite_view
     view = suite_view()
     budgets, notes = {}, []

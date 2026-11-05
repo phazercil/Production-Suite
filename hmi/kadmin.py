@@ -129,7 +129,8 @@ def tab_data(s, tab, request):
     if tab == "updates":
         try:
             from plant import updates
-            return {"U": updates.info(), "GH": github_data(s)}
+            from labor import calcupdate
+            return {"U": updates.info(), "GH": github_data(s), "LC": calcupdate.info()}
         except Exception as e:  # noqa: BLE001
             return {"U": None, "err": str(e)}
     if tab == "alerts":
@@ -1071,3 +1072,51 @@ CONFIRM = {
     "updCancel": ("Remove the waiting update?", "", "", "Remove"),
     "updGoBack": ("Go back to the previous version?", "The suite stops for a minute or two.", "", "Go back"),
 }
+
+
+# ---------------------------------------------------------------- Labor Calculator from its own GitHub repository
+def calc_panel(request, s, msg=None, hold=False):
+    from labor import calcupdate
+    return render_panel(request, "hmi/k/admin/_laborcalc.html", S=s, LC=calcupdate.info(), msg=msg, hold=hold or bool(msg))
+
+
+def _calc(request, s, fn, done):
+    from labor import calcupdate
+    deny = _need(request, s, "updates.install")
+    if deny:
+        return deny
+    try:
+        r = fn()
+    except calcupdate.CalcError as e:
+        return calc_panel(request, s, {"ok": False, "text": str(e)})
+    text = done(r)
+    if text:
+        engine.audit(engine.Ctx(user=s.actor), text)
+    return calc_panel(request, s, {"ok": True, "text": text} if text else None, hold=True)
+
+
+@action("calcCheck")
+def a_calc_check(request, s, p):
+    from labor import calcupdate
+    return _calc(request, s, calcupdate.check, lambda r: None)
+
+
+@action("calcInstall")
+def a_calc_install(request, s, p):
+    from labor import calcupdate
+    sha = str(p.get("sha") or "") or None
+    return _calc(request, s, lambda: calcupdate.install(s.actor.name, sha),
+                 lambda m: f"Labor Calculator {m['short']} installed from GitHub ({m['repo']})")
+
+
+@action("calcUndo")
+def a_calc_undo(request, s, p):
+    from labor import calcupdate
+    return _calc(request, s, calcupdate.undo,
+                 lambda m: f"Labor Calculator back to {m['short']} from GitHub" if m.get("sha") else "Labor Calculator back to the one that came with the suite")
+
+
+@action("calcReset")
+def a_calc_reset(request, s, p):
+    from labor import calcupdate
+    return _calc(request, s, calcupdate.reset, lambda m: "Labor Calculator back to the one that came with the suite")
