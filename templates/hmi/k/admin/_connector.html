@@ -1,7 +1,7 @@
 {% load suite %}<div id="connector" class="connector" data-connector {% if not tabCan %}data-readonly{% endif %}>
 <div class="panel csum">
   <div class="row" style="align-items:flex-end"><div class="grow"><h2 class="h2">Connector builder</h2>
-    <p class="sub" style="margin-top:4px">Pick a database and a table on the left, then <b>drag a column onto what the suite needs</b> on the right (or tap a column, then tap the slot). Each card takes all its columns from one table. Nothing changes until you press that card's Save.</p></div>
+    <p class="sub" style="margin-top:4px">Pick a database and a table on the left. <b>Drag from a column's dot to the dot of what the suite needs</b> to wire them (or tap a column, then tap the input). Click a wire to unwire it. Each box on the right reads one table; nothing changes until you press its Save.</p></div>
     <div class="cprog"><b class="num">{{ C.sum.done }} / {{ C.sum.total }}</b><span>data needs connected</span><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ C.sum.pct }}" aria-label="Data needs connected"><i style="width:{{ C.sum.pct }}%"></i></div></div></div>
   {% if C.sum.missing %}<div class="cmiss"><span class="eyebrow">Still needed</span>{% for x in C.sum.missing %}<button type="button" class="chip warn" data-goto="{{ x.key }}" title="{{ x.need|join:', ' }}">{{ x.title }}{% if x.sub and x.sub != "Machine readings" %}{% else %} · readings{% endif %}</button>{% endfor %}</div>
   {% else %}<p class="note" style="margin-top:8px;color:var(--ok)">Everything the suite can take from a database is connected.</p>{% endif %}
@@ -9,36 +9,36 @@
 </div>
 {% if not C.dbs %}<div class="panel" style="border-color:var(--warn)"><b>No database is connected yet.</b> Add the machine data, asset or S2K database under <a href="/admin/?tab=connections" style="color:var(--accent)">Connections</a>, then come back here.</div>
 {% else %}
-<div class="cgrid">
-  <aside class="panel csrc" aria-label="Columns you can use">
-    <span class="eyebrow">1 · Source</span>
-    <label class="f">Database<select name="db" hx-get="/kiosk/v/admin?tab=connector" hx-target="#view" hx-include="this" aria-label="Database">{% for d, lbl in C.dbs %}<option value="{{ d }}" {% if C.src.db == d %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></label>
-    <label class="f">Table<select name="table" hx-get="/kiosk/v/admin?tab=connector&db={{ C.src.db }}" hx-target="#view" hx-include="this" aria-label="Table"><option value="">Pick a table…</option>{% for t in C.src.tables %}<option {% if C.src.table == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
-    {% if C.src.err %}<p class="note" style="color:var(--bad)">{{ C.src.err }}</p>{% endif %}
-    {% if C.src.table %}<span class="eyebrow" style="margin-top:6px">2 · Columns in {{ C.src.table }}</span>
-      <input type="search" class="cfilter" placeholder="Filter columns" aria-label="Filter columns">
-      {% if C.src.cols.0.err %}<p class="note">Couldn't read sample values: {{ C.src.cols.0.err }}</p>{% endif %}
-      <div class="ctags">{% for c in C.src.cols %}<button type="button" class="ctag" data-col="{{ c.name }}" data-table="{{ C.src.table }}" data-db="{{ C.src.db }}" title="{{ c.type }}{% if c.sample %} · e.g. {{ c.sample }}{% endif %}"><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></button>{% empty %}<p class="note">This table has no columns.</p>{% endfor %}</div>
-    {% else %}<p class="note">Pick a table to see its columns.</p>{% endif %}
+<div class="cwire" data-wire>
+  <svg class="wires" aria-hidden="true"></svg>
+  <aside class="wbox src" aria-label="Columns you can use">
+    <div class="wh"><b>Source</b><span class="note">{% if C.src.table %}{{ C.src.table }}{% else %}pick a table{% endif %}</span></div>
+    <div class="wsel">
+      <select name="db" hx-get="/kiosk/v/admin?tab=connector" hx-target="#view" hx-include="this" aria-label="Database">{% for d, lbl in C.dbs %}<option value="{{ d }}" {% if C.src.db == d %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select>
+      <select name="table" hx-get="/kiosk/v/admin?tab=connector&db={{ C.src.db }}" hx-target="#view" hx-include="this" aria-label="Table"><option value="">Pick a table…</option>{% for t in C.src.tables %}<option {% if C.src.table == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+      {% if C.src.table %}<input type="search" class="cfilter" placeholder="Filter columns" aria-label="Filter columns">{% endif %}
+    </div>
+    {% if C.src.err %}<p class="note" style="color:var(--bad);padding:0 12px">{{ C.src.err }}</p>{% endif %}
+    {% if C.src.cols.0.err %}<p class="note" style="padding:0 12px">Couldn't read sample values: {{ C.src.cols.0.err }}</p>{% endif %}
+    <div class="ports">{% for c in C.src.cols %}<button type="button" class="ctag port out" data-col="{{ c.name }}" data-table="{{ C.src.table }}" data-db="{{ C.src.db }}" title="{{ c.type }}{% if c.sample %} · e.g. {{ c.sample }}{% endif %}"><span class="pl"><b>{{ c.name }}</b><small>{{ c.type }}{% if c.sample %} · {{ c.sample }}{% endif %}</small></span><span class="dot" aria-hidden="true"></span></button>
+    {% empty %}<p class="note" style="padding:8px 12px">{% if C.src.table %}This table has no columns.{% else %}Pick a table to see its columns. Each column gets a dot; drag from it to what the suite needs.{% endif %}</p>{% endfor %}</div>
   </aside>
-  <section class="cneeds" aria-label="What the suite needs">
-    <span class="eyebrow">3 · What the suite needs</span>
-    {% for g in C.groups %}<form class="panel cgroup st-{{ g.status }} {% if C.focus == g.key %}focus{% endif %}" id="cg-{{ forloop.counter }}" data-group="{{ g.key }}" data-dbs="{{ g.dbs|join:',' }}" data-state="{{ g.state|jsonattr }}" hx-post="/kiosk/do/connectorSave" hx-target="#connector" hx-swap="outerHTML">
+  <section class="needs" aria-label="What the suite needs">
+    {% for g in C.groups %}<form class="wbox cgroup st-{{ g.status }} {% if C.focus == g.key %}focus{% endif %}" id="cg-{{ forloop.counter }}" data-group="{{ g.key }}" data-dbs="{{ g.dbs|join:',' }}" data-state="{{ g.state|jsonattr }}" hx-post="/kiosk/do/connectorSave" hx-target="#connector" hx-swap="outerHTML">
       <input type="hidden" name="group" value="{{ g.key }}"><input type="hidden" name="db" value="{{ g.db }}"><input type="hidden" name="table" value="{{ g.table }}"><input type="hidden" name="map" value="">
       <input type="hidden" name="srcDb" value="{{ C.src.db }}"><input type="hidden" name="srcTable" value="{{ C.src.table }}">
-      <div class="gh">{% if g.color %}<span class="swatch" style="background:{{ g.color }}"></span>{% endif %}<div class="grow"><b>{{ g.title }}</b> <span class="note">{{ g.sub|truncatechars:110 }}</span></div>
+      <div class="wh">{% if g.color %}<span class="swatch" style="background:{{ g.color }}"></span>{% endif %}<div class="grow"><b>{{ g.title }}</b><span class="note">{{ g.sub|truncatechars:90 }}</span></div>
         {% if g.status == "done" %}<span class="pill ok">CONNECTED</span>{% elif g.status == "partial" %}<span class="pill warn">PARTLY</span>{% elif g.status == "other" %}<span class="pill ok">{{ g.other|upper }}</span>{% elif g.status == "custom" %}<span class="pill ok">CUSTOM SQL</span>{% else %}<span class="pill bad">NOT CONNECTED</span>{% endif %}</div>
-      <div class="gsrc note">Uses the {% for d in g.dbs %}{{ C.allDbs|get:d }}{% if not forloop.last %} or {% endif %}{% endfor %}{% if g.table %} · table <b class="tb">{{ g.table }}</b>{% else %} · <span class="tb">no table yet</span>{% endif %}
-        {% if g.status == "other" %} · readings come by {{ g.other }} now; saving here switches it to a database table.{% endif %}{% if g.status == "custom" %} · a hand-written query is in use; saving here replaces it.{% endif %}</div>
-      <div class="slots">{% for sl in g.slots %}<div class="slot {% if sl.req %}req{% endif %} {% if sl.col %}set{% endif %}" data-slot="{{ sl.k }}" role="button" tabindex="0" aria-label="{{ sl.label }}{% if sl.req %} (needed){% endif %}: {% if sl.col %}{{ sl.col }}{% else %}empty{% endif %}">
-          <span class="sl">{{ sl.label }}{% if sl.req %}<i aria-hidden="true">*</i>{% endif %}</span>
-          <span class="sv">{% if sl.col %}{{ sl.col }}{% else %}drop a column{% endif %}</span>
-          <button type="button" class="sx" aria-label="Clear {{ sl.label }}" {% if not sl.col %}hidden{% endif %}>✕</button>
-          {% if sl.help %}<small>{{ sl.help }}</small>{% endif %}</div>{% endfor %}</div>
-      {% if g.kind == "machine" %}<label class="f gextra">{{ g.keyValLabel }} <span class="note">(used with "Which machine")</span><input type="text" name="keyVal" value="{{ g.keyVal }}" maxlength="120"></label>{% endif %}
+      <div class="gsrc note">{% for d in g.dbs %}{{ C.allDbs|get:d }}{% if not forloop.last %} or {% endif %}{% endfor %} · table <b class="tb">{% if g.table %}{{ g.table }}{% else %}none yet{% endif %}</b>
+        {% if g.status == "other" %}<br>Readings come by {{ g.other }} now; saving here switches it to a database table.{% endif %}{% if g.status == "custom" %}<br>A hand-written query is in use; saving here replaces it.{% endif %}</div>
+      <div class="ports">{% for sl in g.slots %}<div class="slot port in {% if sl.req %}req{% endif %} {% if sl.col %}set{% endif %}" data-slot="{{ sl.k }}" role="button" tabindex="0" aria-label="{{ sl.label }}{% if sl.req %} (needed){% endif %}: {% if sl.col %}{{ sl.col }}{% else %}empty{% endif %}" {% if sl.help %}title="{{ sl.help }}"{% endif %}>
+          <span class="dot" aria-hidden="true"></span><span class="sl">{{ sl.label }}{% if sl.req %}<i aria-hidden="true">*</i>{% endif %}</span>
+          <span class="sv">{% if sl.col %}{{ sl.col }}{% endif %}</span>
+          <button type="button" class="sx" aria-label="Unlink {{ sl.label }}" {% if not sl.col %}hidden{% endif %}>✕</button></div>{% endfor %}</div>
+      {% if g.kind == "machine" %}<label class="f gextra">{{ g.keyValLabel }} <span class="note">(with "Which machine")</span><input type="text" name="keyVal" value="{{ g.keyVal }}" maxlength="120"></label>{% endif %}
       {% if g.kind == "s2k" %}<label class="f gextra">Only rows where that column equals <span class="note">(blank = every row)</span><input type="text" name="fval" value="{{ g.fval }}" maxlength="120" placeholder="OPEN"></label>{% endif %}
       <div class="row gfoot"><span class="gmsg note grow">{% if C.msg and C.msg.group == g.key %}<span class="{% if C.msg.ok %}okt{% else %}badt{% endif %}">{{ C.msg.text }}</span>{% elif g.missing %}Needed: {{ g.missing|join:", " }}{% endif %}</span>
-        <button type="button" class="btn ghost sm" data-undo hidden>Undo changes</button>{% if tabCan %}<button class="btn primary" type="submit" data-save disabled>Save</button>{% endif %}</div>
+        <button type="button" class="btn ghost sm" data-undo hidden>Undo</button>{% if tabCan %}<button class="btn primary sm" type="submit" data-save disabled>Save</button>{% endif %}</div>
     </form>{% endfor %}
   </section>
 </div>

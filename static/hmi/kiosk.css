@@ -457,3 +457,61 @@ body.c-dragging{cursor:grabbing;user-select:none}
 .badt{color:#f3b3ab}
 .gextra{max-width:360px}
 input:disabled,select:disabled,textarea:disabled{opacity:.55;cursor:not-allowed}
+/* connector builder: wire view */
+.cwire{position:relative;display:grid;grid-template-columns:minmax(260px,330px) minmax(90px,1fr) minmax(360px,520px);gap:0;align-items:start}
+.cwire .wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:2}
+.cwire .wires path{fill:none;stroke-width:3;stroke-linecap:round;pointer-events:stroke;cursor:pointer}
+.cwire .wires path.saved{stroke:#7cc4f2}
+.cwire .wires path.pending{stroke:var(--warn);stroke-dasharray:7 5}
+.cwire .wires path.live{stroke:var(--ok);stroke-dasharray:4 4;pointer-events:none}
+.cwire .wires path:hover,.cwire .wires path.hl{stroke-width:5;filter:drop-shadow(0 0 3px rgba(124,196,242,.7))}
+.cwire .wires path.arrow{stroke-width:0}
+.wbox{background:#2a3038;border:1px solid var(--rule-2);border-radius:10px;overflow:visible;position:relative}
+.wbox .wh{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--rule)}
+.wbox .wh b{font-size:16px;display:block}
+.wbox .wh .note{display:block;font-size:12px}
+.cwire .src{grid-column:1;position:sticky;top:76px;max-height:calc(100vh - 100px);display:flex;flex-direction:column}
+.cwire .src .wsel{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-bottom:1px solid var(--rule)}
+.cwire .src .ports{overflow-y:auto;overflow-x:visible;padding:6px 0 8px;flex:1;min-height:0}
+.cwire .needs{grid-column:3;display:flex;flex-direction:column;gap:14px;min-width:0}
+.cwire .ports{display:flex;flex-direction:column}
+.port{position:relative;display:flex;align-items:center;gap:8px;min-height:40px;background:none;border:0;border-radius:0;color:var(--ink);text-align:left;width:100%;user-select:none;touch-action:none}
+.port .dot{width:20px;height:20px;border-radius:50%;flex:none;border:2px solid rgba(0,0,0,.35);box-shadow:inset 0 -2px 0 rgba(0,0,0,.2);cursor:crosshair}
+.port.out{padding:4px 10px 4px 14px;cursor:grab;border-left:0}
+.port.out .pl{flex:1;min-width:0;display:flex;flex-direction:column}
+.port.out .pl b{font:600 14px var(--f-mono);overflow-wrap:anywhere}
+.port.out .pl small{font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.port.out .dot{background:#f2a33a;margin-right:-22px;position:relative;z-index:3}
+.port.out:hover,.port.out.picked{background:rgba(242,163,58,.12)}
+.port.out.wired .dot{box-shadow:0 0 0 3px rgba(124,196,242,.35)}
+.cwire .slot.port.in{padding:4px 34px 4px 0;border:0;border-radius:0;min-height:40px;background:none;cursor:pointer}
+.cwire .slot.port.in .dot{background:#4aa3e8;margin-left:-11px;position:relative;z-index:3}
+.cwire .slot.port.in.req .dot{background:#4aa3e8;outline:2px solid rgba(224,108,91,.6);outline-offset:2px}
+.cwire .slot.port.in.set .dot{background:#4aa3e8;outline:none}
+.cwire .slot .sl{font-size:14px;color:var(--ink);flex:1;min-width:0}
+.cwire .slot .sv{font:500 12px var(--f-mono);color:var(--ink-2);max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cwire .slot .sx{top:50%;transform:translateY(-50%);right:6px}
+.cwire .slot:hover,.cwire .slot.over{background:rgba(74,163,232,.12)}
+.connector.picking .cwire .slot{background:rgba(74,163,232,.06)}
+.cwire .cgroup{display:block;border-left:1px solid var(--rule-2)}
+.cwire .cgroup .gsrc{padding:6px 12px 2px}
+.cwire .cgroup .ports{padding:4px 0 6px}
+.cwire .cgroup .gextra{padding:0 12px 6px;max-width:none}
+.cwire .cgroup .gfoot{padding:8px 12px 10px;border-top:1px solid var(--rule)}
+.cwire .cgroup.st-done .wh{box-shadow:inset 4px 0 0 var(--ok)}
+.cwire .cgroup.st-partial .wh{box-shadow:inset 4px 0 0 var(--warn)}
+.cwire .cgroup.st-missing .wh{box-shadow:inset 4px 0 0 var(--bad)}
+.cwire .cgroup.other-db{opacity:.45}
+.cwire .cgroup.other-db .port .dot{background:#6b7480}
+.cwire .cgroup.focus{box-shadow:0 0 0 2px var(--accent)}
+body.c-dragging .port.out{cursor:grabbing}
+@media (max-width:1000px){.cwire{grid-template-columns:1fr}.cwire .src{position:relative;top:0;max-height:none}.cwire .needs{grid-column:1;margin-top:14px}.cwire .wires{display:none}}
+.cwire .slot.port.in{flex-direction:row;align-items:center;gap:8px;text-align:left;justify-content:flex-start}
+.cwire .slot.port.in small{display:none}
+.cwire .port.out{flex-direction:row;align-items:center;justify-content:flex-start;border:0;border-radius:0;background:none;min-height:42px;padding:4px 10px 4px 14px;box-shadow:none}
+.cwire .port.out:hover,.cwire .port.out.picked{background:rgba(242,163,58,.12);outline:none}
+.cwire .port.out .pl{align-items:flex-start;text-align:left}
+.cwire .port.out .dot{margin-right:0}
+.cwire .src .ports{padding-right:0}
+.cwire,.cwire .port{-webkit-user-select:none;user-select:none}
+.cwire input,.cwire select{-webkit-user-select:text;user-select:text}
