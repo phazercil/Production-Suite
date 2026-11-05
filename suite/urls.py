@@ -41,6 +41,8 @@ urlpatterns = [
     path("api/scheduler/state", sch.state),
     path("api/scheduler/job", sch.put_job),
     path("api/scheduler/job/delete", sch.del_job),
+    path("api/scheduler/job/split", sch.split_job),
+    path("api/scheduler/job/merge", sch.merge_job),
     path("api/scheduler/preview", sch.preview),
     path("api/scheduler/mo", sch.put_mo),
     path("api/scheduler/mo/delete", sch.del_mo),

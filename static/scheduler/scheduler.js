@@ -205,9 +205,12 @@ function renderSchedule(){
       const grid=S.view.scale==="day"?"":bk.map(([x])=>`<div class="gridline" style="left:${X(x,a,px)}px"></div>`).join("");
       const bars=rs.filter(r=>r.end>a&&r.start<b).map(r=>{
         const mo=S.mos[r.moId];if(!mo)return "";
-        const l=X(r.start,a,px),w=Math.max(4,X(r.end,a,px)-l),cw=r.coMin?Math.min(w,X(r.runStart,a,px)-l):0;
-        const tip=`${mo.mo} · ${mo.part} · ${fmtN(r.qty)} pcs${r.running?" · RUNNING at the kiosk now":""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\nChangeover ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
-        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}</b><span>${esc(mo.part)} · ${fmtK(r.qty)}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}</div>`}).join("");
+        const l=X(r.start,a,px),w=r.rest?Math.max(96,X(r.end,a,px)-l):Math.max(4,X(r.end,a,px)-l),cw=r.coMin?Math.min(w,X(r.runStart,a,px)-l):0;
+        const pl=r.parts>1?` · ${r.part}/${r.parts}`:"",sp=r.parts>1&&r.part===1?r.split:null;
+        const spTxt=sp?(sp.mode==="qty"?`Part 1 stops after ${fmtN(sp.qty)}`:sp.mode==="time"?`Part 1 stops at ${fmtDT(sp.at)}`:"Part 1 runs until the operator ends the MO"):"";
+        const tip=`${mo.mo}${pl} · ${mo.part} · ${r.rest?"the rest once the operator ends part 1":fmtN(r.qty)+" pcs"}${r.running?" · RUNNING at the kiosk now":""}${spTxt?"\n"+spTxt:""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\nChangeover ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
+        const canSplit=!S.editLocked&&!r.unplanned&&(r.parts<2||r.part===1);
+        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
       const tot=rs.reduce((s,r)=>s+qtyIn(r,a,b),0);
       const cells=bk.map(([x,y])=>{const q=rs.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
       const sp=m.stage==="s1"?`${m.mode==="fixed"?m.ppm+" PPM":m.mode==="new"?"New-machine PPM":"Sheet PPM"}`:`${(S.modes[m.stage]||[]).find(x=>x[0]===m.mode)?.[1].split(" (")[0]||"Fixed"}`;
@@ -302,10 +305,12 @@ function wireSchedule(a,px){
   });
   $$(".bar").forEach(bEl=>{
     bEl.addEventListener("dragstart",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;const rect=bEl.getBoundingClientRect();
-      DRAG={moId:j.moId,op:j.op,grabPx:e.clientX-rect.left,w:rect.width,from:j.id};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move";
+      DRAG={moId:j.moId,op:j.op,part:j.part||1,grabPx:e.clientX-rect.left,w:rect.width,from:j.id};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move";
       bEl.classList.add("dragging")});
     bEl.addEventListener("dragend",()=>bEl.classList.remove("dragging"));
-    bEl.addEventListener("click",()=>{const j=S.jobs[bEl.dataset.job];if(j)openJobDialog(j.moId,j.op)});
+    bEl.addEventListener("click",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;
+      if(e.target.closest(".splitbtn")||(j.part||1)>1){openSplitDialog(j.moId,j.op);return}
+      openJobDialog(j.moId,j.op)});
   });
   /* where the MO would start: the dragged bar's left edge (a bar keeps the spot it was grabbed by), snapped */
   const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();const x=Math.max(0,e.clientX-rect.left-(DRAG&&DRAG.grabPx||0));
@@ -320,10 +325,10 @@ function wireSchedule(a,px){
       if(!DRAG)return;const d=DRAG;DRAG=null;
       if(m.stage!==d.op){toast(`${STAGES[d.op].short} work can only go on a ${STAGES[d.op].short} line.`);return}
       if(d.op!=="s1"&&!S.jobs[jobKey(d.moId,"s1")]){toast("Schedule Stage 1 for this order first.");return}
-      const k=jobKey(d.moId,d.op),want=tAt(tr,e);
+      const k=d.from||jobKey(d.moId,d.op),want=tAt(tr,e);
       const was=S.res[k];
       if(was&&was.running&&was.machineId===m.id){toast(`${S.mos[d.moId]?.mo||"This MO"} is running on ${m.name} now, so it stays at now until the operator ends it at the kiosk.`);return}
-      const r=await putJob({moId:d.moId,op:d.op,machineId:m.id,reqStart:want});
+      const r=await putJob({moId:d.moId,op:d.op,part:d.part||1,machineId:m.id,reqStart:want});
       const x=S.res[k];
       if(r.ok&&x){
         if(x.paced)toast(`Held back to ${fmtDT(x.start)} so it doesn't run out of Stage 1 parts.`);
@@ -379,6 +384,34 @@ function openJobDialog(moId,op){
     if(op==="s1"){const dn=STAGE_ORDER.filter(o=>o!=="s1"&&S.jobs[jobKey(moId,o)]);if(dn.length){const b=$("#dun");if(!b.dataset.sure){b.dataset.sure="1";b.textContent=`Also unschedule ${dn.length} later stage${dn.length>1?"s":""}?`;return}close();await delJob(k,true);toast("Unscheduled.");return}}
     close();await delJob(k);toast("Unscheduled.")};
   $("#dm").focus();
+}
+
+/* ---------- split a run in two ---------- */
+function openSplitDialog(moId,op){
+  const mo=S.mos[moId];if(!mo)return;const k=jobKey(moId,op),r1=S.res[k],j1=S.jobs[k];if(!j1)return;
+  const k2=`${k}__2`,r2=S.res[k2],sp=r1&&r1.parts>1?r1.split:null;
+  const total=op==="s1"?Math.max(0,mo.qty-(mo.produced||0)):mo.qty;
+  const mid=r1?Math.round(((r1.runStart+r1.end)/2)/(15*MIN))*15*MIN:Date.now();
+  const mode=sp?sp.mode:"time";
+  $("#layer").innerHTML=`<div class="scrim" id="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgt">
+    <div class="hd"><div><h2 id="dlgt">Split ${esc(mo.mo)} · ${esc(STAGES[op].name)}</h2><div class="muted small">${esc(mo.part)} · ${fmtN(total)} to make${r1?` · on ${esc(machineById(r1.machineId)?.name||"")}, ${fmtDT(r1.runStart)} → ${fmtDT(r1.end)}`:""}</div></div><button class="btn ghost" id="dx" aria-label="Close">✕</button></div>
+    <p class="muted small" style="margin:0 0 10px">Part 1 stays where it is and stops as set here. Part 2 makes the rest: it starts right after part 1 on the same line, and you can drag it to any time or line.</p>
+    <fieldset class="splitopts">
+      <label class="opt"><input type="radio" name="sm" value="time" ${mode==="time"?"checked":""}><span><b>At a time of day</b><small>Part 1 stops then; part 2 makes what's left.</small><input type="datetime-local" id="sat" value="${toLocalInput(sp&&sp.at||mid)}"></span></label>
+      ${op==="s1"?`<label class="opt"><input type="radio" name="sm" value="operator" ${mode==="operator"?"checked":""}><span><b>When the operator ends the MO</b><small>Part 1 runs until it's ended at the kiosk; part 2 makes whatever is left then.</small></span></label>`:""}
+      <label class="opt"><input type="radio" name="sm" value="qty" ${mode==="qty"?"checked":""}><span><b>By quantity</b><small>Part 1 makes this many; part 2 makes the rest.</small><input type="number" id="sqty" min="1" max="${Math.max(1,Math.floor(total)-1)}" step="1" value="${sp&&sp.qty?Math.round(sp.qty):Math.round(total/2)}"></span></label>
+    </fieldset>
+    ${r2?`<div class="note">Now: part 1 ${r1.rest?"":fmtN(r1.qty)+" pcs"} ${fmtDT(r1.start)} → ${fmtDT(r1.end)}; part 2 ${r2.rest?"the rest once part 1 ends":fmtN(r2.qty)+" pcs"} on ${esc(machineById(r2.machineId)?.name||"")} ${fmtDT(r2.start)}${r2.rest?"":" → "+fmtDT(r2.end)}.</div>`:""}
+    <div class="foot">${r2?`<button class="btn danger" id="smerge">Undo the split</button>`:""}<span style="flex:1"></span><button class="btn" id="dc">Cancel</button><button class="btn primary" id="sok">${r2?"Save":"Split"}</button></div>
+  </div></div>`;
+  const close=()=>closeDialog();$("#dx").onclick=close;$("#dc").onclick=close;$("#scrim").onclick=e=>{if(e.target.id==="scrim")close()};
+  $$(".splitopts input[type=datetime-local],.splitopts input[type=number]").forEach(x=>x.addEventListener("focus",()=>{x.closest(".opt").querySelector("input[type=radio]").checked=true}));
+  $("#sok").onclick=async()=>{const m=$(".splitopts input[name=sm]:checked").value;
+    const body={key:k,mode:m};if(m==="time"){const v=$("#sat").value;if(!v){toast("Pick the time part 1 stops.");return}body.at=new Date(v).getTime()}
+    if(m==="qty")body.qty=+$("#sqty").value;
+    const r=await guard(api("/api/scheduler/job/split",body));if(!r.ok){toast(r.error||"Couldn't split.");return}
+    close();await load();toast(r2?"Split changed.":"Split: part 2 is right after part 1. Drag it anywhere.")};
+  if(r2)$("#smerge").onclick=async()=>{close();await guard(api("/api/scheduler/job/merge",{key:k}));await load();toast("Back to one run.")};
 }
 
 /* ---------- Labor Budget plan ---------- */
