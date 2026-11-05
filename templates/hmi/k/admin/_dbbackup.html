@@ -1,0 +1,14 @@
+<div class="panel" id="dbbackup" {% if msg %}data-hold{% endif %}>
+  <div class="row"><h2 class="h2 grow">Back up the database</h2><span class="pill idle">{% if DB.engine == "mariadb" %}MariaDB · {{ DB.name }}{% else %}SQLite file{% endif %}</span></div>
+  <p class="sub" style="margin-top:4px">Everything the suite keeps: shifts, downtime, counts, QC, the schedule, people, settings. The backup is taken from one consistent moment while the suite keeps running. Files go to <code>backups/database</code> in the suite's folder; the newest {{ DB.keep }} are kept. Download them to keep a copy off this server.</p>
+  <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary" hx-post="/kiosk/do/dbBackup" hx-target="#dbbackup" hx-swap="outerHTML" {% if not S.perms.backup_manage %}disabled{% endif %}>Back up the database now</button><span class="htmx-indicator note">Backing up…</span></div>
+  {% include "hmi/k/admin/_msg.html" with m=msg %}
+  {% if DB.list %}<div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Backup</th><th>Taken</th><th style="text-align:right">Size</th><th></th></tr></thead><tbody>
+    {% for b in DB.list %}<tr><td class="mono">{{ b.name }}</td><td>{{ b.at|date:"D n/j/Y g:i a" }}</td><td style="text-align:right">{{ b.size|filesizeformat }}</td>
+      <td>{% if S.perms.backup_manage %}<a class="btn sm" href="/kiosk/backup/{{ b.name }}" download>Download</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="note" style="margin-top:10px">No database backups yet.</p>{% endif %}
+  <details style="margin-top:10px"><summary class="note">How to restore one</summary>
+    {% if DB.engine == "mariadb" %}<p class="note" style="margin-top:6px">Stop the suite, then on a computer with the MariaDB client: <code>gunzip -c production_suite-….sql.gz | mariadb -u root -p {{ DB.name }}</code> (on Windows, unzip it with 7-Zip, then <code>mariadb -u root -p {{ DB.name }} &lt; production_suite-….sql</code>). Start the suite again.</p>
+    {% else %}<p class="note" style="margin-top:6px">Stop the suite, unzip the file and put it in place of the suite's .sqlite3 file, then start the suite.</p>{% endif %}
+  </details>
+</div>

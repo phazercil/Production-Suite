@@ -50,7 +50,7 @@ def load_world(jobs_override=None):
     # Stage 1 slot, but any End Band / Arts & Crafts / Glue Bead work already on the board stays scheduled.
     from django.db.models import Q
     mos = {}
-    later = Job.objects.filter(op__in=["eb", "ac", "gb"]).values("mo_id")
+    later = Job.objects.filter(Q(op__in=["eb", "ac", "gb"]) | Q(part__gt=1)).values("mo_id")   # (or the rest of a split Stage 1)
     for mo in MO.objects.filter(Q(status="OPEN") | Q(status="CLOSE", pk__in=later)):
         mos[mo.id] = {"id": mo.id, "mo": mo.number, "part": mo.part, "qty": mo.qty, "due": ms_from_date(mo.due), "pleats": mo.pleats,
                       "ops": mo.ops or {"s1": True}, "itemUid": mo.item_uid, "status": mo.status, "produced": mo.produced,
@@ -58,7 +58,9 @@ def load_world(jobs_override=None):
     if jobs_override is not None:
         jobs = jobs_override
     else:
-        jobs = {j.key: {"id": j.key, "moId": j.mo_id, "op": j.op, "machineId": j.machine_id, "reqStart": ms(j.req_start)}
+        jobs = {j.key: {"id": j.key, "moId": j.mo_id, "op": j.op, "machineId": j.machine_id, "reqStart": ms(j.req_start),
+                        "part": j.part, "split": {"mode": j.split_mode, "at": ms(j.split_at) if j.split_at else None, "qty": j.split_qty}
+                        if j.split_mode else None}
                 for j in Job.objects.all()}
     from hmi.models import ShiftRun  # local import: hmi depends on scheduler
     running = {r["mo_id"]: r["machine_id"] for r in ShiftRun.objects.filter(active=True, mo__isnull=False, machine__isnull=False).values("mo_id", "machine_id")}
@@ -283,13 +285,58 @@ def keeps_up(down, up):
 
 
 def compute(world, jobs=None):
-    cfg = world["cfg"]
+    """Times for every job. A stage split at a time of day needs two passes: part 1's planned quantity up to that
+    time decides what part 2 makes."""
     jobs = world["jobs"] if jobs is None else jobs
+    out = _compute(world, jobs, {})
+    if any((j.get("split") or {}).get("mode") == "time" for j in jobs.values()):
+        out = _compute(world, jobs, out["cuts"])
+    return out
+
+
+def _stage_total(mo, st):
+    """What a stage still has to make: Stage 1 what is left at the pleater, later stages the whole order."""
+    if st == "s1":
+        return max(0, float(mo["qty"] or 0) - float(mo.get("produced") or 0))
+    return float(mo["qty"] or 0)
+
+
+def _part_qty(j, mo, st, parts, cuts):
+    """(quantity, waiting for the operator) for one job. Unsplit stages make everything; a split stage's part 1
+    stops at its quantity, its time (cuts: what part 1 makes until then) or when the operator ends the MO."""
+    total = _stage_total(mo, st)
+    closed = st == "s1" and mo["status"] != "OPEN"
+    ps = parts.get((mo["id"], st)) or [j]
+    if len(ps) < 2:
+        return (0 if closed else total), False
+    p1 = ps[0]
+    sp = p1.get("split") or {}
+    mode, first = sp.get("mode"), j is p1
+    if mode == "operator":
+        if closed:   # the operator ended part 1 at the kiosk: part 2 makes what is left
+            return (0, False) if first else (total, False)
+        return (total, False) if first else (0, True)
+    if closed:
+        return 0, False
+    if mode == "qty":
+        q1 = min(total, max(0.0, float(sp.get("qty") or 0)))
+    else:   # time
+        q1 = min(total, cuts.get(p1["id"], total))
+    return (q1, False) if first else (max(0.0, total - q1), False)
+
+
+def _compute(world, jobs, cuts):
+    cfg = world["cfg"]
     mos, cat = world["mos"], world["catalog"]
     cal = Calendar(cfg, world.get("labor"), world.get("laborLines"), world.get("extraBreaks"))
     running = world.get("running", {})
     t_now = world.get("now") or ms(now())
-    res, by_m, s1_res, s1_done = {}, {}, {}, set()
+    res, by_m, s1_res, s1_done, new_cuts = {}, {}, {}, set(), {}
+    parts = {}
+    for j in jobs.values():
+        parts.setdefault((j["moId"], j["op"]), []).append(j)
+    for v in parts.values():
+        v.sort(key=lambda x: int(x.get("part") or 1))
     for st in STAGE_ORDER:
         for m in [x for x in cfg["machines"] if x["stage"] == st]:
             # The MO running on a Stage 1 machine right now goes first, from now, with what is left to make.
@@ -302,13 +349,17 @@ def compute(world, jobs=None):
                 item = cat.item_for(mo)
                 rate, basis = rate_for(m, item, mo)
                 warn = []
-                is_running = st == "s1" and running.get(mo["id"]) == m["id"]
+                qty, rest = _part_qty(j, mo, st, parts, cuts)
+                ps = parts.get((mo["id"], st)) or [j]
+                # the part on the machine running the MO now is the one running (the first with something to make)
+                is_running = st == "s1" and running.get(mo["id"]) == m["id"] and qty > 0 and \
+                    next((x for x in ps if _part_qty(x, mo, st, parts, cuts)[0] > 0), None) is j
                 earliest = max(t_now, prev_end) if is_running else max(j["reqStart"], prev_end)
                 waiting, up = False, None
                 if st == "s1":
-                    qty_left = 0 if mo["status"] != "OPEN" else max(0, float(mo["qty"] or 0) - float(mo.get("produced") or 0))
-                    if qty_left <= 0:
-                        s1_done.add(mo["id"])  # Stage 1 already made the full quantity
+                    if qty <= 0 and not rest:
+                        if _stage_total(mo, st) <= 0 or mo["status"] != "OPEN" and all(_part_qty(x, mo, st, parts, cuts)[0] <= 0 for x in ps):
+                            s1_done.add(mo["id"])  # Stage 1 already made the full quantity
                         continue
                 elif mo["id"] not in s1_done:
                     up = s1_res.get(mo["id"])
@@ -320,12 +371,13 @@ def compute(world, jobs=None):
                                                         (prev_part is not None and (prev_part != pkey or cfg.get("coSamePart")))) else 0
                 if is_running:
                     co_min = 0  # already set up and running
+                if rest:
+                    co_min = 0   # part 2 of a split waits for the operator: a marker, no time taken yet
                 scrap = min(.95, max(0, float(m["scrap"] or 0) / 100))
                 dt = min(.95, max(0, float(m["downtime"] or 0) / 100))
-                qty = qty_left if st == "s1" else float(mo["qty"] or 0)
                 gross = math.ceil(qty / (1 - scrap))
                 eff = rate * (1 - dt)
-                if not rate:
+                if not rate and not rest:
                     warn.append("No run speed for this part on this line")
                 run_min = gross / eff * 60 if eff > 0 else 0
 
@@ -348,7 +400,8 @@ def compute(world, jobs=None):
                 if not p:
                     # Report it instead of dropping it: the board and the floor queue still show the job.
                     res[j["id"]] = {"id": j["id"], "moId": mo["id"], "op": st, "machineId": m["id"], "rate": rate, "basis": basis, "eff": 0,
-                                    "gross": 0, "qty": float(mo["qty"] or 0), "scrap": 0, "dt": 0, "coMin": 0, "runMin": 0,
+                                    "gross": 0, "qty": qty, "scrap": 0, "dt": 0, "coMin": 0, "runMin": 0, "part": int(j.get("part") or 1),
+                                    "parts": len(parts.get((mo["id"], st)) or [j]), "rest": rest, "split": (parts.get((mo["id"], st)) or [j])[0].get("split"),
                                     "start": j["reqStart"], "runStart": j["reqStart"], "end": j["reqStart"], "segs": [], "coSegs": [], "runSegs": [],
                                     "warn": warn + ["This line has no shift time ahead (no shifts ticked in Lines & Shifts, or the "
                                                     "Labor Budget calendar has no work days), so this run can't be timed"], "waiting": waiting,
@@ -370,13 +423,29 @@ def compute(world, jobs=None):
                     if best:
                         p, paced = best, True
                 segs, run_segs = p["segs"], p["run"]
+                sp = j.get("split") or {}
+                if sp.get("mode") == "time" and sp.get("at") and len(parts.get((mo["id"], st)) or []) > 1 and run_segs:
+                    # part 1 stops at the time set: it makes what fits before then, part 2 the rest
+                    cut = sp["at"]
+                    tot = sum(b - a for a, b in run_segs)
+                    run_segs = [(a, min(b, cut)) for a, b in run_segs if a < cut]
+                    segs = [(a, min(b, cut)) for a, b in segs if a < cut] or [(segs[0][0], segs[0][0])]
+                    done = sum(b - a for a, b in run_segs)
+                    qty = round(qty * done / tot) if tot else 0
+                    gross = math.ceil(qty / (1 - scrap))
+                    run_min = done / MIN
+                    p = {**p, "co": [(a, min(b, cut)) for a, b in p["co"] if a < cut]}
+                    new_cuts[j["id"]] = qty
                 run_start = (run_segs[0] if run_segs else segs[0])[0]
                 out = {"id": j["id"], "moId": mo["id"], "op": st, "machineId": m["id"], "rate": rate, "basis": basis, "eff": eff,
                        "gross": gross, "qty": qty, "scrap": scrap, "dt": dt, "coMin": co_min, "runMin": run_min,
                        "start": segs[0][0], "runStart": run_start, "end": segs[-1][1], "segs": segs, "coSegs": p["co"],
                        "runSegs": run_segs, "warn": warn, "waiting": waiting, "paced": paced,
                        "overlap": bool(up and run_start < up["end"]), "pushed": segs[0][0] - j["reqStart"] > MIN, "late": False,
-                       "reqStart": j["reqStart"], "running": is_running}
+                       "reqStart": j["reqStart"], "running": is_running, "part": int(j.get("part") or 1),
+                       "parts": len(parts.get((mo["id"], st)) or [j]), "rest": rest, "split": (parts.get((mo["id"], st)) or [j])[0].get("split")}
+                if rest:
+                    out["pushed"] = False
                 if is_running:
                     out["pushed"] = False
                 cost = cal.labor_cost(m, segs)
@@ -390,9 +459,10 @@ def compute(world, jobs=None):
                 res[j["id"]] = out
                 by_m[m["id"]].append(j["id"])
                 prev_end, prev_part = out["end"], pkey
-                if st == "s1":
-                    s1_res[mo["id"]] = out
-    return {"res": res, "byM": by_m, "cal": cal}
+                if st == "s1" and not rest:   # later stages pace against every part of Stage 1
+                    u = s1_res.get(mo["id"])
+                    s1_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
+    return {"res": res, "byM": by_m, "cal": cal, "cuts": new_cuts}
 
 
 def qty_in(r, a, b):
@@ -426,6 +496,8 @@ def refresh_floor_queue(by="Scheduler"):
                 continue
             for i, key in enumerate(sch["byM"].get(m["id"], [])):
                 r = sch["res"][key]
+                if r.get("rest") or (r["moId"] in planned and planned[r["moId"]][2]["start"] <= r["start"]):
+                    continue   # a split MO sits in the queue of the line its next part runs on
                 planned[r["moId"]] = (m["id"], i + 1, r)
         for mo in MO.objects.select_for_update().filter(status="OPEN"):  # closed MOs never sit in a kiosk queue
             if mo.id in running_by_mo:

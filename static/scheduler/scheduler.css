@@ -202,3 +202,47 @@ td input[type=text]{width:140px}
 .mo.grab{cursor:grab}
 .mo.grab:hover{border-color:var(--accent,#5B9BD5)}
 .mo.dragging{opacity:.5}
+/* each shift's stretch of the day: 1st shift lightest, then 2nd and 3rd darker, so the shifts tell apart at a glance */
+.sband{position:absolute;top:0;bottom:0;pointer-events:none;z-index:0}
+.sband.n1{background:rgba(255,255,255,.06)}
+.sband.n2{background:rgba(0,0,0,.24)}
+.sband.n3{background:rgba(0,0,0,.4)}
+.g-axis .sband{bottom:0;top:auto;height:4px}
+.g-axis .sband.n1{background:rgba(255,255,255,.35)}
+.g-axis .sband.n2{background:rgba(255,255,255,.14)}
+.g-axis .sband.n3{background:rgba(255,255,255,.06)}
+.legend .sband-key{display:inline-block;width:14px;height:10px;border:1px solid var(--line);border-radius:2px;vertical-align:-1px}
+.legend .sband-key.n1{background:#3a4048}.legend .sband-key.n2{background:#1d2126}.legend .sband-key.n3{background:#121518}
+.ghost-line.box{background:color-mix(in srgb,var(--accent) 22%,transparent);border-left:2px solid var(--accent);border-radius:4px}
+.bar.dragging{opacity:.45}
+/* orders by stage */
+.rail-sec{display:flex;flex-direction:column;gap:6px}
+.rail-sec+.rail-sec{margin-top:10px}
+.rail-sec-h{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;border-bottom:1px solid var(--line);color:var(--fg);font:600 13px var(--f-display);letter-spacing:.06em;text-transform:uppercase;padding:6px 2px;cursor:pointer;text-align:left;position:sticky;top:0;background:var(--surface);z-index:1}
+.rail-sec-h::after{content:"▾";margin-left:4px;color:var(--muted)}
+.rail-sec-h[aria-expanded="false"]::after{content:"▸"}
+.rail-sec-h .n{margin-left:auto;font-family:var(--f-mono);font-size:11px;color:var(--muted);letter-spacing:0}
+.mo.grab{cursor:grab}
+.mo.blocked{opacity:.6;cursor:not-allowed}
+.mo.placed{border-style:dashed}
+.mo.s1{border-left:3px solid var(--st1)}.mo.eb{border-left:3px solid var(--eb)}.mo.ac{border-left:3px solid var(--ac)}.mo.gb{border-left:3px solid var(--gb)}
+.mo-where{display:flex;align-items:center;gap:6px;font-size:11.5px;flex-wrap:wrap}
+.mo-where .on{font-family:var(--f-mono);font-size:11px}
+.mo-where .others{margin-left:auto;display:flex;gap:3px}
+.chip.mini{font-size:10px;padding:1px 5px;cursor:default}
+.bar.running{outline:2px solid var(--ok);outline-offset:-2px}
+.bar.running::after{content:"RUNNING";position:absolute;right:6px;bottom:3px;font:600 9px var(--f-mono);letter-spacing:.06em;color:var(--surface);opacity:.85}
+/* split a run: the button in a bar's top-right corner, and the parts */
+.bar .splitbtn{position:absolute;top:2px;right:3px;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:rgba(0,0,0,.28);color:#fff;font-size:11px;line-height:18px;cursor:pointer;opacity:.75;z-index:3}
+.bar .splitbtn:hover,.bar .splitbtn:focus-visible{opacity:1;background:rgba(0,0,0,.5)}
+.bar:has(.splitbtn) .flag{right:24px}
+.bar.split{border-right:3px dashed rgba(0,0,0,.35)}
+.bar.rest{background:transparent!important;border:2px dashed var(--c,var(--st1));color:var(--fg);box-shadow:none}
+.bar.rest .run b,.bar.rest .run span{color:var(--fg)}
+.splitopts{border:0;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:8px}
+.splitopts .opt{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.splitopts .opt:has(input[type=radio]:checked){border-color:var(--accent);background:var(--accent-soft)}
+.splitopts .opt>input{margin-top:3px}
+.splitopts .opt span{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.splitopts .opt small{color:var(--muted);font-size:12px}
+.splitopts .opt input[type=datetime-local],.splitopts .opt input[type=number]{max-width:240px}

@@ -543,3 +543,15 @@ body.c-dragging .port.out{cursor:grabbing}
 .cwire .cpick .chk span{display:flex;flex-direction:column;min-width:0}
 .cwire .cpick .chk b{font:600 13px var(--f-mono);overflow-wrap:anywhere}
 .cwire .cpick .chk small{font-size:11px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cwire .gtest:empty{display:none}
+.cwire .ctest{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-top:1px solid var(--rule);background:var(--well-3)}
+.cwire .ctest th small{display:block;font-weight:400;color:var(--ink-3);font-size:11px}
+.cwire .ctest td{font-size:12px;white-space:nowrap}
+/* an input's own rows (a table with one value per row and a tag) */
+.cwire .slot.port.in{padding-right:62px}
+.cwire .slot .sf{position:absolute;top:50%;transform:translateY(-50%);right:32px;width:24px;height:24px;border-radius:6px;border:0;background:transparent;color:var(--ink-3);cursor:pointer;font-size:13px}
+.cwire .slot .sf:hover,.cwire .slot .sf.on{color:#f0a64a;background:rgba(240,166,74,.12)}
+.cwire .sfil{display:grid;grid-template-columns:auto minmax(0,1fr) auto minmax(0,1.3fr) auto;gap:6px;align-items:center;margin:0 6px 6px 18px;padding:6px 8px;border-left:2px solid #f0a64a;background:rgba(240,166,74,.06);border-radius:0 6px 6px 0}
+.cwire .sfil[hidden]{display:none}
+.cwire .sfil select,.cwire .sfil input{min-width:0;min-height:34px;font-size:13px}
+.cwire .sfil .sfx{width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--ink-2);cursor:pointer}
