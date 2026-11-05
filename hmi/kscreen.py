@@ -107,6 +107,12 @@ class Screen:
     def shift_on(self):
         return bool(self.shift)
 
+    @property
+    def unattended(self):
+        """The machine is being recorded during its shift with nobody logged in (hmi/engine.unattended)."""
+        from .engine import unattended
+        return unattended(self.shift)
+
     # ------------------------------------------------------------ parts
     def part(self, item):
         if self._specs is None:
@@ -331,7 +337,7 @@ class Screen:
         last_ppm = hist[-1][1] if hist else 0
         st = shift_stats(sh) if sh else {"mins": 0, "run": 0, "down": 0, "uptime": 100}
         nx = self.up_next()
-        out = {"on": bool(sh), "sh": sh, "stats": st, "lastPpm": last_ppm, "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
+        out = {"on": bool(sh), "unattended": self.unattended, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,
                "grafana": self.grafana_src((self.settings.get("grafana") or {}).get("ppm")),
@@ -346,11 +352,12 @@ class Screen:
         if mo:
             p = self.part(mo.part)
             good = max(0, mo.produced - mo.scrap)
-            per = (sh.override or {}).get("pleats") or p["pleats"]
+            from plant import units
             try:
-                per = float(per)
+                ov = float((sh.override or {}).get("pleats") or 0) or None
             except (TypeError, ValueError):
-                per = p["pleats"]
+                ov = None
+            per = units.per_part(self.machine or sh.machine, p, ov)   # speed-minutes per part (plant/units.py)
             from .engine import has_counter
             if self.machine and has_counter(self.machine):
                 # a machine with a counter: parts per minute are what the counter added (last 5 minutes), not the speed

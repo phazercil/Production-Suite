@@ -276,7 +276,7 @@ def m_alarms(request, s):
 
 @modal("start", login=True)
 def m_start(request, s):
-    if s.shift_on:
+    if s.shift_on and not s.unattended:
         return modal_response(request, "hmi/k/m_note.html", **ctx_for(s, title="Shift already running",
                               text=f"{s.shift.line} has been running since {engine.fmt_t(s.shift.start)}. End that shift first."))
     trained = set(s.me.trained.values_list("name", flat=True))
@@ -431,7 +431,7 @@ def m_override(request, s):
     if not s.shift_on:
         return thin.refused("Start a shift first.")
     p = s.part(s.current_item())
-    return modal_response(request, "hmi/k/m_override.html", **ctx_for(s, o=s.shift.override or {}, p=p, rated=int(s.machine.ppm)))
+    return modal_response(request, "hmi/k/m_override.html", **ctx_for(s, o=s.shift.override or {}, p=p, rated=int(s.machine.ppm), unit=s.machine.speed_short))
 
 
 @modal("notes", login=True)

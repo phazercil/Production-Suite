@@ -97,8 +97,8 @@ def judge(items, vals, part):
 def due_at(sh, settings, now):
     """When this shift's next QC check is (or was) due; None when none is due (QC reminders off, or waiting for the
     machine to run after a changeover)."""
-    if not sh or not sh.active or not settings.get("autoQC"):
-        return None
+    if not sh or not sh.active or not settings.get("autoQC") or (sh.person_id is None and not sh.user_name):
+        return None   # (no QC reminders while nobody is logged in: the run is only being recorded)
     if sh.qc_after_co:
         return sh.qc_due_at   # set by the minute tick when the machine first runs after the changeover
     every = timedelta(minutes=float(settings.get("qcEvery") or 30))
