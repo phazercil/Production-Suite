@@ -5,6 +5,9 @@
     <p class="sub">Log in, walk the safety checklist and scan the first MO to start running.{% if R.first %} First up from the planner: MO {{ R.first.m.number }} · {{ R.first.m.part }}.{% endif %}</p>
     <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>
   {% else %}
+  {% if R.unattended %}<div class="panel idlecard" style="border-color:var(--warn)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name|default:"this shift" }}</span><h2>No one logged in</h2>
+    <p class="sub">The machine's speed, counts and downtime are being recorded since {{ R.sh.start|time:"g:i a" }}. Start your shift to take over: everything recorded this shift becomes yours, and the count goes on the MO you scan.</p>
+    <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>{% endif %}
   <div class="panel order">
     <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
     {% if R.mo %}
@@ -43,7 +46,7 @@
     {% for r in R.reports %}<div class="rep {% if r.bad %}bad{% endif %}"><div class="m"><b>{{ r.kind }}</b> · {{ r.t|plan:S.t }}{% if r.by %} · {{ r.by }}{% endif %}{% if r.status %} · <span class="pill {% if r.bad %}warn{% else %}ok{% endif %}">{{ r.status }}</span>{% endif %}</div><div class="x">{{ r.text|truncatechars:160 }}</div></div>
     {% empty %}<div class="note">Nothing reported on {{ station }} in the last day.</div>{% endfor %}</div>
   <div class="spacer"></div>
-  {% if R.on %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.state == "changeover" %}Continue changeover{% else %}Start changeover{% endif %}</button>{% endif %}
+  {% if R.on and not R.unattended %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.state == "changeover" %}Continue changeover{% else %}Start changeover{% endif %}</button>{% endif %}
 </aside></div>
 <div class="actions">
   <button class="act {% if R.qcDue %}due{% endif %}" hx-get="/kiosk/m/qc" hx-target="#modal" hx-swap="innerHTML">{% icon "qc" %}<span>QC check</span></button>
@@ -51,7 +54,7 @@
   <button class="act" hx-get="/kiosk/m/drawing" hx-target="#modal" hx-swap="innerHTML">{% icon "draw" %}<span>Instructions</span></button>
   <button class="act" hx-get="/kiosk/m/rolls" hx-target="#modal" hx-swap="innerHTML">{% icon "rolls" %}<span>Roll tags</span></button>
   <button class="act" hx-get="/kiosk/m/notes" hx-target="#modal" hx-swap="innerHTML">{% icon "notes" %}<span>Shift notes</span></button>
-  {% if R.on %}<button class="act" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">{% icon "end" %}<span>End shift</span></button>
+  {% if R.on and not R.unattended %}<button class="act" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">{% icon "end" %}<span>End shift</span></button>
   {% else %}<button class="act due" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}<span>Start shift</span></button>{% endif %}
   <button class="act bad" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">{% icon "maint" %}<span>Call maintenance</span></button>
 </div>
