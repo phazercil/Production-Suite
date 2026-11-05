@@ -11,7 +11,7 @@ from datetime import timedelta
 
 from django.conf import settings as dj_settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Max
 from django.db.models.functions import Greatest
 
 from plant import netsafety
@@ -168,9 +168,11 @@ def spec_for(item):
 
 
 def pleats_for(sh):
-    if sh.override and sh.override.get("pleats"):
-        return float(sh.override["pleats"])
-    return float(spec_for(sh.mo.part if sh.mo else "")["pleats"]) or 24
+    """Speed-minutes one part takes on this run's machine (pleats per part on a pleater; see plant/units.py), so
+    speed readings add up to parts when the machine has no counter. 0 when it can't be told."""
+    from plant import units
+    pleats = float(sh.override["pleats"]) if sh.override and sh.override.get("pleats") else None
+    return units.per_part(sh.machine, spec_for(sh.mo.part if sh.mo else ""), pleats)
 
 
 # ------------------------------------------------------------------ machine
@@ -327,8 +329,8 @@ def tick(machine, sample, t):
     elif not co:
         sh.acc += ppm
         per = pleats_for(sh)
-        units = int(sh.acc // per)
-        sh.acc -= units * per
+        units = int(sh.acc // per) if per > 0 else 0
+        sh.acc = sh.acc - units * per if per > 0 else 0.0
     if units > 0:
         reading.units = units
         reading.save(update_fields=["units"])
@@ -1350,6 +1352,9 @@ def _set_source(m, f, v):
     cur = dict(getattr(m, attr) or {})
     need(key in SOURCE_KEYS | extra, "Unknown field.")
     clear = {c: "" for c in ("orderCol", "keyCol", *cols)}
+    if attr == "feed_src" and key in ("db", "table", "keyCol", "keyVal"):
+        cur.pop("where", None)    # set by hand here: no longer the connector builder's source card
+        cur.pop("source", None)
     if key == "db":
         need(v in machinedata.TABLE_DBS, "Pick the machine data database or the asset database.")
         if cur.get("db") != v:
@@ -1439,6 +1444,17 @@ def line_set(p, ctx):
     elif f == "rated":
         need(float(v or 0) > 0, "Rated speed must be above 0.")
         m.ppm = float(v)
+    elif f == "unit":
+        from plant import units
+        need(v in units.UNITS, "Pick pleats per minute, linear mm per second or parts per minute.")
+        m.speed_unit = v
+    elif f == "mmpp":
+        try:
+            n = float(v) if str(v or "").strip() else None
+        except (TypeError, ValueError):
+            raise Need("Type the mm per part as a number, or leave it blank.")
+        need(n is None or 0 < n < 100000, "mm per part must be above 0.")
+        m.mm_per_part = n
     elif f == "color":
         need(re.match(r"^#[0-9a-fA-F]{6}$", str(v or "")), "Pick a color.")
         m.color = v
@@ -1486,7 +1502,7 @@ def line_set(p, ctx):
     m.save()
     LineState.objects.filter(machine=m).update(feed={})
     audit(ctx, f"{m.name} {f} set to {m.feed_url or '(blank)' if f == 'feed.url' else '(query changed)' if f == 'feed.query' else json.dumps(v)}")
-    if f in ("rated", "active"):
+    if f in ("rated", "active", "unit", "mmpp"):
         refresh_schedule("a machine change")
 
 
@@ -2434,45 +2450,43 @@ def db_test(p, ctx):
         raise Need(str(e))
 
 
-@cmd("connectorSave", "connections.edit")
-def connector_save(p, ctx):
-    """Save one group of links from the connector builder: a machine's readings, S2K's open MOs, or a changeover query."""
-    from . import connector
-    gs = {g["key"]: g for g in connector.groups()}
-    g = gs.get(str(p.get("group") or ""))
-    need(g, "Unknown data need.")
-    db, table = str(p.get("db") or g["db"]), str(p.get("table") or "")
-    need(db in g["dbs"], f"{g['title']} needs a column from the {' or '.join(connector.DB_LABEL[d] for d in g['dbs'])}.")
-    need(db in connector.ready_dbs(), f"{connector.DB_LABEL[db]} isn't set up yet (Admin › Connections).")
-    mp = p.get("map") if isinstance(p.get("map"), dict) else {}
-    slots = {s_["k"]: s_ for s_ in g["slots"]}
-    mp = {k: str(v) for k, v in mp.items() if k in slots and str(v or "").strip()}
-    need(table, "Drag a column in first: the group takes its table from it.")
+def _schema_of(db):
     try:
-        sch = {t["name"]: {c["name"] for c in t["columns"]} for t in integrations.schema(db)["tables"]}
+        return {t["name"]: {c["name"] for c in t["columns"]} for t in integrations.schema(db)["tables"]}
     except integrations.ConnError as e:
         raise Need(str(e))
+
+
+def _apply_group(g, c, mp, ctx):
+    """Save one data need as reading source card c (its table and filters) with these column links."""
+    from . import connector
+    db, table = c.db, c.table
+    slots = {s_["k"]: s_ for s_ in g["slots"]}
+    mp = {k: str(v) for k, v in (mp or {}).items() if k in slots and str(v or "").strip()}
+    need(db in g["dbs"], f"{g['title']} needs a column from the {' or '.join(connector.DB_LABEL[d] for d in g['dbs'])}.")
+    need(db in connector.ready_dbs(), f"{connector.DB_LABEL[db]} isn't set up yet (Admin › Connections).")
+    sch = _schema_of(db)
     need(table in sch, f'There is no table "{table}" in the {connector.DB_LABEL[db]}.')
-    bad = [c for c in mp.values() if c not in sch[table]]
-    need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{c}"' for c in bad) + ".")
+    bad = [x for x in [*mp.values(), *(f["col"] for f in c.filters or [])] if x not in sch[table]]
+    need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{x}"' for x in dict.fromkeys(bad)) + ".")
     miss = [slots[k]["label"] for k in slots if slots[k]["req"] and not mp.get(k)]
-    need(not miss, "Still needed: " + ", ".join(miss) + ".")
+    need(not miss, f"{g['title']}: still needed: " + ", ".join(miss) + ".")
+    filters = [{"col": f["col"], "val": str(f.get("val", ""))} for f in c.filters or []]
     if g["kind"] == "machine":
         m = Machine.objects.select_for_update().get(pk=int(g["key"][2:]))
-        key_val = str(p.get("keyVal") or "").strip()[:120]
-        need(not mp.get("keyCol") or key_val, "Type the value that marks this machine's rows.")
-        # one table can log every machine: then each machine takes only its own rows
+        # one table can log every machine: each machine needs a card that keeps only its own rows
+        mine = connector.norm_filters(filters)
         others = [o for o in Machine.objects.filter(active=True, feed_type="db").exclude(pk=m.pk)
                   if (o.feed_src or {}).get("db", "machines") == db and (o.feed_src or {}).get("table") == table]
-        if others:
-            names = ", ".join(o.name for o in others)
-            need(mp.get("keyCol"), f"{names} also read{'s' if len(others) == 1 else ''} {table}. Wire \"Which machine\" to the column "
-                                   "that names the machine, so each machine takes only its own rows.")
-            same = [o.name for o in others if (o.feed_src or {}).get("keyCol") == mp["keyCol"]
-                    and str((o.feed_src or {}).get("keyVal", "")).strip().lower() == key_val.lower()]
-            need(not same, f"{', '.join(same)} already reads the rows where {mp['keyCol']} = {key_val}. Give each machine its own value.")
+        need(not others or filters, f"{', '.join(o.name for o in others)} also read{'s' if len(others) == 1 else ''} {table}. "
+                                    f"Give {m.name} a card with a filter for its rows (e.g. machine = {m.name}).")
+        same = [o.name for o in others if connector.norm_filters((o.feed_src or {}).get("where") or (
+            [{"col": o.feed_src["keyCol"], "val": o.feed_src.get("keyVal", "")}] if (o.feed_src or {}).get("keyCol") else [])) == mine]
+        need(not same, f"{', '.join(same)} already read{'s' if len(same) == 1 else ''} exactly these rows of {table}. "
+                       f"Give {m.name} its own card with a filter for its rows (e.g. machine = {m.name}).")
         src = dict(m.feed_src or {}) if m.feed_type == "db" else {}
-        src.update(db=db, table=table, orderCol=mp["orderCol"], keyCol=mp.get("keyCol", ""), keyVal=key_val if mp.get("keyCol") else "")
+        src.update(db=db, table=table, orderCol=mp["orderCol"], source=c.pk, where=filters,
+                   keyCol=filters[0]["col"] if len(filters) == 1 else "", keyVal=filters[0]["val"] if len(filters) == 1 else "")
         src.setdefault("maxAge", 3)
         m.feed_type, m.feed_src = "db", src
         m.feed_ppm_field, m.feed_count_field, m.feed_recipe_field = mp["ppm"], mp.get("count", ""), mp.get("recipe", "")
@@ -2488,26 +2502,106 @@ def connector_save(p, ctx):
             m.error_src = {}
         m.save()
         LineState.objects.filter(machine=m).update(feed={})
-        audit(ctx, f"Connector builder: {m.name} reads {table} in the {connector.DB_LABEL[db]} ("
-                   + ", ".join(f"{slots[k]['label'].split(' (')[0]} = {v}" for k, v in mp.items()) + ")")
-        return {"msg": f"{m.name} now reads its data from {table}"}
+        audit(ctx, f"Connector builder: {m.name} reads card \"{c.title}\" ({table}" + "".join(f", {f['col']} = {f['val']}" for f in filters)
+                   + " in the " + connector.DB_LABEL[db] + "): " + ", ".join(f"{slots[k]['label'].split(' (')[0]} = {v}" for k, v in mp.items()))
+        return f"{m.name} now reads its data from {c.title}"
     from . import kadmin
     try:
         if g["kind"] == "s2k":
-            fval = str(p.get("fval") or "").strip()
-            sql = kadmin.s2k_build_sql({"table": table, **mp, "fval": fval})
+            sql = kadmin.s2k_build_sql({"table": table, **mp, "where": filters})
             name = "s2k_mos"
         else:
             name = g["key"][2:]
-            sql = kadmin.build_codata_sql(name, {"table": table, **mp})
+            sql = kadmin.build_codata_sql(name, {"table": table, **mp, "where": filters})
     except ValueError as e:
         raise Need(str(e))
-    db_save({"name": name, "sql": sql, "params": {}}, ctx)
+    db_save({"name": name, "sql": sql, "params": {"source": c.pk}}, ctx)
     if g["kind"] == "s2k":
         st = settings_obj()
         st.settings["s2kSource"] = "db"
         st.save(update_fields=["settings"])
-    return {"msg": f"{g['title']} saved: {table}"}
+    return f"{g['title']} saved: {c.title}"
+
+
+@cmd("connectorSave", "connections.edit")
+def connector_save(p, ctx):
+    """Save one data need from the connector builder: a machine's readings, S2K's open MOs or a changeover query,
+    reading the source card its columns were wired from."""
+    from . import connector
+    from .models import SourceCard
+    gs = {g["key"]: g for g in connector.groups()}
+    g = gs.get(str(p.get("group") or ""))
+    need(g, "Unknown data need.")
+    c = SourceCard.objects.filter(pk=p.get("src") or 0).first() if str(p.get("src") or "").isdigit() else None
+    need(c, "Drag a column in first: the box reads the card its columns come from.")
+    return {"msg": _apply_group(g, c, p.get("map") if isinstance(p.get("map"), dict) else {}, ctx)}
+
+
+def _clean_filters(raw, cols):
+    out = []
+    for f in raw if isinstance(raw, list) else []:
+        col, val = str((f or {}).get("col") or "").strip(), str((f or {}).get("val") or "").strip()[:120]
+        if not col and not val:
+            continue
+        need(col in cols, f'Pick the column for the filter "{val}".' if not col else f'The table has no column "{col}".')
+        need(val, f'Type the value to keep in "{col}", or remove that filter.')
+        out.append({"col": col, "val": val})
+    return out
+
+
+@cmd("sourceCardSave", "connections.edit")
+def source_card_save(p, ctx):
+    """Add or change a source card of the connector builder: its title, the columns it shows and the rows it keeps.
+    The data needs wired to it are saved again with its new filters."""
+    from . import connector
+    from .models import SourceCard
+    c = SourceCard.objects.select_for_update().filter(pk=p["id"]).first() if str(p.get("id") or "").isdigit() else None
+    need(c or not p.get("id"), "That card was removed. Reload the page.")
+    db, table = (c.db, c.table) if c else (str(p.get("db") or ""), str(p.get("table") or ""))
+    need(db in connector.ready_dbs(), f"{connector.DB_LABEL.get(db, 'That database')} isn't set up yet (Admin › Connections).")
+    sch = _schema_of(db)
+    need(table in sch, f'There is no table "{table}" in the {connector.DB_LABEL[db]}.')
+    cols = sch[table]
+    title = re.sub(r"\s+", " ", str(p.get("title") or "")).strip()[:80] if "title" in p else (c.title if c else table)
+    need(title, "Give the card a title.")
+    pick = [x for x in (p.get("columns") if isinstance(p.get("columns"), list) else (c.columns if c else [])) if x in cols]
+    pick = [] if set(pick) == cols else list(dict.fromkeys(pick))
+    filters = _clean_filters(p["filters"], cols) if "filters" in p else (c.filters if c else [])
+    gs = connector.groups()
+    connector.link_cards(gs, create=False)
+    users = [g for g in gs if c and g.get("src") == c.pk]
+    if pick:
+        gone = sorted({f"{g['title']} uses {v}" for g in users for v in g["state"]["map"].values() if v not in pick})
+        need(not gone, "Keep the columns that are wired: " + "; ".join(gone) + ".")
+    if not c:
+        c = SourceCard(db=db, table=table, sort=(SourceCard.objects.aggregate(m=Max("sort"))["m"] or 0) + 1)
+    old_filters = connector.norm_filters(c.filters) if c.pk else None
+    c.title, c.columns, c.filters, c.updated_by, c.updated_at = title, pick, filters, ctx.by, ctx.now
+    c.save()
+    again = []
+    if old_filters is not None and old_filters != connector.norm_filters(filters):
+        for g in users:   # the boxes reading this card follow its new filters
+            _apply_group(g, c, g["state"]["map"], ctx)
+            again.append(g["title"])
+    audit(ctx, f"Connector builder: card \"{title}\" ({table} in the {connector.DB_LABEL[db]}"
+               + "".join(f", {f['col']} = {f['val']}" for f in filters) + ")" + (f"; saved again: {', '.join(again)}" if again else ""))
+    return {"msg": f"Card \"{title}\" saved" + (f"; {', '.join(again)} now read{'s' if len(again) == 1 else ''} its new filter." if again else "."),
+            "id": c.pk}
+
+
+@cmd("sourceCardDelete", "connections.edit")
+def source_card_delete(p, ctx):
+    from . import connector
+    from .models import SourceCard
+    c = SourceCard.objects.filter(pk=p.get("id") or 0).first() if str(p.get("id") or "").isdigit() else None
+    need(c, "That card was already removed.")
+    gs = connector.groups()
+    connector.link_cards(gs, create=False)
+    users = [g["title"] for g in gs if g.get("src") == c.pk]
+    need(not users, f"{', '.join(users)} read{'s' if len(users) == 1 else ''} this card. Wire {'it' if len(users) == 1 else 'them'} to another card first.")
+    audit(ctx, f"Connector builder: removed card \"{c.title}\" ({c.table})")
+    c.delete()
+    return {"msg": f"Card \"{c.title}\" removed."}
 
 
 @cmd("dbSave", "connections.edit")
