@@ -301,6 +301,18 @@ Each downtime then lists what the machine reported during it (and in the 2 minut
 and in the "Why did the line stop?" prompt. A code still showing appears in the run screen's alerts and on Status.
 Stored in `hmi_machine_errors` for Grafana (a ready query is under Admin › Connections › Grafana).
 
+### Outside databases: MariaDB/MySQL, SQL Server or PostgreSQL
+
+The asset, S2K and machine data databases can each be **MariaDB / MySQL, Microsoft SQL Server or PostgreSQL**.
+Admin › Connections › Database type is *Auto-detect* by default: *Test connection* tells them apart from the
+server's first answer on the network (no login needed for that), signs in read-only, and says which kind it
+found; *Save* keeps the kind (`ASSET_DB_KIND`, `S2K_DB_KIND`, `MACHINE_DB_KIND` = `mysql`, `mssql` or `postgres`).
+Every query the suite writes (S2K, changeover data, tooling, machine readings, alarm logs, the connector
+builder, table previews) uses that database's own SQL (quoting, `TOP`/`LIMIT`); tables outside the default
+schema (`dbo` / `public`) show as `schema.table`. The drivers ship with the suite: PyMySQL, pymssql (SQL
+Server) and pg8000 (PostgreSQL). Use a login that can only read; the suite also only ever sends single SELECTs,
+and MariaDB/MySQL and PostgreSQL sessions are opened read-only.
+
 ### S2K
 
 Admin › Connections › S2K reads open MOs from one of:

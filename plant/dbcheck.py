@@ -46,7 +46,7 @@ def check_fields(host, port, name, user):
     return None
 
 
-def test_read_only(host, port, name, user, password, what, nets=None, records=None, internet=False):
+def test_read_only(host, port, name, user, password, what, nets=None, records=None, internet=False, kind="auto"):
     """Sign in read-only and read the table list. Nothing is created or changed.
     Returns {"ok", "msg", "tables", "writable"}; records = (host, port, name) of the suite's own database."""
     from plant.netsafety import NotPrivate, check_host
@@ -62,6 +62,73 @@ def test_read_only(host, port, name, user, password, what, nets=None, records=No
     if records and (str(host).lower(), str(port), str(name).lower()) == tuple(str(x).lower() for x in records):
         return {"ok": False, "msg": f"That is the suite's own records database. {what} must be a different database; "
                                     "the suite creates its tables only in its own database."}
+    from plant import dbkinds
+    if kind not in dbkinds.KINDS:   # "auto": tell from the server's first answer which kind of database it is
+        try:
+            kind = dbkinds.detect(host, port)
+        except OSError:
+            kind = "mysql"   # can't reach it: the MariaDB sign-in below explains why, as it always has
+        if not kind:
+            return {"ok": False, "msg": f"Something answered on {host}:{port}, but it isn't MariaDB/MySQL, SQL Server or PostgreSQL. "
+                                        "Check the port (MariaDB/MySQL 3306, SQL Server 1433, PostgreSQL 5432)."}
+    if kind != "mysql":
+        r = _test_other(kind, host, port, name, user, password, what)
+        return {**r, "kind": kind}
+    r = _test_mysql(host, port, name, user, password, what)
+    return {**r, "kind": "mysql"}
+
+
+def _test_other(kind, host, port, name, user, password, what):
+    """SQL Server or PostgreSQL: sign in, count the tables the login can read, and check it can't change data."""
+    from plant import dbkinds
+    label = dbkinds.KINDS[kind]["label"]
+    try:
+        db = dbkinds.driver(kind)
+    except dbkinds.NoDriver as e:
+        return {"ok": False, "msg": str(e)}
+    try:
+        conn = dbkinds.connect(kind, host, port, name, user, password)
+    except Exception as e:  # noqa: BLE001 - each driver has its own errors; explain the common ones
+        t = str(e)
+        low = t.lower()
+        if "18456" in t or "login failed" in low or "password authentication failed" in low or "28p01" in low:
+            msg = f"{label} refused that user name or password."
+        elif "4060" in t or ("database" in low and ("does not exist" in low or "cannot open database" in low or "3d000" in low)):
+            msg = f"There is no database named \"{name}\" on that server (or this login can't open it). Nothing is ever created there."
+        elif "timed out" in low or "timeout" in low or "unable to connect" in low or "20009" in t:
+            msg = f"Couldn't reach {label} at {host}:{port}. Check the address, the port and the server's firewall."
+        else:
+            msg = f"{label} answered with an error."
+        return {"ok": False, "msg": f"{msg}  ({t[:240]})"}
+    try:
+        cur = conn.cursor()
+        sql, params = dbkinds.schema_sql(kind)
+        cur.execute(sql, params(name))
+        n = len({r[0] for r in cur.fetchall()})
+        writable = False
+        try:   # only reads the login's own permissions, to warn if it could change data
+            if kind == "mssql":
+                cur.execute("SELECT COUNT(*) FROM fn_my_permissions(NULL, 'DATABASE') "
+                            "WHERE permission_name IN ('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CONTROL')")
+            else:
+                cur.execute("SELECT COUNT(*) FROM information_schema.table_privileges WHERE grantee = current_user "
+                            "AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE')")
+            writable = bool(cur.fetchone()[0])
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": True, "msg": f"{what} reachable ({label}): {n} tables. Connected read-only; nothing was created or changed.",
+                "tables": n, "writable": writable}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "msg": f"{label} answered with an error.  ({str(e)[:240]})"}
+    finally:
+        try:
+            conn.rollback()
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _test_mysql(host, port, name, user, password, what):
     try:
         db = driver()
     except NoDriver as e:
@@ -85,7 +152,7 @@ def test_read_only(host, port, name, user, password, what, nets=None, records=No
             writable = bool(re.search(r"\b(ALL PRIVILEGES|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b", grants))
         except db.Error:
             pass
-        return {"ok": True, "msg": f"{what} reachable: {n} tables. Connected read-only; nothing was created or changed.",
+        return {"ok": True, "msg": f"{what} reachable (MariaDB/MySQL): {n} tables. Connected read-only; nothing was created or changed.",
                 "tables": n, "writable": writable}
     except db.Error as e:
         return {"ok": False, "msg": explain(e, port)[0]}

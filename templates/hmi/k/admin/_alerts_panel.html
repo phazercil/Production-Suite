@@ -27,7 +27,7 @@
     <label class="f">Security<select name="security">{% for v, l in "starttls:STARTTLS (port 587),ssl:SSL/TLS (port 465),none:None (port 25, inside the plant only)"|pairs %}<option value="{{ v }}" {% if mf.security == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
     <label class="f">From address<input type="email" name="from" value="{{ mf.from }}" placeholder="plant-alerts@yourcompany.com"></label>
     <label class="f">User name (if the server needs a login)<input type="text" name="user" value="{{ mf.user }}" autocomplete="off"></label>
-    <label class="f">Password<input type="password" name="password" autocomplete="new-password" placeholder="{% if I.smtp.hasPassword %}Leave blank to keep the saved one{% endif %}"></label>
+    <label class="f">Password<input type="password" id="pw-smtp" hx-preserve name="password" autocomplete="new-password" placeholder="{% if I.smtp.hasPassword %}Leave blank to keep the saved one{% endif %}"></label>
     <label class="chk"><input type="checkbox" name="internet:b" value="1" {% if mf.internet %}checked{% endif %}> The mail server is on the internet (for example Office 365). This allows one outside connection, for email only.</label></div>
   <div class="row" style="margin-top:8px"><button class="btn primary" type="submit">Save</button>{% if I.smtp.on %}<button type="button" class="btn ghost" hx-get="/kiosk/m/confirm?a=alertConfig&k=alertConfig:smtp-remove&group=smtp-remove&t=%23alertspanel" hx-target="#modal" hx-swap="innerHTML">Remove</button>{% endif %}</div>
   {% if msgs.smtp %}<p style="margin-top:6px;color:{% if msgs.smtp.ok %}var(--ok){% else %}var(--bad){% endif %}">{{ msgs.smtp.text }}</p>{% endif %}</form>{% endwith %}
@@ -36,7 +36,7 @@
   <p class="sub" style="margin-top:4px">Texts go through a Twilio account, a cloud service, so this is an internet connection, used only when set up here. Without Twilio, you can still text people by using their carrier's email-to-text address as their email.</p>
   <div class="grid3" style="margin-top:8px">
     <label class="f">Account SID<input type="text" name="sid" value="{{ tf.sid }}" autocomplete="off" spellcheck="false"></label>
-    <label class="f">Auth token<input type="password" name="token" autocomplete="new-password" placeholder="{% if I.sms.hasToken %}Leave blank to keep the saved one{% endif %}"></label>
+    <label class="f">Auth token<input type="password" id="pw-twilio" hx-preserve name="token" autocomplete="new-password" placeholder="{% if I.sms.hasToken %}Leave blank to keep the saved one{% endif %}"></label>
     <label class="f">Twilio number texts come from<input type="tel" name="from" value="{{ tf.from }}"></label></div>
   <div class="row" style="margin-top:8px"><button class="btn primary" type="submit">Save</button>{% if I.sms.on %}<button type="button" class="btn ghost" hx-get="/kiosk/m/confirm?a=alertConfig&k=alertConfig:sms-remove&group=sms-remove&t=%23alertspanel" hx-target="#modal" hx-swap="innerHTML">Remove</button>{% endif %}</div>
   {% if msgs.sms %}<p style="margin-top:6px;color:{% if msgs.sms.ok %}var(--ok){% else %}var(--bad){% endif %}">{{ msgs.sms.text }}</p>{% endif %}</form>{% endwith %}

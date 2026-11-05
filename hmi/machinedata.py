@@ -107,19 +107,24 @@ def columns(db, table):
         return hit[1]
     if db not in TABLE_DBS:
         raise ConnError("Pick the machine data database or the asset database.")
-    conn = integrations._db(db)
-    with conn.cursor() as c:
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position",
-                  [conn.settings_dict["NAME"], table])
-        cols = [r[0] for r in c.fetchall()]
+    if integrations.kind_of(db) == "mysql":
+        conn = integrations._db(db)
+        with conn.cursor() as c:
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_schema=%s AND table_name=%s ORDER BY ordinal_position",
+                      [conn.settings_dict["NAME"], table])
+            cols = [r[0] for r in c.fetchall()]
+    else:   # SQL Server / PostgreSQL: from the schema listing (names there are schema-qualified outside dbo/public)
+        cols = next(([c["name"] for c in t["columns"]] for t in integrations.schema(db)["tables"] if t["name"] == table), [])
     if not cols:
         raise ConnError(f'There is no table "{table}" in {integrations.DB_NAMES[db].replace("The ", "the ")}.')
     _cols_cache[key] = (time.monotonic(), cols)
     return cols
 
 
-def _q(name):
-    return "`" + str(name).replace("`", "``") + "`"
+def _q(name, db="machines"):
+    """A column name quoted for that database's dialect."""
+    from plant import dbkinds
+    return dbkinds.quote(integrations.kind_of(db), name)
 
 
 def latest_row(db, table, want, order_col, key_col="", key_val=""):
@@ -131,13 +136,15 @@ def latest_row(db, table, want, order_col, key_col="", key_val=""):
     for c in [*want, order_col, *( [key_col] if key_col else [])]:
         if c not in cols:
             raise ConnError(f'The table "{table}" has no column "{c}".' if c else "Pick the column that tells which row is newest.")
+    from plant import dbkinds
+    qc, qt = integrations.quoters(db)
     pick = list(dict.fromkeys([*want, order_col]))
-    sql = f"SELECT {', '.join(_q(c) for c in pick)} FROM {_q(table)}"
+    rest = f"{', '.join(qc(c) for c in pick)} FROM {qt(table)}"
     params = []
     if key_col:
-        sql += f" WHERE {_q(key_col)} = %s"
+        rest += f" WHERE {qc(key_col)} = %s"
         params.append(str(key_val))
-    sql += f" ORDER BY {_q(order_col)} DESC LIMIT 1"
+    sql = dbkinds.top(integrations.kind_of(db), rest + f" ORDER BY {qc(order_col)} DESC", 1)
     conn = integrations._db(db)
     with conn.cursor() as c:
         c.execute(sql, params)

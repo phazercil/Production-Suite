@@ -221,6 +221,19 @@ def check_select(sql, what="the asset database"):
     return sql
 
 
+def kind_of(db):
+    """mysql, mssql or postgres: what kind of database the alias is (Admin › Connections detects it)."""
+    liveconfig.refresh()
+    return (connections.settings.get(db) or {}).get("SUITE_KIND") or "mysql"
+
+
+def quoters(db):
+    """(column, table) name quoting for that database's SQL dialect."""
+    from plant import dbkinds
+    k = kind_of(db)
+    return (lambda n: dbkinds.quote(k, n)), (lambda n: dbkinds.table(k, n))
+
+
 def run_saved(sql, params, limit=500, db="assets"):
     sql = check_select(sql, DB_NAMES.get(db, "that database").replace("The ", "the "))
     conn = _db(db)
@@ -236,11 +249,12 @@ def run_saved(sql, params, limit=500, db="assets"):
 
 
 def schema(db="assets"):
+    from plant import dbkinds
     conn = _db(db)
     name = conn.settings_dict["NAME"]
+    sql, params = dbkinds.schema_sql(kind_of(db))
     with conn.cursor() as c:
-        c.execute("SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema=%s "
-                  "ORDER BY table_name, ordinal_position", [name])
+        c.execute(sql, params(name))
         tables = {}
         for t, col, typ in c.fetchall():
             tables.setdefault(t, []).append({"name": col, "type": typ})
@@ -251,7 +265,9 @@ def preview(table, db="assets"):
     names = {t["name"] for t in schema(db)["tables"]}
     if table not in names:
         raise ConnError("Unknown table.")
-    return run_saved(f"SELECT * FROM `{table}`", {}, limit=20, db=db)
+    from plant import dbkinds
+    k = kind_of(db)
+    return run_saved(dbkinds.top(k, f"* FROM {dbkinds.table(k, table)}", 20), {}, limit=20, db=db)
 
 
 def s2k_db_rows(sql):

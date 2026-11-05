@@ -227,7 +227,8 @@ def connections_data(s, request):
 
 def db_box(info, g, title, help_, form=None, msg=None):
     d = info[g]
-    f = form or {"host": d["host"], "port": d["port"] or "3306", "name": d["name"], "user": d["user"], "internet": d.get("internet")}
+    f = form or {"host": d["host"], "port": d["port"] or "3306", "name": d["name"], "user": d["user"], "internet": d.get("internet"),
+                 "kind": d.get("kind") or "auto"}
     return {"g": g, "title": title, "help": help_, "d": d, "f": f, "msg": msg}
 
 
@@ -298,7 +299,11 @@ def s2k_data(s, request, sql=None, msg=None, err=False, res=None, show=False, bl
     return out
 
 
-def s2k_build_sql(b):
+def s2k_build_sql(b, kind=None):
+    from plant import dbkinds
+    kind = kind or integrations.kind_of("s2k")
+    q = lambda n: dbkinds.quote(kind, n)   # noqa: E731 - quoting for that database's dialect
+    qt = lambda n: dbkinds.table(kind, n)  # noqa: E731
     if not b.get("table"):
         raise ValueError("Pick a table.")
     miss = [lbl for k, lbl, req in S2K_ROLES if req and not b.get(k)]
@@ -310,8 +315,8 @@ def s2k_build_sql(b):
         v = str(b.get("fval") or "").strip()
         if not v:
             raise ValueError('Type the value to keep, or clear the "only rows where" column.')
-        where = f"\nWHERE {q(b['fcol'])} = '" + v.replace("\\", "\\\\").replace("'", "''") + "'"
-    return f"SELECT {sel}\nFROM {q(b['table'])}{where}"
+        where = f"\nWHERE {q(b['fcol'])} = '" + v.replace("\\", "\\\\" if kind == "mysql" else "\\").replace("'", "''") + "'"
+    return f"SELECT {sel}\nFROM {qt(b['table'])}{where}"
 
 
 # ------------------------------------------------------------------ changeover data (asset database queries)
@@ -344,7 +349,11 @@ def guess_columns(qname, cols):
     return out
 
 
-def build_codata_sql(qname, b):
+def build_codata_sql(qname, b, kind=None):
+    from plant import dbkinds
+    kind = kind or integrations.kind_of("assets")
+    q = lambda n: dbkinds.quote(kind, n)   # noqa: E731 - quoting for that database's dialect
+    qt = lambda n: dbkinds.table(kind, n)  # noqa: E731
     from .snapshot import QDEF
     D = QDEF[qname]
     if not b.get("table"):
@@ -363,7 +372,7 @@ def build_codata_sql(qname, b):
     if b.get("f_from"):
         w.append(f"({q(b['f_from'])} = :from_part OR {q(b['f_from'])} IS NULL)")
     order = f"\nORDER BY {q(b['seq'])}" if D.get("order") and b.get("seq") else ""
-    return f"SELECT {sel}\nFROM {q(b['table'])}\nWHERE " + "\n  AND ".join(w) + order
+    return f"SELECT {sel}\nFROM {qt(b['table'])}\nWHERE " + "\n  AND ".join(w) + order
 
 
 def norm_steps(rows):
@@ -525,7 +534,7 @@ def _conn_fields(p, g):
         return {k: p.get(k, "") for k in ("sid", "token")}
     if g == "grafana":
         return {"token": p.get("token", "")}
-    return {k: p.get(k, "") for k in ("host", "port", "name", "user", "password")} | {"internet": bool(p.get("internet"))}
+    return {k: p.get(k, "") for k in ("host", "port", "name", "user", "password", "kind")} | {"internet": bool(p.get("internet"))}
 
 
 @action("connTest")

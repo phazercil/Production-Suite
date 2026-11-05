@@ -34,21 +34,35 @@ def ready_dbs():
     return [d for d in ("machines", "assets", "s2k") if d in integrations.connections.databases]
 
 
+_ID = r"(?:`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"|\[(?:[^\]]|\]\])+\])"   # `mysql`, "postgres" or [sql server]
+
+
+def _unq(x):
+    x = x.strip()
+    if x[:1] == "`":
+        return x[1:-1].replace("``", "`")
+    if x[:1] == '"':
+        return x[1:-1].replace('""', '"')
+    if x[:1] == "[":
+        return x[1:-1].replace("]]", "]")
+    return x
+
+
 def parse_sql(sql):
-    """Table and column links back out of SQL the suite's own builders made: FROM `t`, `col` AS role,
-    `col` = :part / :machine / :from_part, `col` = 'value'."""
+    """Table and column links back out of SQL the suite's own builders made (any of the three dialects):
+    FROM `t` / "s"."t" / [t], `col` AS role, `col` = :part / :machine / :from_part, `col` = 'value'."""
     sql = sql or ""
     out = {"table": "", "map": {}, "fval": ""}
-    m = re.search(r"FROM\s+`((?:[^`]|``)+)`", sql, re.I)
+    m = re.search(rf"FROM\s+({_ID})(?:\.({_ID}))?", sql, re.I)
     if m:
-        out["table"] = m.group(1).replace("``", "`")
-    for col, role in re.findall(r"`((?:[^`]|``)+)`\s+AS\s+(\w+)", sql, re.I):
-        out["map"][role.lower()] = col.replace("``", "`")
-    for col, par in re.findall(r"`((?:[^`]|``)+)`\s*=\s*:(part|machine|from_part)\b", sql, re.I):
-        out["map"]["f_" + {"part": "part", "machine": "machine", "from_part": "from"}[par.lower()]] = col.replace("``", "`")
-    m = re.search(r"WHERE\s+`((?:[^`]|``)+)`\s*=\s*'((?:[^']|'')*)'", sql, re.I)
+        out["table"] = _unq(m.group(1)) + ("." + _unq(m.group(2)) if m.group(2) else "")
+    for col, role in re.findall(rf"({_ID})\s+AS\s+(\w+)", sql, re.I):
+        out["map"][role.lower()] = _unq(col)
+    for col, par in re.findall(rf"({_ID})\s*=\s*:(part|machine|from_part)\b", sql, re.I):
+        out["map"]["f_" + {"part": "part", "machine": "machine", "from_part": "from"}[par.lower()]] = _unq(col)
+    m = re.search(rf"WHERE\s+({_ID})\s*=\s*'((?:[^']|'')*)'", sql, re.I)
     if m:
-        out["map"]["fcol"] = m.group(1).replace("``", "`")
+        out["map"]["fcol"] = _unq(m.group(1))
         out["fval"] = m.group(2).replace("''", "'")
     return out
 
