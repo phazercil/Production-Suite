@@ -58,7 +58,16 @@ class Machine(models.Model):
     code = models.CharField(max_length=12, blank=True, help_text="S2K process code, e.g. BARB")
     stage = models.CharField(max_length=2, choices=STAGES, default="s1")
     speed_mode = models.CharField(max_length=8, default="fixed")
-    ppm = models.FloatField(default=180, help_text="Stage 1: rated / fixed pleats per minute")
+    ppm = models.FloatField(default=180, help_text="Stage 1: rated / fixed speed, in the machine's speed unit")
+    # What the machine's speed is measured in (plant/units.py): pleats per minute, linear mm per second of media,
+    # or parts per minute. Counts without a counter, run rates and the schedule all follow it.
+    speed_unit = models.CharField(max_length=4, default="ppm")
+
+    @property
+    def speed_short(self):
+        from plant import units
+        return units.short(self)
+    mm_per_part = models.FloatField(null=True, blank=True, help_text="mm/s machines: mm of travel per part (blank = pleats × 2 × pleat height)")
     rate = models.FloatField(default=0, help_text="Other stages: filters per hour when the sheet has no rate")
     scrap_pct = models.FloatField(default=5)
     downtime_pct = models.FloatField(default=10)

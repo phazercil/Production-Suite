@@ -431,7 +431,7 @@ def m_override(request, s):
     if not s.shift_on:
         return thin.refused("Start a shift first.")
     p = s.part(s.current_item())
-    return modal_response(request, "hmi/k/m_override.html", **ctx_for(s, o=s.shift.override or {}, p=p, rated=int(s.machine.ppm)))
+    return modal_response(request, "hmi/k/m_override.html", **ctx_for(s, o=s.shift.override or {}, p=p, rated=int(s.machine.ppm), unit=s.machine.speed_short))
 
 
 @modal("notes", login=True)

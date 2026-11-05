@@ -16,8 +16,8 @@ from . import integrations
 DB_LABEL = {"machines": "Machine data database", "assets": "Asset database", "s2k": "S2K database"}
 MACHINE_SLOTS = [("orderCol", "Newest row (time stamp or ID)", True, "Which row is the latest reading"),
                  ("keyCol", "Which machine (column)", False, "Only when one table holds several machines"),
-                 ("ppm", "Speed · pleats per minute", True, "The pleater's speed"),
-                 ("count", "Filters made (counter)", False, "Without it, filters come from speed ÷ pleats"),
+                 ("ppm", "Speed (in the machine's speed unit)", True, "Pleats per minute, mm per second or parts per minute: Admin › Machines › Speed unit"),
+                 ("count", "Filters made (counter)", False, "Without it, filters are worked out from the speed"),
                  ("recipe", "Recipe loaded", False, ""),
                  ("run", "Run signal (High = running)", False, "Without it, running = speed above the stop speed"),
                  ("errCode", "Error / alarm code", False, ""),

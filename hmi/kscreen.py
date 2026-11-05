@@ -331,7 +331,7 @@ class Screen:
         last_ppm = hist[-1][1] if hist else 0
         st = shift_stats(sh) if sh else {"mins": 0, "run": 0, "down": 0, "uptime": 100}
         nx = self.up_next()
-        out = {"on": bool(sh), "sh": sh, "stats": st, "lastPpm": last_ppm, "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
+        out = {"on": bool(sh), "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,
                "grafana": self.grafana_src((self.settings.get("grafana") or {}).get("ppm")),
@@ -346,11 +346,12 @@ class Screen:
         if mo:
             p = self.part(mo.part)
             good = max(0, mo.produced - mo.scrap)
-            per = (sh.override or {}).get("pleats") or p["pleats"]
+            from plant import units
             try:
-                per = float(per)
+                ov = float((sh.override or {}).get("pleats") or 0) or None
             except (TypeError, ValueError):
-                per = p["pleats"]
+                ov = None
+            per = units.per_part(self.machine or sh.machine, p, ov)   # speed-minutes per part (plant/units.py)
             out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0,
                        rate=f"{last_ppm / per:.1f}" if per else "—", eta=self.eta())
         from . import runinfo
