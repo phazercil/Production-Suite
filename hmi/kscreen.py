@@ -78,6 +78,14 @@ class Screen:
         """Who this screen acts as: the supervisor during an override, otherwise the person logged in."""
         return self.sup or self.me
 
+    @property
+    def labor_master(self):
+        """The Labor Budget is the master of lines and shifts once it has been saved."""
+        if not hasattr(self, "_labor_master"):
+            from labor.sync import master_on
+            self._labor_master = master_on()
+        return self._labor_master
+
     def can(self, key):
         return bool(self.perms[key.replace(".", "_")])
 

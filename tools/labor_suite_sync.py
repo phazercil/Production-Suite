@@ -1,14 +1,13 @@
 """Labor Budget page changes that keep it in step with the rest of the suite (used by tools/build_labor.py).
 
-labor/sync.py does the work on the server: the suite's machines, speeds and shifts are put into the plan
-whenever it is read or saved. Here the page shows that: what comes from the suite can't be changed on this
-page (it is changed in the Scheduler's Lines & Shifts or in Admin), and crew names are offered from the
-Team list. New styles are inline, since labor.css is built from the calculator's own classes.
+labor/sync.py does the work on the server. Budget A is the master of the lines and the shifts: lines (added,
+renamed, removed, their stage and shifts) and shifts (how many, times, days, lunch) are changed on this page and
+the suite follows when it's saved. A line's color and speed are machine settings, so they still come from the
+suite (Admin / Scheduler) and are locked here. Crew names are offered from the Team list. New styles are inline, since labor.css is built from the calculator's own classes.
 """
 import json
 
-FROM_SUITE = "Set in the Scheduler (Lines & Shifts) or Admin, and kept in step here."
-LOCK = 'style="opacity:.6;cursor:not-allowed" title="' + FROM_SUITE.replace("&", "&amp;") + '"'
+FROM_SUITE = "A machine setting: set in Admin › Machines or the Scheduler (Lines & Shifts)."
 BADGE = "font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;"
 
 PATCHES = [
@@ -37,19 +36,19 @@ PATCHES = [
      """<input type="color" value="${line.color || '#2563eb'}" ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'color', this.value)\""""),
     ("the line name",
      """<input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)\"""",
-     """<input type="text" value="${esc(line.name)}" ${line.machineId ? 'readonly ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'name', this.value)\""""),
+     """<input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)\""""),
     ("the line stage",
      """<select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">""",
-     """<select ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">"""),
+     """<select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">"""),
     ("the line badges",
      "                ${thresholdLineBadge(line.id)}\n                ${collapsed ? ",
      "                ${thresholdLineBadge(line.id)}\n"
-     "                ${line.machineId ? `<span style=\"" + BADGE + "background:#e0f2fe;color:#075985\" title=\"${FROM_SUITE_TEXT}\">From the suite${line.inService === false ? ' · out of service' : ''}</span>`\n"
-     "                  : line.suiteMissing ? `<span style=\"" + BADGE + "background:#fee2e2;color:#991b1b\" title=\"The Scheduler has no machine for this line, so it isn't planned there.\">Not in the suite</span>` : ''}\n"
+     "                ${line.machineId ? `<span style=\"" + BADGE + "background:#e0f2fe;color:#075985\" title=\"A machine in the Scheduler and the Operator Kiosk. Its name, stage and shifts are set here; its color and speed in Admin.\">Machine${line.inService === false ? ' · out of service' : ''}</span>`\n"
+     "                  : line.suiteMissing ? `<span style=\"" + BADGE + "background:#fee2e2;color:#991b1b\" title=\"Save the plan to add this line to the Scheduler and Admin.\">New machine</span>` : ''}\n"
      "                ${collapsed ? "),
     ("Delete Line",
      """<button onclick="removeLine(${lIdx})" class="text-xs text-red-600""",
-     """<button onclick="removeLine(${lIdx})" ${line.machineId ? 'hidden' : ''} class="text-xs text-red-600"""),
+     """<button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Deleting it takes the machine out of service when the plan is saved (its records are kept)"' : ''} class="text-xs text-red-600"""),
     ("the line speed",
      """<input type="number" min="0" step="1" value="${line.hourlyRate}" onchange="updateLine(${lIdx}, 'hourlyRate', Number(this.value))" class="w-full bg-white">""",
      """<input type="number" min="0" step="1" value="${line.hourlyRate}" ${line.machineId ? 'readonly ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'hourlyRate', Number(this.value))" class="w-full bg-white">
@@ -58,30 +57,28 @@ PATCHES = [
      "          clone.id = 'L' + Date.now();\n          clone.name = newName.trim();",
      "          clone.id = 'L' + Date.now();\n          clone.name = newName.trim();\n"
      "          delete clone.machineId; delete clone.rateBasis;   // a copy is the plan's own line, not the suite's machine"),
-    # lines added here are labor-only (machines are added in the Scheduler)
+    # a new line starts labor-only; picking a production stage (Stage 1, 2, 3, Glue Bead) makes it a machine when saved
     ("addLine()",
      "        name: `Line ${state.lines.length + 1} - New Line (Stage 1)`,\n        stage: 'Stage 1',",
      "        name: `Line ${state.lines.length + 1} - Labor only`,\n        stage: 'Non Production',"),
 
-    # shifts: how many, and each shift's main crew schedule, are the suite's shifts
-    ("the shift count -", """<button onclick="adjustShiftCount(-1)" class=\"""", """<button onclick="adjustShiftCount(-1)" disabled """ + LOCK + """ class=\""""),
-    ("the shift count +", """<button onclick="adjustShiftCount(1)" class=\"""", """<button onclick="adjustShiftCount(1)" disabled """ + LOCK + """ class=\""""),
+    # shifts: how many, and each shift's main crew schedule (A), are the suite's shifts: changed here, followed there
     ("schedule start",
      """<input type="time" value="${s.startTime}" onchange="updateSchedule(${idx}, 'startTime', this.value)\"""",
-     """<input type="time" value="${s.startTime}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'startTime', this.value)\""""),
+     """<input type="time" value="${s.startTime}" onchange="updateSchedule(${idx}, 'startTime', this.value)\""""),
     ("schedule end",
      """<input type="time" value="${s.endTime}" onchange="updateSchedule(${idx}, 'endTime', this.value)\"""",
-     """<input type="time" value="${s.endTime}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'endTime', this.value)\""""),
+     """<input type="time" value="${s.endTime}" onchange="updateSchedule(${idx}, 'endTime', this.value)\""""),
     ("schedule lunch",
      """<input type="number" min="0" max="180" value="${s.lunchMins}" onchange="updateSchedule(${idx}, 'lunchMins', Number(this.value))\"""",
-     """<input type="number" min="0" max="180" value="${s.lunchMins}" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'lunchMins', Number(this.value))\""""),
+     """<input type="number" min="0" max="180" value="${s.lunchMins}" onchange="updateSchedule(${idx}, 'lunchMins', Number(this.value))\""""),
     ("schedule on/off",
      """<input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="updateSchedule(${idx}, 'enabled', this.checked)\"""",
      """<input type="checkbox" ${s.enabled ? 'checked' : ''} ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onchange="updateSchedule(${idx}, 'enabled', this.checked)\""""),
     ("schedule delete", """<button onclick="deleteSchedule(${idx})" class=\"""", """<button onclick="deleteSchedule(${idx})" ${s.suiteShift ? 'hidden' : ''} class=\""""),
     ("schedule days",
      """<button type="button" onclick="toggleScheduleDay(${idx}, ${dow})" class=\"""",
-     """<button type="button" ${s.suiteShift ? 'disabled ' + LOCK_ATTR : ''} onclick="toggleScheduleDay(${idx}, ${dow})" class=\""""),
+     """<button type="button" onclick="toggleScheduleDay(${idx}, ${dow})" class=\""""),
     ("the schedule badge",
      """Shift ${s.shift} &bull; ${esc(s.code)}</span>""",
      """Shift ${s.shift} &bull; ${esc(s.code)}</span>${s.suiteShift ? `<span style=\"""" + BADGE + """background:#e0f2fe;color:#075985\" title=\"${FROM_SUITE_TEXT}\">${esc(s.suiteName || 'Suite shift')}</span>` : ''}"""),

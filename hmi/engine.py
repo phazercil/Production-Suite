@@ -1242,8 +1242,16 @@ def list_set(p, ctx):
         audit(ctx, f'Renamed "{old}" to "{v}" in {p["k"]}')
 
 
+def labor_lock(what):
+    """Once the Labor Budget has been saved it is the master of lines and shifts: change them there."""
+    from labor.sync import master_on
+    need(not master_on(), f"{what} come from the Labor Budget now. Change them there (Labor Budget in the top bar); "
+                          "Admin and the Scheduler follow it when it's saved.")
+
+
 @cmd("lineAdd", "machines.edit")
 def line_add(p, ctx):
+    labor_lock("Lines")
     n = Machine.objects.filter(stage="s1").count() + 1
     while Machine.objects.filter(name=f"Machine {n}").exists():
         n += 1
@@ -1343,6 +1351,7 @@ def line_set(p, ctx):
     busy = bool(active_run(m))
     f, v = p.get("f"), p.get("v")
     if f == "id":
+        labor_lock("Line names")
         v = str(v or "").strip()
         need(v, "A machine needs a name.")
         need(len(v) <= 60, "Machine names can be up to 60 characters.")
@@ -1414,6 +1423,7 @@ def line_set(p, ctx):
 
 @cmd("lineDel", "machines.edit")
 def line_del(p, ctx):
+    labor_lock("Lines")
     m = line_of(p.get("id"))
     need(m, "Machine not found.")
     need(not active_run(m), f"A shift is running on {m.name}. End it first.")
@@ -1431,6 +1441,7 @@ def _shift(i):
 
 @cmd("shiftAdd", "lists.edit")
 def shift_add(p, ctx):
+    labor_lock("Shifts")
     s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count())
     for m in Machine.objects.all():
         m.shifts.add(s)
@@ -1442,6 +1453,8 @@ def shift_set(p, ctx):
     s = _shift(p.get("s"))
     f, v = p.get("f"), str(p.get("v") or "").strip()
     need(f in ("name", "start", "end"), "Unknown field.")
+    if f != "name":
+        labor_lock("Shift times")
     need(v, "Cannot be blank.")
     if f != "name":
         need(TIME_RE.match(v), "Use a time like 07:00.")
@@ -1455,6 +1468,7 @@ def shift_set(p, ctx):
 
 @cmd("shiftDel", "lists.edit")
 def shift_del(p, ctx):
+    labor_lock("Shifts")
     need(Shift.objects.count() > 1, "Keep at least one shift.")
     s = _shift(p.get("s"))
     name = s.name
@@ -1486,6 +1500,8 @@ def break_set(p, ctx):
     need(0 <= int(p.get("b", -1)) < len(brs), "Break not found.")
     b = brs[int(p["b"])]
     f, v = p.get("f"), p.get("v")
+    if "lunch" in (b.label or "").lower() and f == "mins" or f == "name" and ("lunch" in (b.label or "").lower()) != ("lunch" in str(v or "").lower()):
+        labor_lock("Lunch lengths")
     if f == "mins":
         b.end = _mins_to_hm(hm(b.start) + max(1, int(float(v or 0))))
     elif f == "start":
@@ -1510,6 +1526,8 @@ def break_del(p, ctx):
     brs = list(s.breaks.all())
     need(0 <= int(p.get("b", -1)) < len(brs), "Break not found.")
     b = brs[int(p["b"])]
+    if "lunch" in (b.label or "").lower():
+        labor_lock("Lunches")
     b.delete()
     audit(ctx, f"Removed {b.label} from {s.name}")
     refresh_schedule("a break change")
