@@ -51,6 +51,16 @@ class GitHubUpdateTests(TestCase):
             p.start()
             self.addCleanup(p.stop)
 
+    def test_linux_update_files_only_go_to_linux_servers(self):
+        lin = {"id": 55, "name": "ProductionSuite-Update-1.12.0-r12-linux-with-packages.zip", "size": 5, "digest": ""}
+        win = {"id": 56, "name": "ProductionSuite-Update-1.12.0-r12.zip", "size": 5, "digest": ""}
+        old = {"id": 57, "name": "ProductionSuite-Update-1.11.0-r11.zip", "size": 5, "digest": ""}
+        rel = {"assets": [old, win, lin]}
+        self.assertEqual(ghupdates.pick_asset(rel, linux=True)["id"], 55)
+        self.assertEqual(ghupdates.pick_asset(rel, linux=False)["id"], 56)
+        self.assertIsNone(ghupdates.pick_asset({"assets": [lin]}, linux=False))
+        self.assertTrue(ghupdates.pick_asset({"assets": [lin]}, linux=True)["packages"])
+
     def test_picks_the_newest_update_file_and_prefers_packages(self):
         pk = {"id": 77, "name": "ProductionSuite-Update-1.12.0-r12-with-packages.zip", "size": 5, "digest": ""}
         gh = FakeGitHub([release("v1.11", 11), release("v1.12", 12, [pk]), release("v1.13", 13, draft=True)])

@@ -14,6 +14,7 @@ day and post a notice when a newer release is out (it never installs by itself).
 import hashlib
 import json
 import logging
+import os
 import re
 import ssl
 import urllib.error
@@ -32,7 +33,7 @@ log = logging.getLogger("plant")
 API = "https://api.github.com"
 DEFAULT_REPO = "phazercil/Production-Suite"
 REPO_RE = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
-ASSET_RE = re.compile(r"^ProductionSuite-Update-(?P<version>[0-9][0-9A-Za-z.]*)-r(?P<revision>[0-9]+)(?P<packages>-with-packages)?\.zip$")
+ASSET_RE = re.compile(r"^ProductionSuite-Update-(?P<version>[0-9][0-9A-Za-z.]*)-r(?P<revision>[0-9]+)(?P<linux>-linux)?(?P<packages>-with-packages)?\.zip$")
 # where GitHub sends a release download: its API, then its file servers
 HOSTS = ("api.github.com", "github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 MAX_BYTES = 400 * 1024 * 1024
@@ -87,17 +88,20 @@ def _open(path, token, accept="application/vnd.github+json", timeout=20):
         raise GHError(f"Couldn't reach GitHub ({getattr(e, 'reason', e)}). This server needs to reach api.github.com over HTTPS.")
 
 
-def pick_asset(release):
-    """The update file of a release: the one with the Python packages when there is one (it always installs)."""
+def pick_asset(release, linux=None):
+    """The update file of a release: the one with the Python packages when there is one (it always installs).
+    A "-linux" update file is built for Linux servers only (Linux packages; its Windows programs aren't code-signed):
+    Windows servers never take one, and Linux servers prefer it."""
+    linux = os.name != "nt" if linux is None else linux
     files = []
     for a in release.get("assets") or []:
         m = ASSET_RE.match(a.get("name") or "")
-        if m:
-            files.append((bool(m["packages"]), int(m["revision"]), m["version"], a))
+        if m and (linux or not m["linux"]):
+            files.append((int(m["revision"]), bool(m["packages"]), bool(m["linux"]), m["version"], a))
     if not files:
         return None
-    files.sort(key=lambda x: (x[1], x[0]), reverse=True)
-    packages, revision, version, a = files[0]
+    files.sort(key=lambda x: x[:3], reverse=True)
+    revision, packages, _, version, a = files[0]
     return {"id": a["id"], "name": a["name"], "size": a.get("size") or 0, "version": version, "revision": revision, "packages": packages,
             "digest": (a.get("digest") or "").removeprefix("sha256:")}
 

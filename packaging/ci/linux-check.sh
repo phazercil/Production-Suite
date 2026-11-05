@@ -75,6 +75,47 @@ grep -q "no earlier version" updates/state.json || die "the updater didn't run: 
 [ "$(stat -c %U /usr/libexec/production-suite/updater.py)" = root ] || die "root's updater copy isn't root-owned"
 pass "an update request ran root's own copy of the updater"
 
+# Admin > Updates on a Linux server: a signed Linux update file with packages (the kind the Release workflow attaches
+# for "Check for updates") is taken in by the suite and installed by root's updater through systemd. Made here from
+# this source with the next revision, signed with a throwaway key that only this test server trusts.
+PY=/opt/production-suite/.venv/bin/python
+rm -rf /tmp/next && mkdir /tmp/next && tar -C /src --exclude=./dist --exclude=./.git -cf - . | tar -C /tmp/next -xf -
+rev=$(sed -n 's/^REVISION = \([0-9]*\)/\1/p' /tmp/next/suite/version.py); next=$((rev + 1))
+sed -i "s/^REVISION = .*/REVISION = $next/" /tmp/next/suite/version.py
+sed -i "s/^\$script:SuiteRevision = .*/\$script:SuiteRevision = $next/" /tmp/next/packaging/installer/common.ps1
+pk=$("$PY" /tmp/next/tools/make_update.py --new-key /tmp/ci-key.txt | sed -n 's/.*Public key: //p')
+[ -n "$pk" ] || die "couldn't make a test signing key"
+trust() { "$PY" - "$1" "$pk" <<'PYEOF'
+import re, sys
+p, pk = sys.argv[1], sys.argv[2]
+s = open(p).read()
+open(p, "w").write(re.sub(r"PUBLIC_KEYS = \[", f'PUBLIC_KEYS = ["{pk}", ', s, count=1))
+PYEOF
+}
+trust /tmp/next/plant/update_key.py
+trust /opt/production-suite/plant/update_key.py && chown psuite:psuite /opt/production-suite/plant/update_key.py
+"$PY" - "$pk" <<'PYEOF'
+import json, sys
+p = "/usr/libexec/production-suite/keys.json"
+keys = json.load(open(p))
+json.dump([sys.argv[1]] + keys, open(p, "w"))
+PYEOF
+(cd /tmp/next && "$PY" packaging/build.py --linux-update --key /tmp/ci-key.txt --packages --notes "CI update") >/dev/null || die "couldn't build the Linux update file"
+upd=$(ls /tmp/next/dist/ProductionSuite-Update-*-r$next-linux-with-packages.zip) || die "no Linux update file was built"
+install -o psuite -g psuite -m 644 "$upd" /tmp/ci-update.zip
+root_before=$(find /opt/production-suite -user root | sort)
+systemctl restart production-suite-ticker
+runuser -u psuite -- "$PY" manage.py shell -c "from plant import updates; updates.receive('/tmp/ci-update.zip', 'ci-update.zip', 'CI', 'now')" \
+    || die "the suite refused the Linux update file"
+for i in $(seq 1 240); do grep -q '"status": "done"\|"status": "failed"' updates/state.json 2>/dev/null && break; sleep 1; done
+grep -q '"status": "done"' updates/state.json || die "the update didn't install: $(cat updates/state.json 2>/dev/null)"
+for i in $(seq 1 60); do curl -s http://127.0.0.1/api/version | grep -q "\"revision\": *$next" && break; sleep 1; done
+curl -s http://127.0.0.1/api/version | grep -q "\"revision\": *$next" || die "after the update: $(curl -s http://127.0.0.1/api/version)"
+runuser -u psuite -- "$PY" -c 'import pymssql, pg8000, PIL' || die "the packages that came with the update don't load"
+new_root=$(comm -13 <(echo "$root_before") <(find /opt/production-suite -user root | sort) | head -5)
+[ -z "$new_root" ] || die "the update left root-owned files: $new_root"
+pass "a signed Linux update file with packages installed from Admin > Updates (rev $rev -> $next, root's updater via systemd)"
+
 # settings file is private, records are in MariaDB
 [ "$(stat -c %a .env)" = 600 ] || die ".env is $(stat -c %a .env)"
 [ "$(stat -c %U .env)" = psuite ] || die ".env belongs to $(stat -c %U .env)"
