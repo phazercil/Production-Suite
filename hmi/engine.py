@@ -101,48 +101,115 @@ def active_run(machine):
     return ShiftRun.objects.filter(machine=machine, active=True).select_related("mo").first()
 
 
-# ------------------------------------------------------------------ nobody logged in
-# A machine in one of its scheduled shifts keeps being recorded when no operator has started a shift: the minute tick
-# opens an "unattended" run (no person) that collects its speed, counts and downtime. When an operator starts their
-# shift on that machine during it, they take that run over, so everything recorded since the shift began is theirs
-# (and with the MO they scan, its count goes on that MO). An unattended run closes by itself at the end of the shift.
+# ------------------------------------------------------------------ the log always runs
+# Machine data is recorded whenever it comes in, whether or not anyone is logged in, and each stretch of time belongs
+# to a window: one of the machine's shifts (Admin › Machine schedule), or "No shift" for the time between them. A run
+# (ShiftRun) is one window's log. When a window ends the log splits by itself: the next window's log starts with the
+# same MO, and an operator still logged in is asked whether they're working into the next shift (offer). With nobody
+# logged in a log is "unattended"; the operator who starts their shift in that window takes it over, so everything
+# recorded since the window began is theirs. "No shift" time is logged but is planned time: never downtime.
+NO_SHIFT = "No shift"
+
+
 def unattended(sh):
     return bool(sh and sh.active and sh.person_id is None and not sh.user_name)
 
 
-def machine_shift_at(machine, t):
-    """The machine's own shift window (Admin › Machines / Labor Budget shifts) that t falls in, or None."""
-    from plant.util import shift_at, shift_list
+def _machine_shifts(machine):
+    from plant.util import shift_list
     ids = set(machine.shifts.values_list("id", flat=True))
-    return shift_at(ms(t), [x for x in shift_list() if x.id in ids]) if ids else None
+    return [x for x in shift_list() if x.id in ids and x.days] if ids else [x for x in shift_list() if x.days]
 
 
-def open_unattended(machine, t):
+def machine_window(machine, t):
+    """The window t falls in for this machine: {"name", "s", "e"} (datetimes) for one of its shifts, or the gap
+    between its shifts ({"name": "No shift", ...}, "noShift": True)."""
+    from datetime import datetime as _dt
+
+    from django.utils import timezone as _tz
+
+    from plant.util import hm, local
+    occ = []
+    for x in _machine_shifts(machine):
+        for back in range(-2, 3):
+            day = local(t).date() + timedelta(days=back)
+            if (day.weekday() + 1) % 7 not in x.days:
+                continue
+            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x.start))
+            occ.append((s0, s0 + timedelta(minutes=(hm(x.end) - hm(x.start)) % 1440 or 1440), x.name))
+    occ.sort()
+    for s0, e0, name in occ:
+        if s0 <= t < e0:
+            return {"name": name, "s": s0, "e": e0, "noShift": False}
+    before = [e0 for s0, e0, _ in occ if e0 <= t]
+    after = [s0 for s0, e0, _ in occ if s0 > t]
+    return {"name": NO_SHIFT, "s": max(before) if before else t - timedelta(days=1), "e": min(after) if after else t + timedelta(days=1),
+            "noShift": True}
+
+
+def machine_shift_at(machine, t):
+    """The machine's own shift window that t falls in, or None (between shifts)."""
+    w = machine_window(machine, t)
+    return None if w["noShift"] else {"name": w["name"], "s": ms(w["s"]), "e": ms(w["e"])}
+
+
+def open_log(machine, t, start=None, mo=None, offer=None, co=None):
+    """Start the log of the window t is in (nobody on it yet)."""
     if rules().get("autoRuns", True) is False:
         return None
-    w = machine_shift_at(machine, t - timedelta(seconds=30))
-    if not w:
-        return None
-    start = max(from_ms(w["s"]), t - timedelta(minutes=1))
+    w = machine_window(machine, t - timedelta(seconds=30))
+    start = start or max(w["s"], t - timedelta(minutes=1))
+    if mo and mo.status != "OPEN":
+        mo = None
     sh = ShiftRun.objects.create(machine=machine, line=machine.name, person=None, user_name="", shift_name=w["name"], start=start,
-                                 state="running", qc_last=start)
+                                 mo=mo, mo_start=start if mo else None, state="changeover" if co else "running", co=co, qc_last=start,
+                                 offer=offer or "")
     event("shift_auto", {"line": machine.name, "shift": w["name"]})
     return ShiftRun.objects.select_for_update().select_related("mo").get(pk=sh.pk)
 
 
-def close_unattended_if_over(sh, t):
-    """An unattended run ends with its shift. Returns True when it closed."""
-    w = machine_shift_at(sh.machine, sh.start + timedelta(seconds=30)) if sh.machine else None
-    end = from_ms(w["e"]) if w else None
-    if end is not None and t <= end:
-        return False
-    end = min(t, end) if end else t
+def open_unattended(machine, t):
+    return open_log(machine, t)
+
+
+def close_log(sh, end, why="window"):
+    """Close a log at `end`: its MO run, its stop, its changeover piece and its stats."""
+    if sh.mo and sh.person_id:
+        MoRun.objects.create(shift=sh, line=sh.line, mo=sh.mo.number, item=sh.mo.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
+                             end_time=end)
     close_stop(sh, end)
+    if sh.state == "changeover" and sh.co and sh.co.get("start"):
+        add_down(sh, from_ms(sh.co["start"]), end, "Changeover")
     st = shift_stats(sh)
-    sh.active, sh.end, sh.state, sh.co = False, end, "idle", None
+    sh.active, sh.end, sh.state = False, end, "idle"
     sh.uptime, sh.down_mins = st["uptime"], st["down"]
     sh.save()
-    event("shift_end", {"line": sh.line, "count": sh.count, "uptime": st["uptime"], "down": st["down"], "unattended": True})
+    event("shift_end", {"line": sh.line, "count": sh.count, "uptime": st["uptime"], "down": st["down"], "auto": why})
+
+
+def roll_over(sh, t):
+    """When the window of a log has ended, close it and start the next window's log (same MO, the changeover going
+    on carried over, and the operator asked whether they are working into it). Returns the log for t."""
+    if rules().get("autoRuns", True) is False or not sh.machine_id:
+        return sh
+    w = machine_window(sh.machine, sh.start + timedelta(seconds=30))
+    if t <= w["e"]:
+        return sh
+    end = w["e"]
+    mo, co, who = sh.mo, None, sh.person_id
+    if sh.state == "changeover" and sh.co:
+        co = {**sh.co, "start": ms(end) if sh.co.get("start") else None}
+    close_log(sh, end)
+    nxt = machine_window(sh.machine, t - timedelta(seconds=30))
+    return open_log(sh.machine, t, start=max(end, nxt["s"]), mo=mo, offer=str(who) if who else None, co=co)
+
+
+def close_unattended_if_over(sh, t):
+    """(Kept for callers: True when the log's window is over; the log is closed.)"""
+    w = machine_window(sh.machine, sh.start + timedelta(seconds=30)) if sh.machine_id else None
+    if w and t <= w["e"]:
+        return False
+    close_log(sh, w["e"] if w else t)
     return True
 
 
@@ -317,10 +384,10 @@ def tick(machine, sample, t):
     ls, _ = LineState.objects.get_or_create(machine=machine)
     ls.last_tick = t
     sh = ShiftRun.objects.select_for_update().filter(machine=machine, active=True).select_related("mo").first()
-    if sh and unattended(sh) and close_unattended_if_over(sh, t):
-        sh = None
-    if not sh and sample is not None:   # data during one of the machine's shifts, nobody logged in: record it anyway
-        sh = open_unattended(machine, t)
+    if sh:
+        sh = roll_over(sh, t)   # its window (shift, or the time between shifts) is over: the next window's log
+    if not sh and sample is not None:   # data with no log open: the log always runs
+        sh = open_log(machine, t)
     if not sh:
         ls.save(update_fields=["last_tick"])
         return
@@ -477,8 +544,10 @@ def start_shift(p, ctx):
         sh.person, sh.user_name = ctx.user, ctx.user.name
         sh.issues, sh.safety = str(p.get("issues") or "").strip(), safety
         sh.pm = p.get("pm") if isinstance(p.get("pm"), list) else []
-        sh.qc_last = ctx.now
-        if mo:
+        sh.qc_last, sh.offer = ctx.now, ""
+        if mo and sh.mo_id != mo.pk:
+            if sh.mo_id and sh.mo_count:   # the log carried another MO: its count moves to the one scanned
+                MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") - sh.mo_count)
             sh.mo, sh.mo_start, sh.mo_count = mo, sh.start, sh.count
             if sh.count:
                 MO.objects.filter(pk=mo.pk).update(produced=F("produced") + sh.count)
@@ -500,6 +569,54 @@ def start_shift(p, ctx):
         mo.save(update_fields=["line", "seq"])
     event("shift_start", {"line": m.name, "mo": mo.number if mo else None, "user": ctx.user.name, "issues": sh.issues})
     return {"msg": f"Shift started on {m.name} at {fmt_t(ctx.now)}"}
+
+
+def take_log(sh, person, ctx, why):
+    """Make a log this person's (it was nobody's)."""
+    sh.person, sh.user_name, sh.offer, sh.qc_last = person, person.name, "", ctx.now
+    sh.save(update_fields=["person", "user_name", "offer", "qc_last"])
+    audit(ctx, f"{person.name} {why} on {sh.line} ({sh.shift_name}, since {fmt_t(sh.start)})")
+    event("shift_start", {"line": sh.line, "mo": sh.mo.number if sh.mo else None, "user": person.name, "since": ms(sh.start)})
+
+
+@cmd("carryOn", "none")
+def carry_on(p, ctx):
+    """The prompt at a shift change: "[Name], working into the next shift?" Yes: the new window's log is theirs.
+    No: it stays nobody's until someone starts their shift."""
+    sh = ShiftRun.objects.select_for_update().select_related("mo").filter(pk=p.get("id") or 0, active=True).first()
+    need(sh and unattended(sh) and sh.offer, "That shift change was already answered.")
+    person = Person.objects.filter(pk=int(sh.offer) if sh.offer.isdigit() else 0, active=True).first()
+    if not p.get("yes") or not person:
+        sh.offer = ""
+        sh.save(update_fields=["offer"])
+        return {"msg": f"{sh.line} is waiting for the {sh.shift_name} operator to start their shift."}
+    take_log(sh, person, Ctx(user=person, t=ctx.now), f"kept working into {sh.shift_name}")
+    return {"msg": f"{person.name} is working into {sh.shift_name} on {sh.line}"}
+
+
+@cmd("changeOperator")
+def change_operator(p, ctx):
+    """Change Operator on the kiosk: the person logging in takes the line over from now. The one before keeps
+    everything up to now; the log carries on with the same MO under the new person."""
+    m = line_of(p.get("line") or ctx.line)
+    need(m, "Pick which machine this screen is for.")
+    need(ctx.user.trained.filter(pk=m.pk).exists(), f"{ctx.user.name} isn't trained on {m.name}. Ask your shift lead.")
+    sh = ShiftRun.objects.select_for_update().select_related("mo").filter(machine=m, active=True).first()
+    need(sh, f"{m.name} has no log running.")
+    if unattended(sh):
+        take_log(sh, ctx.user, ctx, "took over")
+        return {"msg": f"{ctx.user.name} is on {m.name} now"}
+    need(sh.person_id != ctx.user.pk, f"{ctx.user.name} is already the operator on {m.name}.")
+    before, mo, co = sh.user_name, sh.mo, None
+    if sh.state == "changeover" and sh.co:
+        co = {**sh.co, "start": ms(ctx.now) if sh.co.get("start") else None}
+    close_log(sh, ctx.now, why="operator change")
+    new = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=sh.shift_name, start=ctx.now,
+                                  mo=mo if mo and mo.status == "OPEN" else None, mo_start=ctx.now, state="changeover" if co else "running",
+                                  co=co, qc_last=ctx.now, safety=sh.safety, pm=sh.pm)
+    audit(ctx, f"Operator change on {m.name}: {before} → {ctx.user.name}")
+    event("shift_start", {"line": m.name, "mo": new.mo.number if new.mo else None, "user": ctx.user.name, "change": before})
+    return {"msg": f"{ctx.user.name} took over {m.name} from {before}"}
 
 
 @cmd("endShift")

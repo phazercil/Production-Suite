@@ -19,6 +19,7 @@ class ShiftRun(models.Model):
     mo_start = models.DateTimeField(null=True, blank=True)
     count = models.IntegerField(default=0)
     mo_count = models.IntegerField(default=0)
+    offer = models.CharField(max_length=20, blank=True, help_text="A log started at a shift change: the person logged in on the one before, asked whether they're working into it")
     stop_what = models.CharField(max_length=120, blank=True, help_text="What stopped, for the stop going on now (e.g. the second run signal's name)")
     acc = models.FloatField(default=0)
     state = models.CharField(max_length=12, default="running")  # running | stopped | changeover | idle

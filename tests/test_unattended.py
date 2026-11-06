@@ -66,17 +66,58 @@ class UnattendedTests(TestCase):
                            engine.Ctx(user=Person.objects.get(name="Plant Admin"), t=t + timedelta(minutes=9)))
         self.assertFalse(r["ok"])
 
-    def test_not_outside_the_machines_shifts_and_closes_at_the_end(self):
+    def test_the_log_always_runs_and_splits_at_each_window(self):
         Shift.objects.filter(name="All day").update(start="06:00", end="06:30")
         day = local(self.t).replace(hour=6, minute=0)
         self.tick(day - timedelta(minutes=10))
-        self.assertFalse(ShiftRun.objects.filter(machine=self.m).exists())   # before the shift
+        a = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual(a.shift_name, engine.NO_SHIFT)                  # before the shift: logged, as "No shift"
         self.tick(day + timedelta(minutes=5))
-        sh = ShiftRun.objects.get(machine=self.m, active=True)
-        self.tick(day + timedelta(minutes=31))                             # after the shift: closed at its end
-        sh.refresh_from_db()
-        self.assertFalse(sh.active)
-        self.assertEqual(local(sh.end).strftime("%H:%M"), "06:30")
-        self.assertFalse(ShiftRun.objects.filter(machine=self.m, active=True).exists())
-        engine.tick(self.m, None, day + timedelta(minutes=10))             # no data: nothing opened
-        self.assertFalse(ShiftRun.objects.filter(machine=self.m, active=True).exists())
+        a.refresh_from_db()
+        self.assertFalse(a.active)
+        self.assertEqual(local(a.end).strftime("%H:%M"), "06:00")        # split at the shift's start
+        b = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((b.shift_name, local(b.start).strftime("%H:%M")), ("All day", "06:00"))
+        self.tick(day + timedelta(minutes=31))
+        b.refresh_from_db()
+        self.assertEqual(local(b.end).strftime("%H:%M"), "06:30")
+        c = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((c.shift_name, local(c.start).strftime("%H:%M")), (engine.NO_SHIFT, "06:30"))
+        # a stop in "No shift" time is never downtime
+        for i in range(32, 45):
+            engine.tick(self.m, {"ppm": 0}, day + timedelta(minutes=i))
+        engine.tick(self.m, {"ppm": 190}, day + timedelta(minutes=45))
+        self.assertFalse(Downtime.objects.filter(shift=c).exists())
+
+    def test_working_into_the_next_shift_and_changing_operator(self):
+        from plant.models import ShiftBreak  # noqa: F401
+        Shift.objects.filter(name="All day").update(start="06:00", end="14:00")
+        Shift.objects.create(name="Late", start="14:00", end="22:00", days=[0, 1, 2, 3, 4, 5, 6])
+        self.m.shifts.add(Shift.objects.get(name="Late"))
+        day = local(self.t).replace(hour=13, minute=50)
+        self.tick(day)
+        mo = MO.objects.filter(status="OPEN").first()
+        safety = [True] * len(engine.config()["safety"])
+        r = engine.execute("startShift", {"line": self.m.name, "mo": mo.number, "safety": safety}, engine.Ctx(user=self.op, t=day + timedelta(minutes=1)))
+        self.assertTrue(r["ok"], r)
+        self.tick(day + timedelta(minutes=12))                           # 14:02: the next shift's log
+        late = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((late.shift_name, late.mo, late.offer, late.person), ("Late", mo, str(self.op.pk), None))
+        # the kiosk asks: "M. Lee, working into Late?"
+        from django.test import Client
+        c = Client(HTTP_HX_REQUEST="true")
+        c.get(f"/station/{self.m.name}/")
+        self.assertContains(c.get("/kiosk/v/controls"), "working into Late?")
+        r = engine.execute("carryOn", {"id": late.pk, "yes": True}, engine.Ctx())
+        self.assertTrue(r["ok"], r)
+        late.refresh_from_db()
+        self.assertEqual((late.person, late.offer), (self.op, ""))
+        # Change Operator: the next person takes over from now, same MO
+        other = Person.objects.get(name="Plant Admin")
+        other.trained.add(self.m)
+        r = engine.execute("changeOperator", {"line": self.m.name}, engine.Ctx(user=other, t=day + timedelta(minutes=20)))
+        self.assertTrue(r["ok"], r)
+        late.refresh_from_db()
+        self.assertFalse(late.active)
+        now_run = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((now_run.person, now_run.mo, now_run.shift_name), (other, mo, "Late"))

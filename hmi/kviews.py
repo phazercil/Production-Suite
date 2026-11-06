@@ -893,3 +893,29 @@ def a_ack_stop(request, s, p):
     acked = [k for k in (request.session.get("stopAck") or []) if k != key][-50:] + ([key] if key else [])
     request.session["stopAck"] = acked
     return render(request, "hmi/k/_notibar.html", ctx_for(s, N=s.notibar(), page=p.get("page", "")))
+
+
+@modal("changeop")
+def m_changeop(request, s):
+    """Change Operator: the next person logs in and takes the line over from now."""
+    sh = s.shift
+    return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, people=kscreen.people_for_login(""),
+                                                                   changeop={"before": sh.user_name if sh and sh.user_name else "Nobody",
+                                                                             "mo": sh.mo.number if sh and sh.mo else ""}))
+
+
+@action("changeOp")
+def a_change_op(request, s, p):
+    u, err = pin_login(request, p.get("pin"), p.get("user") or None, "")
+    if not u:
+        return err_in_modal(err)
+    r = engine.execute("changeOperator", {"line": s.station}, engine.Ctx(user=u, line=s.station))
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.done(toast=r["msg"], close=True, changed=True)
+
+
+@action("carryOn")
+def a_carry_on(request, s, p):
+    r = engine.execute("carryOn", {"id": p.get("id"), "yes": p.get("yes") == "1"}, engine.Ctx(line=s.station))
+    return thin.done(toast=r.get("msg") if r["ok"] else r["error"], changed=True)
