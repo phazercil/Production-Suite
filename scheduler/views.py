@@ -17,8 +17,8 @@ from hmi.views import current_person, touch
 from plant.api import BadRequest, json_api, to_int
 
 from . import imports
-from .engine import compute, config_sig, load_world, rate_for, refresh_floor_queue
-from .models import Job
+from .engine import compute, config_sig, fmt_dt, load_world, rate_for, refresh_floor_queue
+from .models import Job, job_key
 
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 
@@ -51,6 +51,8 @@ def result_json(r, lead=False):
     out["runSegs"] = r["runSegs"]
     out["unplanned"] = r.get("unplanned", False)
     out["running"] = r.get("running", False)
+    for k in ("part", "parts", "rest", "split"):
+        out[k] = r.get(k)
     if lead and r.get("laborCost") is not None:  # wages are for shift leads only
         out["laborCost"] = r["laborCost"]
     return out
@@ -124,8 +126,6 @@ def put_job(request):
     mo = MO.objects.filter(pk=to_int(p.get("moId"), "order")).first()
     m = Machine.objects.filter(pk=to_int(p.get("machineId"), "line")).first()
     op = p.get("op")
-    if mo and op == "s1" and mo.status != "OPEN":
-        return fail(f"MO {mo.number} is closed, so its Stage 1 run is finished.")
     req = from_ms(to_int(p.get("reqStart"), "start time"))
     if not mo or not m or op not in STAGE_ORDER:
         return fail("That order or line no longer exists.")
@@ -135,17 +135,87 @@ def put_job(request):
     if op != "s1" and not s1_finished and not Job.objects.filter(mo=mo, op="s1").exists():
         return fail("Schedule Stage 1 for this order first.")
     from hmi.models import ShiftRun
-    if op == "s1" and ShiftRun.objects.filter(active=True, mo=mo).exclude(machine=m).exists():
+    if op == "s1" and to_int(p.get("part") or 1, "part") == 1 and ShiftRun.objects.filter(active=True, mo=mo).exclude(machine=m).exists():
         return fail(f"MO {mo.number} is running on another machine right now. Move it after that run is changed over.")
-    Job.objects.update_or_create(mo=mo, op=op, defaults={"machine": m, "req_start": req})
+    part = to_int(p.get("part") or 1, "part")
+    if part != 1 and not Job.objects.filter(mo=mo, op=op, part=part).exists():
+        return fail("That part of the split was merged back. Reload the board.")
+    if op == "s1" and mo.status != "OPEN" and part == 1:
+        return fail(f"MO {mo.number} is closed, so its Stage 1 run is finished.")
+    Job.objects.update_or_create(mo=mo, op=op, part=part, defaults={"machine": m, "req_start": req})
+    return ok()
+
+
+def _key(p):
+    bits = str(p.get("key", "")).split("__")
+    if len(bits) not in (2, 3) or not bits[0].isdigit() or bits[1] not in STAGE_ORDER or (len(bits) == 3 and not bits[2].isdigit()):
+        raise BadRequest("Unknown job.")
+    return int(bits[0]), bits[1], int(bits[2]) if len(bits) == 3 else 1
+
+
+@json_api
+@mutate
+def split_job(request):
+    """Split a stage in two: part 1 stops at a time of day, after a quantity, or when the operator ends the MO at the
+    kiosk (Stage 1); part 2 makes the rest. Part 2 starts out right after part 1 on the same line, to drag anywhere."""
+    p = body(request)
+    mo_id, op, _ = _key(p)
+    j = Job.objects.select_for_update().filter(mo_id=mo_id, op=op, part=1).select_related("mo").first()
+    if not j:
+        return fail("Put this stage on the board first.")
+    mode = p.get("mode")
+    if mode not in ("time", "operator", "qty"):
+        return fail("Pick how to split: at a time, when the operator ends it, or by quantity.")
+    if mode == "operator" and op != "s1":
+        return fail("Only Stage 1 is ended by an operator at the kiosk. Split this stage at a time or by quantity.")
+    world = load_world()
+    sch = compute(world)
+    r1 = sch["res"].get(j.key)
+    total = float(j.mo.qty or 0) - (float(j.mo.produced or 0) if op == "s1" else 0)
+    j.split_mode, j.split_at, j.split_qty = mode, None, None
+    if mode == "time":
+        t = to_int(p.get("at"), "time")
+        if r1 and not (r1["runStart"] < t < max(r1["end"], r1["runStart"] + 1)) and Job.objects.filter(mo_id=mo_id, op=op, part=2).count() == 0:
+            return fail(f"Pick a time while part 1 runs: between {fmt_dt(r1['runStart'])} and {fmt_dt(r1['end'])}.")
+        j.split_at = from_ms(t)
+    elif mode == "qty":
+        try:
+            q = float(p.get("qty"))
+        except (TypeError, ValueError):
+            return fail("Type the quantity part 1 makes.")
+        if not 0 < q < total:
+            return fail(f"Part 1 has to make between 1 and {int(total) - 1:,} (the stage has {int(total):,} to make).")
+        j.split_qty = q
+    j.save()
+    if not Job.objects.filter(mo_id=mo_id, op=op, part=2).exists():
+        start = from_ms(r1["end"]) if r1 else j.req_start
+        if mode == "time":
+            start = j.split_at
+        Job.objects.create(mo_id=mo_id, op=op, part=2, machine_id=j.machine_id, req_start=start)
+    return ok(key=job_key(mo_id, op, 2))
+
+
+@json_api
+@mutate
+def merge_job(request):
+    """Undo a split: part 1 makes everything again."""
+    p = body(request)
+    mo_id, op, _ = _key(p)
+    Job.objects.filter(mo_id=mo_id, op=op, part__gt=1).delete()
+    Job.objects.filter(mo_id=mo_id, op=op, part=1).update(split_mode="", split_at=None, split_qty=None)
     return ok()
 
 
 @json_api
 @mutate
 def del_job(request):
+    """Take a stage off the board (all its parts). Taking part 2 of a split off merges it back into part 1."""
     p = body(request)
-    mo_id, op = str(p.get("key", "")).split("__") if "__" in str(p.get("key", "")) else (None, None)
+    mo_id, op, part = _key(p)
+    if part > 1:
+        Job.objects.filter(mo_id=mo_id, op=op, part__gt=1).delete()
+        Job.objects.filter(mo_id=mo_id, op=op, part=1).update(split_mode="", split_at=None, split_qty=None)
+        return ok()
     qs = Job.objects.filter(mo_id=mo_id, op=op)
     if op == "s1" and p.get("cascade"):
         qs = Job.objects.filter(mo_id=mo_id)
@@ -162,7 +232,7 @@ def preview(request):
     jobs = dict(world["jobs"])
     if p.get("op") not in STAGE_ORDER:
         raise BadRequest("Unknown stage.")
-    jobs[key] = {"id": key, "moId": to_int(p.get("moId"), "order"), "op": p.get("op"), "machineId": to_int(p.get("machineId"), "line"),
+    jobs[key] = {**jobs.get(key, {}), "id": key, "moId": to_int(p.get("moId"), "order"), "op": p.get("op"), "machineId": to_int(p.get("machineId"), "line"),
                  "reqStart": to_int(p.get("reqStart"), "start time")}
     sch = compute(world, jobs)
     r = sch["res"].get(key)

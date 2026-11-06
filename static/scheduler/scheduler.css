@@ -232,3 +232,17 @@ td input[type=text]{width:140px}
 .chip.mini{font-size:10px;padding:1px 5px;cursor:default}
 .bar.running{outline:2px solid var(--ok);outline-offset:-2px}
 .bar.running::after{content:"RUNNING";position:absolute;right:6px;bottom:3px;font:600 9px var(--f-mono);letter-spacing:.06em;color:var(--surface);opacity:.85}
+/* split a run: the button in a bar's top-right corner, and the parts */
+.bar .splitbtn{position:absolute;top:2px;right:3px;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:rgba(0,0,0,.28);color:#fff;font-size:11px;line-height:18px;cursor:pointer;opacity:.75;z-index:3}
+.bar .splitbtn:hover,.bar .splitbtn:focus-visible{opacity:1;background:rgba(0,0,0,.5)}
+.bar:has(.splitbtn) .flag{right:24px}
+.bar.split{border-right:3px dashed rgba(0,0,0,.35)}
+.bar.rest{background:transparent!important;border:2px dashed var(--c,var(--st1));color:var(--fg);box-shadow:none}
+.bar.rest .run b,.bar.rest .run span{color:var(--fg)}
+.splitopts{border:0;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:8px}
+.splitopts .opt{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.splitopts .opt:has(input[type=radio]:checked){border-color:var(--accent);background:var(--accent-soft)}
+.splitopts .opt>input{margin-top:3px}
+.splitopts .opt span{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.splitopts .opt small{color:var(--muted);font-size:12px}
+.splitopts .opt input[type=datetime-local],.splitopts .opt input[type=number]{max-width:240px}
