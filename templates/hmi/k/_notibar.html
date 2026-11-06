@@ -1,4 +1,10 @@
 <div id="notibar" class="notibar-wrap" hx-get="/kiosk/r/notibar?page={{ page }}" hx-trigger="suite:changed from:body" hx-swap="outerHTML">
+{% with x=N.stops.0 %}{% if x %}<div class="stoppop" role="alertdialog" aria-modal="false" aria-labelledby="stoppop-t" data-stop="{{ x.key }}">
+  <div class="stoppop-card"><span class="ic" aria-hidden="true">⛔</span>
+    <div class="grow"><b id="stoppop-t">{% if x.what %}{{ x.what }} stopped{% else %}{{ x.line }} stopped{% endif %}</b>
+      <span class="sub">{% if x.what %}On {{ x.line }} · {% endif %}since {{ x.since|clock }} ({{ x.mins }} min){% if x.mo %} · MO {{ x.mo }}{% endif %}{% if N.stops|length > 1 %} · {{ N.stops|length|add:"-1" }} more machine{{ N.stops|length|add:"-1"|pluralize }} stopped{% endif %}</span></div>
+    <button class="btn primary" hx-post="/kiosk/do/ackStop" hx-vals='{"key": "{{ x.key }}", "page": "{{ page }}"}' hx-target="#notibar" hx-swap="outerHTML" autofocus>OK</button></div>
+</div>{% endif %}{% endwith %}
 {% if N.brk %}<div class="notibar brk {% if N.brk.now %}now{% endif %}" role="status"><span class="ic" aria-hidden="true">☕</span>
   <span class="tx">{% if N.brk.now %}<b>{{ N.brk.label }} now</b> until {{ N.brk.e|clock }}. Stops during it aren't downtime.{% else %}<b>{{ N.brk.label }} in {{ N.brk.inMins }} min</b>: {{ N.brk.s|clock }}–{{ N.brk.e|clock }}.{% endif %}</span></div>{% endif %}
 {% if N.top %}<div class="notibar k-{{ N.top.kind }}" role="status"><span class="ic" aria-hidden="true">{{ N.icon|get:N.top.kind|default:"ℹ" }}</span>

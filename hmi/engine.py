@@ -281,7 +281,8 @@ def add_down(sh, start, end, reason=None):
     d = None
     for s, e in pieces:
         d = Downtime.objects.create(shift=sh, line=sh.line, mo=sh.mo.number if sh.mo else "", start_time=s, end_time=e,
-                                    minutes=max(1, round((e - s).total_seconds() / 60)), reason=reason)
+                                    minutes=max(1, round((e - s).total_seconds() / 60)), reason=reason,
+                                    notes=f"{sh.stop_what} stopped" if reason != "Changeover" and sh.stop_what and sh.stop_what != sh.line else "")
         event("downtime", {"line": d.line, "start": s, "end": e, "minutes": d.minutes, "reason": reason})
     return d
 
@@ -320,7 +321,12 @@ def tick(machine, sample, t):
     ppm = 0 if co else max(0, round(ppm_raw))
     planned = any(a < t <= b for a, b, _ in planned_for_tick(sh, t))
     signal = sample.get("run")
-    running = (signal if isinstance(signal, bool) else ppm > r["stopPpm"]) and not co
+    main_runs = signal if isinstance(signal, bool) else ppm > r["stopPpm"]
+    # two machines running together (a second run signal): the line runs only while both do
+    second = sample.get("run2")
+    second_runs = second if isinstance(second, bool) else True
+    running = main_runs and second_runs and not co
+    stopped = [n for n, ok in ((machine.name, main_runs), (sample.get("run2Name") or "Second machine", second_runs)) if not ok]
     recipe = str(sample.get("recipe") or "")[:80]
     reading = PpmReading.objects.create(machine=machine, line=machine.name, shift=sh, t=t, ppm=ppm, planned=planned, run=running,
                                         recipe=recipe)
@@ -352,6 +358,9 @@ def tick(machine, sample, t):
         if not running:
             if not sh.stop_start:
                 sh.stop_start = t - timedelta(minutes=1)
+                sh.stop_what = " and ".join(stopped)[:120]
+            elif stopped and sh.stop_what != " and ".join(stopped)[:120]:
+                sh.stop_what = " and ".join(dict.fromkeys(sh.stop_what.split(" and ") + stopped))[:120]
             sh.state = "stopped"
         else:
             if sh.stop_start:
@@ -359,10 +368,11 @@ def tick(machine, sample, t):
                 if (end - sh.stop_start).total_seconds() / 60 >= r["minDown"]:
                     add_down(sh, sh.stop_start, end)
                 sh.stop_start = None
+                sh.stop_what = ""
             sh.state = "running"
             if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
                 sh.qc_due_at = t - timedelta(minutes=1)
-    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at"])
+    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at", "stop_what"])
 
 
 def close_stop(sh, t):
@@ -370,6 +380,7 @@ def close_stop(sh, t):
         if (t - sh.stop_start).total_seconds() / 60 >= rules()["minDown"]:
             add_down(sh, sh.stop_start, t)
         sh.stop_start = None
+        sh.stop_what = ""
 
 
 def shift_stats(sh):
@@ -2467,7 +2478,7 @@ def _schema_of(db):
         raise Need(str(e))
 
 
-def _apply_group(g, c, mp, ctx, slot_where=None):
+def _apply_group(g, c, mp, ctx, slot_where=None, run2_name=None):
     """Save one data need as reading source card c (its table and filters) with these column links."""
     from . import connector
     db, table = c.db, c.table
@@ -2507,6 +2518,12 @@ def _apply_group(g, c, mp, ctx, slot_where=None):
                        f"Give {m.name} its own card or speed filter for its rows (e.g. machine = {m.name}).")
         src = dict(m.feed_src or {}) if m.feed_type == "db" else {}
         src["slotWhere"] = sw
+        if mp.get("run2"):   # a second machine running with this one: the line runs only while both do
+            name = re.sub(r"\s+", " ", str(g["state"].get("run2Name", "") if run2_name is None else run2_name)).strip()[:60]
+            need(name, "Name the second run signal (e.g. the machine running with " + m.name + ").")
+            src["run2"] = {"field": mp["run2"], "name": name, "runWhen": (src.get("run2") or {}).get("runWhen") or "high"}
+        else:
+            src.pop("run2", None)
         src.update(db=db, table=table, orderCol=mp["orderCol"], source=c.pk, where=filters,
                    keyCol=filters[0]["col"] if len(filters) == 1 else "", keyVal=filters[0]["val"] if len(filters) == 1 else "")
         src.setdefault("maxAge", 3)
@@ -2587,7 +2604,8 @@ def connector_save(p, ctx):
     c = SourceCard.objects.filter(pk=p.get("src") or 0).first() if str(p.get("src") or "").isdigit() else None
     need(c, "Drag a column in first: the box reads the card its columns come from.")
     return {"msg": _apply_group(g, c, p.get("map") if isinstance(p.get("map"), dict) else {}, ctx,
-                                slot_where=p.get("where") if isinstance(p.get("where"), dict) else {})}
+                                slot_where=p.get("where") if isinstance(p.get("where"), dict) else {},
+                                run2_name=str(p.get("run2Name") or ""))}
 
 
 def _clean_filters(raw, cols):

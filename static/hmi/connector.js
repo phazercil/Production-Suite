@@ -17,6 +17,7 @@
       try { g._st = JSON.parse(g.dataset.state || "{}"); } catch (e) { g._st = {}; }
       g._st.map = g._st.map || {};
       g._st.where = g._st.where || {};
+      if (g.dataset.kind === "machine") g._st.run2Name = g._st.run2Name || "";
       g._orig = JSON.stringify(g._st);
     }
     return g._st;
@@ -43,12 +44,15 @@
       sl.setAttribute("aria-label", label(sl) + ": " + (col || "empty"));
     });
     paintFilters(g);
+    const r2 = g.querySelector(".g-run2");
+    if (r2) { r2.hidden = !st.map.run2; const i = r2.querySelector(".run2name"); if (document.activeElement !== i) i.value = st.run2Name || ""; }
     const tb = g.querySelector(".gsrc .tb"); if (tb) tb.textContent = title(root, st.src) || "none yet";
     const changed = JSON.stringify(st) !== g._orig;
     const save = g.querySelector("[data-save]"); if (save) save.disabled = !changed;
     const undo = g.querySelector("[data-undo]"); if (undo) undo.hidden = !changed;
     if (changed) g.dataset.dirty = "1"; else delete g.dataset.dirty;
     const missing = [...g.querySelectorAll(".slot.req")].filter(sl => !st.map[sl.dataset.slot]).map(label);
+    if (st.map.run2 && !(st.run2Name || "").trim()) missing.push("a name for the second run signal");
     if (changed) {
       const shared = g.dataset.kind === "machine" && st.src &&
         [...root.querySelectorAll('.cgroup[data-kind="machine"]')].filter(o => o !== g && String(state(o).src) === String(st.src)).map(o => o.querySelector(".wh b").textContent);
@@ -223,6 +227,7 @@
       });
     }
     root.addEventListener("input", e => {
+      if (e.target.matches(".run2name")) { const g = e.target.closest(".cgroup"); state(g).run2Name = e.target.value; paint(g); return; }
       const row = e.target.closest(".sfil");
       if (row && e.target.matches(".sfcol,.sfval")) {
         const g = row.closest(".cgroup"), st = state(g), f = (st.where[row.dataset.for] || [])[0];
@@ -341,6 +346,7 @@
       const st = state(g);
       e.detail.parameters.map = JSON.stringify(st.map);
       e.detail.parameters.where = JSON.stringify(st.where || {});
+      e.detail.parameters.run2Name = st.run2Name || "";
       e.detail.parameters.src = st.src || "";
       e.detail.parameters.db = st.db || "";
       e.detail.parameters.table = st.table || "";

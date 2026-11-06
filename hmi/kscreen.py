@@ -255,11 +255,34 @@ class Screen:
                         "locked": key in ADMIN_PAGES and not self.is_lead})
         return out
 
+    def stop_alerts(self):
+        """Machines of the operator on this screen that have stopped and nobody has acknowledged here yet: the machine
+        this screen is for, and any other machine the person logged in is running. Stops in planned time (breaks,
+        lunch, start-up) and during a changeover don't pop up."""
+        from .engine import planned_for_tick, unattended
+        runs = []
+        if self.shift and not unattended(self.shift):
+            runs.append(self.shift)
+        if self.me:
+            runs += [r for r in ShiftRun.objects.filter(active=True, person=self.me).select_related("mo") if r.pk not in {x.pk for x in runs}]
+        acked = set(self.request.session.get("stopAck") or [])
+        out = []
+        for sh in runs:
+            if sh.state != "stopped" or not sh.stop_start:
+                continue
+            key = f"{sh.pk}:{ms(sh.stop_start)}"
+            if key in acked or any(a < self.t <= b for a, b, _ in planned_for_tick(sh, self.t)):
+                continue
+            out.append({"key": key, "line": sh.line, "what": sh.stop_what if sh.stop_what and sh.stop_what != sh.line else "",
+                        "since": sh.stop_start, "mins": max(1, round((self.t - sh.stop_start).total_seconds() / 60)),
+                        "mo": sh.mo.number if sh.mo else ""})
+        return out
+
     def notibar(self, all_=False):
         """The notification bar under the banner: the newest unread notice for this machine and how many more."""
         ns = self.unread_notices()
         now_brk = self.break_now()
-        return {"top": ns[0] if ns else None, "more": max(0, len(ns) - 1), "all": ns if all_ else [], "brk": now_brk,
+        return {"top": ns[0] if ns else None, "more": max(0, len(ns) - 1), "all": ns if all_ else [], "brk": now_brk, "stops": self.stop_alerts(),
                 "icon": {"schedule": "📅", "break": "☕", "maint": "🔧", "qc": "✔", "info": "ℹ"}}
 
     def break_now(self):

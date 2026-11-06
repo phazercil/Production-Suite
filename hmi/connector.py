@@ -19,6 +19,7 @@ MACHINE_SLOTS = [("orderCol", "Newest row (time stamp or ID)", True, "Which row 
                  ("count", "Filters made (counter)", False, "Without it, filters are worked out from the speed"),
                  ("recipe", "Recipe loaded", False, ""),
                  ("run", "Run signal (High = running)", False, "Without it, running = speed above the stop speed"),
+                 ("run2", "Second run signal (a machine running with it)", False, "Two machines running together: the line runs only while both do; name it below"),
                  ("errCode", "Error / alarm code", False, ""),
                  ("errText", "Error / alarm text", False, "")]
 
@@ -83,6 +84,7 @@ def groups():
             cur = {"orderCol": src.get("orderCol", ""), "ppm": m.feed_ppm_field or "",
                    "count": m.feed_count_field, "recipe": m.feed_recipe_field,
                    "run": up.get("field", "") if up.get("type") == "feed" else "",
+                   "run2": (src.get("run2") or {}).get("field", ""),
                    "errCode": err.get("field", "") if err.get("type") == "feed" else "",
                    "errText": err.get("textField", "") if err.get("type") == "feed" else ""}
         elif m.feed_type not in ("none", ""):
@@ -90,6 +92,7 @@ def groups():
         out.append({"key": f"m:{m.pk}", "kind": "machine", "title": m.name, "sub": "Machine readings", "color": m.color,
                     "dbs": ["machines", "assets"], "db": src.get("db") or "machines", "table": src.get("table", "") if m.feed_type == "db" else "",
                     "slots": _slots(MACHINE_SLOTS, cur), "other": other,
+                    "run2Name": (src.get("run2") or {}).get("name", "") if m.feed_type == "db" else "",
                     "slotWhere": clean_slot_where(src.get("slotWhere")) if m.feed_type == "db" else {},
                     "src": src.get("source") if m.feed_type == "db" else None,
                     "filters": (src.get("where") or ([{"col": src["keyCol"], "val": src.get("keyVal", "")}] if src.get("keyCol") else []))
@@ -119,11 +122,11 @@ def groups():
         g["status"] = ("custom" if g.get("custom") else "other" if g["other"] else
                        "done" if g["table"] and not g["missing"] else "partial" if done else "missing")
         g["state"] = {"src": g["src"], "db": g["db"], "table": g["table"], "map": {s["k"]: s["col"] for s in g["slots"] if s["col"]},
-                      "where": g.get("slotWhere") or {}}
+                      "where": g.get("slotWhere") or {}, "run2Name": g.get("run2Name", "")}
     return out
 
 
-SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "errCode", "errText"}   # (not "Newest row")
+SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "run2", "errCode", "errText"}   # (not "Newest row")
 
 
 def clean_slot_where(raw, cols=None):
@@ -263,7 +266,8 @@ def test_data(g, card, mp, rows=5, slot_where=None):
         from . import machinedata
         m = Machine(name=g["title"], feed_type="db", feed_ppm_field=mp["ppm"], feed_count_field=mp.get("count", ""),
                     feed_recipe_field=mp.get("recipe", ""),
-                    feed_src={"db": db, "table": table, "orderCol": mp["orderCol"], "where": card.filters or [], "slotWhere": sw},
+                    feed_src={"db": db, "table": table, "orderCol": mp["orderCol"], "where": card.filters or [], "slotWhere": sw,
+                              "run2": {"field": mp["run2"], "name": "Second run signal"} if mp.get("run2") else {}},
                     uptime_src={"type": "feed", "field": mp["run"]} if mp.get("run") else {},
                     error_src={"type": "feed", "field": mp.get("errCode", ""), "textField": mp.get("errText", "")}
                     if mp.get("errCode") or mp.get("errText") else {})

@@ -19,6 +19,7 @@ class ShiftRun(models.Model):
     mo_start = models.DateTimeField(null=True, blank=True)
     count = models.IntegerField(default=0)
     mo_count = models.IntegerField(default=0)
+    stop_what = models.CharField(max_length=120, blank=True, help_text="What stopped, for the stop going on now (e.g. the second run signal's name)")
     acc = models.FloatField(default=0)
     state = models.CharField(max_length=12, default="running")  # running | stopped | changeover | idle
     stop_start = models.DateTimeField(null=True, blank=True)
