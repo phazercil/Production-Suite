@@ -18,6 +18,7 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const clone=o=>JSON.parse(JSON.stringify(o));
 const uid=p=>p+Math.random().toString(36).slice(2,9);
 const fmtN=n=>Math.round(n).toLocaleString("en-US");
+const fmtS=n=>n>=1000?(n/1000).toFixed(n>=10000?0:1).replace(/\.0$/,"")+"k":String(Math.round(n));
 const fmtK=n=>n>=100000?Math.round(n/1000)+"k":n>=10000?(n/1000).toFixed(1).replace(/\.0$/,"")+"k":fmtN(n);
 const sod=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
 const addDays=(t,n)=>{const d=new Date(t);d.setDate(d.getDate()+n);return d.getTime()};
@@ -119,6 +120,7 @@ function render(){
   ({schedule:renderSchedule,lines:renderLines,orders:renderOrders,parts:renderParts})[r]();
 }
 window.addEventListener("hashchange",()=>{closeDialog();render()});
+let resizeT;window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if($(".gwrap")&&!$("#layer").firstChild)render()},250)});
 document.addEventListener("dragend",()=>{DRAG=null;$$(".ghost-line").forEach(g=>g.remove());$$(".drop-ok,.drop-no").forEach(t=>t.classList.remove("drop-ok","drop-no"))});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#layer").firstChild)closeDialog()});
 let toastT;
@@ -152,13 +154,26 @@ function shiftBands(a,b){
 }
 function bandHtml(bands,a,px){return bands.map(x=>`<div class="sband n${Math.min(x.n,3)}" style="left:${X(x.s,a,px)}px;width:${Math.max(0,X(x.e,a,px)-X(x.s,a,px))}px" title="${esc(x.name)}"></div>`).join("")}
 let TMAP=null;   // time <-> board position for the view on screen
+/* A day no line works (a weekend or holiday with no shift crewed, and nothing scheduled) shrinks to a thin strip,
+   so the board is mostly production time. Its hours still map onto the strip, so nothing on it is lost. */
+const CLOSED_W={week:30,month:8};
+function workingDays(a,b){
+  const on=new Set(),mark=(s,e)=>{for(let d=sod(Math.max(s,a));d<Math.min(e,b);d=addDays(d,1))on.add(d)};
+  for(const segs of Object.values(S.work||{}))for(const [s,e] of segs)if(e>s)mark(s,e);
+  for(const r of Object.values(S.res||{}))if(r&&r.end>a&&r.start<b)for(const [s,e] of (r.runSegs&&r.runSegs.length?r.runSegs:[[r.start,r.end]]))mark(s,e);
+  return on;
+}
 function makeMap(a,b,px){
   const [h0,h1]=shownHours(),days=[];let off=0;
-  for(let d=a;d<b;d=addDays(d,1)){const s=d+h0*HOUR,e=Math.min(addDays(d,1),d+h1*HOUR);days.push({d,s,e,off});off+=(e-s)/HOUR*px}
+  const cw=CLOSED_W[S.view.scale],on=cw?workingDays(a,b):null,any=on&&on.size>0;
+  for(let d=a;d<b;d=addDays(d,1)){const s=d+h0*HOUR,e=Math.min(addDays(d,1),d+h1*HOUR);
+    const closed=!!(any&&!on.has(d)),w=closed?cw:(e-s)/HOUR*px;
+    days.push({d,s:closed?d:s,e:closed?addDays(d,1):e,off,w,closed});off+=w}
   return {a,b,px,h0,h1,days,W:off,
-    x(t){if(t<=a)return 0;if(t>=b)return off;let k=days.length-1;while(k>0&&t<days[k].d)k--;const D=days[k];return D.off+(Math.min(Math.max(t,D.s),D.e)-D.s)/HOUR*px},
-    t(x){let k=days.length-1;while(k>0&&x<days[k].off)k--;const D=days[k];return Math.min(D.e,D.s+(x-D.off)/px*HOUR)}};
+    x(t){if(t<=a)return 0;if(t>=b)return off;let k=days.length-1;while(k>0&&t<days[k].d)k--;const D=days[k];return D.off+(Math.min(Math.max(t,D.s),D.e)-D.s)/(D.e-D.s)*D.w},
+    t(x){let k=days.length-1;while(k>0&&x<days[k].off)k--;const D=days[k];return Math.min(D.e,D.s+Math.max(0,x-D.off)/D.w*(D.e-D.s))}};
 }
+const dayClosed=t=>!!(TMAP&&TMAP.days.find(D=>D.d===t)?.closed);
 const X=(t,a,px)=>TMAP&&TMAP.a===a&&TMAP.px===px?TMAP.x(t):(t-a)/HOUR*px;
 function buckets(a,b){const out=[];if(S.view.scale==="day"){const [h0,h1]=TMAP?[TMAP.h0,TMAP.h1]:[0,24];for(let t=a+h0*HOUR;t<a+h1*HOUR;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
 function rangeLabel(a,b){
@@ -174,7 +189,12 @@ function renderSchedule(){
   const main=$("#main");
   const keepScroll=$(".gwrap")?{l:$(".gwrap").scrollLeft,t:$(".gwrap").scrollTop,k:S.view.scale+S.view.anchor}:null;
   const railScroll=$(".rail-list")?$(".rail-list").scrollTop:0;
-  const {sc,a,b}=viewWindow();const px=sc.px;TMAP=makeMap(a,b,px);const W=Math.round(X(b,a,px));
+  const {sc,a,b}=viewWindow();let px=sc.px;TMAP=makeMap(a,b,px);
+  /* week and month fill the screen: working days stretch, the thin strips for closed days keep their width */
+  if(S.view.scale!=="day"){const labw=parseFloat(getComputedStyle($(".planner")||document.body).getPropertyValue("--labw"))||200;
+    const avail=(main.clientWidth||1200)-(($(".rail")?.offsetWidth)||300)-labw-80,fixed=TMAP.days.filter(D=>D.closed).reduce((s,D)=>s+D.w,0);
+    if(TMAP.W-fixed>0&&avail>TMAP.W){px=px*(avail-fixed)/(TMAP.W-fixed);TMAP=makeMap(a,b,px)}}
+  const W=Math.round(X(b,a,px));
   const mos=Object.values(S.mos);
   const late=new Set(),waiting=new Set();let scheduled=0;
   for(const mo of mos){const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));const rs=ops.map(o=>S.res[jobKey(mo.id,o)]).filter(Boolean);
@@ -184,23 +204,28 @@ function renderSchedule(){
   const hrsLbl=TMAP.h0===0&&TMAP.h1===24?"06 · 12 · 18":`${String(TMAP.h0).padStart(2,"0")}:00 – ${String(TMAP.h1%24).padStart(2,"0")}:00`;
   if(S.view.scale==="day"){for(let t=a+TMAP.h0*HOUR;t<a+TMAP.h1*HOUR;t+=HOUR){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${px}px"><span class="big">${String(h).padStart(2,"0")}:00</span></div>`}}
   else{for(let t=a;t<b;t=addDays(t,1)){const d=new Date(t),w=X(addDays(t,1),a,px)-X(t,a,px),we=d.getDay()===0||d.getDay()===6,td=sod(now)===t;
+    if(dayClosed(t)){axis+=`<div class="tick closed ${td?"today":""}" style="left:${X(t,a,px)}px;width:${w}px" title="${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}: no shift on any line"><span class="big">${S.view.scale==="week"?DOW[d.getDay()].slice(0,2):""}</span>${S.view.scale==="week"?d.getDate():""}</div>`;continue}
     const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Holiday":"Day off"} in the Labor Budget plan"`:"",spL=sp==="HOLIDAY"?"Holiday":sp==="OFF"?"Off":sp==="WORK"?"Work day":"";
     axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||hrsLbl}</div>`
       :`<div class="tick ${d.getDay()===1?"major":""} ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${d.getDate()}</span>${sp==="HOLIDAY"?"H":DOW[d.getDay()][0]}</div>`}}
   const bk=buckets(a,b);
-  const bands=bandHtml(shiftBands(a,b),a,px);
+  const closedHtml=TMAP.days.filter(D=>D.closed).map(D=>`<div class="closedday" style="left:${D.off}px;width:${D.w}px"></div>`).join("");
+  const bands=bandHtml(shiftBands(a,b),a,px)+closedHtml;
   const nowX=(now>=a&&now<b)?`<div class="nowline" style="left:${X(now,a,px)}px"></div>`:"";
   let rows="";
   for(const st of STAGE_ORDER){
     const ms=S.cfg.machines.filter(m=>m.stage===st);if(!ms.length)continue;
     const all=ms.flatMap(m=>resultsFor(m.id));
     const gTot=all.reduce((s,r)=>s+qtyIn(r,a,b),0);
-    const gcells=bk.map(([x,y])=>{const q=all.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
-    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot">${fmtN(gTot)} pcs in view</span></div><div class="g-track" style="width:${W}px">${bands}${gcells}</div></div>`;
+    const gcells=bk.map(([x,y])=>{const q=all.reduce((s,r)=>s+qtyIn(r,x,y),0),cw=X(y,a,px)-X(x,a,px);if(!q||cw<20)return "";
+      return `<div class="qcell has" style="left:${X(x,a,px)}px;width:${cw}px" title="${fmtN(Math.round(q))} pcs ${S.view.scale==="day"?"this hour":"on "+fmtD(x)}">${cw<60?fmtS(q):fmtK(q)}</div>`}).join("");
+    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot">${fmtN(Math.round(gTot))} pcs</span></div><div class="g-track" style="width:${W}px">${bands}${gcells}</div></div>`;
     for(const m of ms){
       const rs=resultsFor(m.id);
       const work=S.work[m.id]||[];let off="",cur=a;
-      for(const [s,e] of work){if(s>cur)off+=`<div class="off" style="left:${X(cur,a,px)}px;width:${X(s,a,px)-X(cur,a,px)}px"></div>`;cur=e}
+      /* week and month leave out breaks too short to see (lunch, start-up); the day view shows them all */
+      const minGap={day:0,week:45*MIN,month:3*HOUR}[S.view.scale]||0;
+      for(const [s,e] of work){if(s>cur&&(s-cur>=minGap||cur===a))off+=`<div class="off" style="left:${X(cur,a,px)}px;width:${X(s,a,px)-X(cur,a,px)}px"></div>`;cur=e}
       if(cur<b)off+=`<div class="off" style="left:${X(cur,a,px)}px;width:${X(b,a,px)-X(cur,a,px)}px"></div>`;
       const grid=S.view.scale==="day"?"":bk.map(([x])=>`<div class="gridline" style="left:${X(x,a,px)}px"></div>`).join("");
       const bars=rs.filter(r=>r.end>a&&r.start<b).map(r=>{
@@ -212,12 +237,13 @@ function renderSchedule(){
         const canSplit=!S.editLocked&&!r.unplanned&&(r.parts<2||r.part===1);
         return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
       const tot=rs.reduce((s,r)=>s+qtyIn(r,a,b),0);
-      const cells=bk.map(([x,y])=>{const q=rs.reduce((s,r)=>s+qtyIn(r,x,y),0);return `<div class="qcell ${q?"has":""}" style="left:${X(x,a,px)}px;width:${X(y,a,px)-X(x,a,px)}px">${q?fmtK(q):""}</div>`}).join("");
+      const cells="";
       const U={ppm:"PPM",mms:"mm/s",pcs:"parts/min"}[m.unit]||"PPM";
       const sp=m.stage==="s1"?`${m.mode==="fixed"||m.unit&&m.unit!=="ppm"?m.ppm+" "+U:m.mode==="new"?"New-machine PPM":"Sheet PPM"}`:`${(S.modes[m.stage]||[]).find(x=>x[0]===m.mode)?.[1].split(" (")[0]||"Fixed"}`;
       const lab=(S.labor.lines||{})[m.id];
       const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} no crew`).join(" · "):"";
-      rows+=`<div class="g-row"><div class="g-lab"><span class="nm">${esc(m.name)}${m.stage==="s1"?' <span class="pill" title="Feeds the Operator Kiosk queue">kiosk</span>':""}</span><span class="ds">${esc(sp)} · ${m.scrap}% scrap · ${m.downtime}% down</span>${lab?`<span class="ds" title="Crew per shift from the Labor Budget plan">Crew: ${esc(crewTxt)}</span>`:""}<span class="tot">${fmtN(tot)} pcs in view</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${bars}${cells}</div></div>`;
+      const labTip=`${m.name}\n${sp} · ${m.scrap}% scrap · ${m.downtime}% down${lab?"\nCrew: "+crewTxt:""}\n${fmtN(Math.round(tot))} pcs in view`;
+      rows+=`<div class="g-row ${rs.some(r=>r.end>a&&r.start<b)?"":"idle"}"><div class="g-lab" title="${esc(labTip)}"><span class="nm">${esc(m.name)}</span><span class="ds">${tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}${esc(sp)}</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${bars}${cells}</div></div>`;
     }
   }
   /* Orders by stage: an MO with several stages is listed once in each stage it still needs, so each section is the
@@ -252,7 +278,7 @@ function renderSchedule(){
     <input type="date" id="jump" aria-label="Jump to date" value="${isoDay(S.view.anchor)}">
     <span class="range">${esc(rangeLabel(a,b))}</span>
     <span class="spacer"></span>
-    <div class="legend"><span><i style="background:var(--st1)"></i>Stage 1</span><span><i style="background:var(--eb)"></i>End Band</span><span><i style="background:var(--ac)"></i>Arts &amp; Crafts</span><span><i style="background:var(--gb)"></i>Glue Bead</span><span><i class="hatch"></i>Changeover</span>${S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start)).slice(0,3).map((s,i)=>`<span><i class="sband-key n${i+1}"></i>${esc(s.name)}</span>`).join("")}<span><i style="background:repeating-linear-gradient(135deg,var(--off) 0 3px,var(--off-stripe) 3px 6px);border:1px solid var(--line)"></i>Off shift / break</span></div>
+    <div class="legend"><span><i style="background:var(--st1)"></i>Stage 1</span><span><i style="background:var(--eb)"></i>End Band</span><span><i style="background:var(--ac)"></i>Arts &amp; Crafts</span><span><i style="background:var(--gb)"></i>Glue Bead</span><span><i class="hatch"></i>Changeover</span>${S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start)).slice(0,3).map((s,i)=>`<span><i class="sband-key n${i+1}"></i>${esc(s.name)}</span>`).join("")}<span><i class="offkey"></i>Off shift / break</span></div>
   </div>
   <div class="kpis">
     <span class="kpi"><b>${mos.length}</b> orders</span><span class="kpi"><b>${scheduled}</b> fully scheduled</span>
@@ -314,7 +340,7 @@ function wireSchedule(a,px){
       openJobDialog(j.moId,j.op)});
   });
   /* where the MO would start: the dragged bar's left edge (a bar keeps the spot it was grabbed by), snapped */
-  const tAt=(tr,e)=>{const rect=tr.getBoundingClientRect();const x=Math.max(0,e.clientX-rect.left-(DRAG&&DRAG.grabPx||0));
+  const tAt=(tr,e,d=DRAG)=>{const rect=tr.getBoundingClientRect();const x=Math.max(0,e.clientX-rect.left-(d&&d.grabPx||0));
     const t=TMAP?TMAP.t(x):a+x/px*HOUR;const sn=SCALES[S.view.scale].snap;return Math.round(t/sn)*sn};
   $$(".g-track[data-m]").forEach(tr=>{
     const m=machineById(+tr.dataset.m);
@@ -326,7 +352,7 @@ function wireSchedule(a,px){
       if(!DRAG)return;const d=DRAG;DRAG=null;
       if(m.stage!==d.op){toast(`${STAGES[d.op].short} work can only go on a ${STAGES[d.op].short} line.`);return}
       if(d.op!=="s1"&&!S.jobs[jobKey(d.moId,"s1")]){toast("Schedule Stage 1 for this order first.");return}
-      const k=d.from||jobKey(d.moId,d.op),want=tAt(tr,e);
+      const k=d.from||jobKey(d.moId,d.op),want=tAt(tr,e,d);
       const was=S.res[k];
       if(was&&was.running&&was.machineId===m.id){toast(`${S.mos[d.moId]?.mo||"This MO"} is running on ${m.name} now, so it stays at now until the operator ends it at the kiosk.`);return}
       const r=await putJob({moId:d.moId,op:d.op,part:d.part||1,machineId:m.id,reqStart:want});
