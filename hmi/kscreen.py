@@ -12,7 +12,7 @@ from django.db import models
 from django.db.models import Q
 
 from plant.models import MO, Machine, PartSpec, Person, PlantSettings, part_key
-from plant.util import Catalog, ms, now, part_spec, shift_at
+from plant.util import Catalog, from_ms, ms, now, part_spec, shift_at
 from suite.svg import speed_chart
 
 from . import integrations
@@ -363,7 +363,14 @@ class Screen:
         st = shift_stats(sh) if sh else {"mins": 0, "run": 0, "down": 0, "uptime": 100}
         nx = self.up_next()
         offer = Person.objects.filter(pk=int(sh.offer)).values_list("name", flat=True).first() if sh and sh.offer.isdigit() and self.unattended else None
-        out = {"on": bool(sh), "unattended": self.unattended, "offerName": offer, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
+        handoff = None
+        if sh and self.unattended and sh.state == "changeover" and sh.co:
+            from . import engine as _e
+            h = sh.co.get("handoff") or {}
+            new = self.mo(sh.co.get("newMo")) if sh.co.get("newMo") else None
+            handoff = {"by": h.get("by") or "", "at": _e.fmt_t(from_ms(h["t"])) if h.get("t") else "", "note": h.get("note") or "",
+                       "done": len(sh.co.get("done") or []), "n": len(_e.co_steps(sh.co)), "new": new}
+        out = {"on": bool(sh), "unattended": self.unattended, "offerName": offer, "coHandoff": handoff, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,
                "grafana": self.grafana_src((self.settings.get("grafana") or {}).get("ppm")),
@@ -374,7 +381,7 @@ class Screen:
         if sh:
             out["pill"] = STATE_PILL.get(sh.state, ("idle", sh.state.title()))
             co = sh.co or {}  # the changeover start is kept as milliseconds
-            out["timerSince"] = co["start"] if sh.state == "changeover" and co.get("start") else (ms(sh.mo_start) if mo and sh.mo_start else None)
+            out["timerSince"] = (co.get("first") or co["start"]) if sh.state == "changeover" and co.get("start") else (ms(sh.mo_start) if mo and sh.mo_start else None)
         if mo:
             p = self.part(mo.part)
             good = max(0, mo.produced - mo.scrap)
@@ -718,7 +725,14 @@ def shift_report(s):
     top = max(by.values()) if by else 1
     st = shift_stats(sh)
     person = Person.objects.filter(pk=sh.person_id).first() if sh.person_id else None
-    r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
+    from .models import ChangeoverPiece
+    ids = list(ChangeoverPiece.objects.filter(shift=sh).values_list("co_id", flat=True).distinct())
+    cos = []
+    for cid in ids:   # every changeover this shift worked on, with each person's and shift's part of it
+        ps = list(ChangeoverPiece.objects.filter(co_id=cid).order_by("start"))
+        cos.append({"new": ps[-1].new_mo, "old": ps[0].old_mo, "mins": sum(x.minutes for x in ps), "pieces": ps,
+                    "finished": any(x.ended == "finished" for x in ps)})
+    r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
          "scrap": sum(q.scrap for q in qc) + sum(m["scrap"] or 0 for m in mos), "rolls": rolls, "mos": mos,
          "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
          "tickets": [{"t": t, "pics": npics.get(t.id, 0)} for t in tickets], "notes": notes, "needReason": len(s.need_reason())}

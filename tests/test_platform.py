@@ -435,8 +435,10 @@ class AlertTests(Base):
                 def start(self):
                     target()
             return T()
+        # (no planned break during the stop, whatever time the test runs)
         with mock.patch("hmi.alerts.send_email", side_effect=lambda to, subj, body: sent.append(subj)), \
-                mock.patch("hmi.alerts.threading.Thread", side_effect=fake_thread), mock.patch("hmi.alerts.close_old_connections"):
+                mock.patch("hmi.alerts.threading.Thread", side_effect=fake_thread), mock.patch("hmi.alerts.close_old_connections"), \
+                mock.patch("hmi.engine.planned_windows", return_value=[]):
             alerts.check()
             alerts.check()  # same stop: not again
             self.assertEqual(sent, ["Barbara is down"])

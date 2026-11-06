@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import uuid
 from datetime import timedelta
 
 from django.conf import settings as dj_settings
@@ -20,7 +21,7 @@ from plant.models import MO, PALETTE, CostItem, Machine, PartSpec, Person, Plant
 from plant.util import MIN, Catalog, default_ops, from_ms, iso_date, ms, now, part_spec, shift_at
 
 from . import integrations
-from .models import (PlannedTime, AuditLog, ChangeoverCache, Downtime, Event, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag,
+from .models import (PlannedTime, AuditLog, ChangeoverCache, ChangeoverPiece, Downtime, Event, LineState, MoRun, Notice, PpmReading, QCCheck, RollTag,
                      SavedQuery, ShiftNote, ShiftRun, Ticket, MachineError, ToolingCache)
 
 log = logging.getLogger("plant")
@@ -153,9 +154,10 @@ def machine_shift_at(machine, t):
     return None if w["noShift"] else {"name": w["name"], "s": ms(w["s"]), "e": ms(w["e"])}
 
 
-def open_log(machine, t, start=None, mo=None, offer=None, co=None):
-    """Start the log of the window t is in (nobody on it yet)."""
-    if rules().get("autoRuns", True) is False:
+def open_log(machine, t, start=None, mo=None, offer=None, co=None, force=False):
+    """Start the log of the window t is in (nobody on it yet). `force`: also when Rules turn automatic logs off (a
+    changeover passed over keeps going for the next operator)."""
+    if rules().get("autoRuns", True) is False and not force:
         return None
     w = machine_window(machine, t - timedelta(seconds=30))
     start = start or max(w["s"], t - timedelta(minutes=1))
@@ -172,14 +174,49 @@ def open_unattended(machine, t):
     return open_log(machine, t)
 
 
-def close_log(sh, end, why="window"):
+CO_ENDED = {"window": "shift change", "operator change": "operator change"}
+
+
+def co_steps(co):
+    return (co or {}).get("steps") or [{"text": t} for t in config()["coSteps"]]
+
+
+def co_piece(sh, end, ended, note=""):
+    """Close this log's piece of a changeover under way at `end`: its time is Changeover downtime, and who worked it,
+    in which shift, for how long and which steps they checked off is kept (ChangeoverPiece, and in the changeover so
+    the next operator sees it). The changeover goes on from `end`."""
+    co = sh.co
+    if not (sh.state == "changeover" and co and co.get("start")):
+        return
+    s0 = from_ms(co["start"])
+    if end > s0:
+        add_down(sh, s0, end, "Changeover")
+    steps = co_steps(co)
+    done = set(co.get("done") or [])
+    mine = sorted(int(i) for i, d in (co.get("doneBy") or {}).items()
+                  if int(i) in done and (d or {}).get("t", 0) >= co["start"] and (d or {}).get("t", 0) <= ms(end))
+    mins = max(0, round((end - s0).total_seconds() / 60))
+    co.setdefault("id", uuid.uuid4().hex)
+    if mins or mine or note:
+        old = MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None
+        new = MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None
+        ChangeoverPiece.objects.create(machine=sh.machine, line=sh.line, co_id=co["id"], shift=sh, by=sh.user_name or "", shift_name=sh.shift_name,
+                                       start=s0, end=end, minutes=mins, old_mo=str(old.number) if old else "", new_mo=str(new.number) if new else "",
+                                       steps=[str(steps[i].get("text") or "") for i in mine if i < len(steps)], steps_total=len(steps),
+                                       ended=ended, note=note)
+        co.setdefault("pieces", []).append({"by": sh.user_name or "", "shift": sh.shift_name, "start": co["start"], "end": ms(end), "mins": mins,
+                                            "steps": [i + 1 for i in mine], "ended": ended, "note": note})
+    co["start"] = ms(end)
+    sh.co = co
+
+
+def close_log(sh, end, why="window", note=""):
     """Close a log at `end`: its MO run, its stop, its changeover piece and its stats."""
     if sh.mo and sh.person_id:
         MoRun.objects.create(shift=sh, line=sh.line, mo=sh.mo.number, item=sh.mo.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
                              end_time=end)
     close_stop(sh, end)
-    if sh.state == "changeover" and sh.co and sh.co.get("start"):
-        add_down(sh, from_ms(sh.co["start"]), end, "Changeover")
+    co_piece(sh, end, CO_ENDED.get(why, why), note)
     st = shift_stats(sh)
     sh.active, sh.end, sh.state = False, end, "idle"
     sh.uptime, sh.down_mins = st["uptime"], st["down"]
@@ -207,10 +244,9 @@ def roll_over(sh, t):
     if t <= w["e"]:
         return sh
     end = w["e"]
-    mo, co, who = sh.mo, None, sh.person_id
-    if sh.state == "changeover" and sh.co:
-        co = {**sh.co, "start": ms(end) if sh.co.get("start") else None}
+    mo, who, was_co = sh.mo, sh.person_id, sh.state == "changeover" and bool(sh.co)
     close_log(sh, end)
+    co = dict(sh.co) if was_co else None
     nxt = machine_window(sh.machine, t - timedelta(seconds=30))
     return open_log(sh.machine, t, start=max(end, nxt["s"]), mo=mo, offer=str(who) if who else None, co=co)
 
@@ -552,6 +588,7 @@ def start_shift(p, ctx):
     if cur:
         # take over what was recorded with nobody logged in: since the shift began it is this operator's
         sh = ShiftRun.objects.select_for_update().get(pk=cur.pk)
+        co_piece(sh, ctx.now, "picked up")   # a changeover passed over: the wait with nobody on it is its own piece
         sh.person, sh.user_name = ctx.user, ctx.user.name
         sh.issues, sh.safety = str(p.get("issues") or "").strip(), safety
         sh.pm = p.get("pm") if isinstance(p.get("pm"), list) else []
@@ -584,8 +621,9 @@ def start_shift(p, ctx):
 
 def take_log(sh, person, ctx, why):
     """Make a log this person's (it was nobody's)."""
+    co_piece(sh, ctx.now, "picked up")
     sh.person, sh.user_name, sh.offer, sh.qc_last = person, person.name, "", ctx.now
-    sh.save(update_fields=["person", "user_name", "offer", "qc_last"])
+    sh.save(update_fields=["person", "user_name", "offer", "qc_last", "co"])
     audit(ctx, f"{person.name} {why} on {sh.line} ({sh.shift_name}, since {fmt_t(sh.start)})")
     event("shift_start", {"line": sh.line, "mo": sh.mo.number if sh.mo else None, "user": person.name, "since": ms(sh.start)})
 
@@ -618,10 +656,9 @@ def change_operator(p, ctx):
         take_log(sh, ctx.user, ctx, "took over")
         return {"msg": f"{ctx.user.name} is on {m.name} now"}
     need(sh.person_id != ctx.user.pk, f"{ctx.user.name} is already the operator on {m.name}.")
-    before, mo, co = sh.user_name, sh.mo, None
-    if sh.state == "changeover" and sh.co:
-        co = {**sh.co, "start": ms(ctx.now) if sh.co.get("start") else None}
+    before, mo, was_co = sh.user_name, sh.mo, sh.state == "changeover" and bool(sh.co)
     close_log(sh, ctx.now, why="operator change")
+    co = dict(sh.co) if was_co else None
     new = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=sh.shift_name, start=ctx.now,
                                   mo=mo if mo and mo.status == "OPEN" else None, mo_start=ctx.now, state="changeover" if co else "running",
                                   co=co, qc_last=ctx.now, safety=sh.safety, pm=sh.pm)
@@ -630,15 +667,45 @@ def change_operator(p, ctx):
     return {"msg": f"{ctx.user.name} took over {m.name} from {before}"}
 
 
+def pass_over(sh, ctx, ended, note):
+    """The operator's part of a changeover ends; the changeover goes on in a log with nobody on it yet, for the next
+    operator or shift, with their note."""
+    note = str(note or "").strip()[:500]
+    m = sh.machine
+    close_log(sh, ctx.now, why=ended, note=note)
+    co = dict(sh.co)
+    co["handoff"] = {"by": sh.user_name, "shift": sh.shift_name, "t": ms(ctx.now), "note": note}
+    sh.co = None
+    sh.save(update_fields=["co"])
+    nxt = open_log(m, ctx.now, start=ctx.now, co=co, force=True)
+    audit(ctx, f"{sh.user_name} passed over the changeover on {sh.line}" + (f": {note}" if note else ""))
+    event("co_pass", {"line": sh.line, "by": sh.user_name, "note": note})
+    return nxt
+
+
+@cmd("coPass")
+def co_pass(p, ctx):
+    """Pass over: at the end of a shift (or any time), hand the changeover under way to the next operator or shift."""
+    sh = shift_of(p, ctx)
+    need(not unattended(sh), "Nobody is logged in on this machine. Start your shift to work on the changeover.")
+    need(sh.state == "changeover" and sh.co and sh.co.get("start"), "There's no changeover under way to pass over.")
+    pass_over(sh, ctx, "passed over", p.get("note"))
+    return {"msg": f"Changeover on {sh.line} passed over. The next operator picks it up where you left off."}
+
+
 @cmd("endShift")
 def end_shift(p, ctx):
     sh = shift_of(p, ctx)
+    if sh.state == "changeover" and sh.co and sh.co.get("start") and sh.person_id:
+        # ending a shift in the middle of a changeover passes it over (it is never lost)
+        sh.end_issues = str(p.get("issues") or "").strip()
+        sh.save(update_fields=["end_issues"])
+        pass_over(sh, ctx, "shift ended", sh.end_issues)
+        return {"msg": f"Shift ended on {sh.line}. The changeover was passed over to the next operator."}
     if sh.mo:
         MoRun.objects.create(shift=sh, line=sh.line, mo=sh.mo.number, item=sh.mo.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
                              end_time=ctx.now)
     close_stop(sh, ctx.now)
-    if sh.state == "changeover" and sh.co and sh.co.get("start"):
-        add_down(sh, from_ms(sh.co["start"]), ctx.now, "Changeover")
     sh.end_issues = str(p.get("issues") or "").strip()
     st = shift_stats(sh)
     sh.active, sh.end, sh.mo, sh.state, sh.co = False, ctx.now, None, "idle", None
@@ -686,7 +753,7 @@ def co_end(p, ctx):
         event("mo_end", {"mo": mo.number, "qty": q, "scrap": sc, "closed": mo.status == "CLOSE"})
     close_stop(sh, ctx.now)
     sh.mo, sh.state, sh.override = None, "changeover", None
-    co.update({"start": ms(ctx.now), "step": 2})
+    co.update({"start": ms(ctx.now), "step": 2, "first": ms(ctx.now), "id": uuid.uuid4().hex, "doneBy": {}, "pieces": []})
     sh.co = co
     sh.save()
     if mo and mo.status == "CLOSE":
@@ -788,11 +855,14 @@ def co_step(p, ctx):
     need(co and co.get("step") == 3, "No changeover in progress.")
     i = int(p.get("i", -1))
     done = set(co.get("done") or [])
+    by = dict(co.get("doneBy") or {})
     if p.get("checked"):
         done.add(i)
+        by[str(i)] = {"by": sh.user_name, "t": ms(ctx.now)}
     else:
         done.discard(i)
-    co["done"] = sorted(done)
+        by.pop(str(i), None)
+    co["done"], co["doneBy"] = sorted(done), by
     sh.co = co
     sh.save(update_fields=["co"])
 
@@ -810,7 +880,7 @@ def co_finish(p, ctx):
     if not m.line_id:
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
-    add_down(sh, from_ms(co["start"]), ctx.now, "Changeover")
+    co_piece(sh, ctx.now, "finished")
     sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, 0, "running", None
     sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()

@@ -149,3 +149,75 @@ class LogWindowTests(TestCase):
         nxt = engine.roll_over(sh, self.at(14, 31))
         self.assertNotEqual(nxt.pk, sh.pk)
         self.assertEqual((nxt.shift_name, nxt.offer), ("2nd shift", str(sh.person_id)))
+
+
+class ChangeoverPassOverTests(TestCase):
+    """Pass over: a changeover handed from one operator and shift to the next, each piece kept (who, shift, time,
+    steps), the wait with nobody logged in included."""
+    setUp = UnattendedTests.setUp
+    tick = UnattendedTests.tick
+    def test_pass_over_to_the_next_shift(self):
+        from django.test import Client
+
+        from hmi.models import ChangeoverPiece
+        Shift.objects.filter(name="All day").update(start="06:00", end="14:00")
+        late = Shift.objects.create(name="Late", start="14:00", end="22:00", days=[0, 1, 2, 3, 4, 5, 6])
+        self.m.shifts.add(late)
+        day = local(self.t).replace(hour=13, minute=20)
+        line = {"line": self.m.name}
+        lee, other = self.op, Person.objects.get(name="Plant Admin")
+        other.trained.add(self.m)
+        mos = list(MO.objects.filter(status="OPEN", line__isnull=True)[:2]) or list(MO.objects.filter(status="OPEN")[:2])
+        safety = [True] * len(engine.config()["safety"])
+
+        def run(name, p, who, mins):
+            r = engine.execute(name, {**line, **p}, engine.Ctx(user=who, t=day + timedelta(minutes=mins)))
+            self.assertTrue(r["ok"], (name, r))
+            return r
+
+        self.tick(day)
+        run("startShift", {"mo": mos[0].number, "safety": safety}, lee, 1)
+        run("coOpen", {}, lee, 5)
+        run("coEnd", {"qty": 10, "scrap": 0}, lee, 10)                     # 13:30 the changeover starts
+        run("coPick", {"mo": mos[1].number}, lee, 12)
+        run("coStep", {"i": 0, "checked": True}, lee, 15)
+        run("coStep", {"i": 1, "checked": True}, lee, 20)
+        n = len(engine.co_steps(ShiftRun.objects.get(machine=self.m, active=True).co))
+        # near the end of the shift the changeover dialog offers Pass over
+        c = Client(HTTP_HX_REQUEST="true")
+        c.get(f"/station/{self.m.name}/")
+        run("coPass", {"note": "Steps 1-2 done, wheels on the cart"}, lee, 35)   # 13:55
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertTrue(engine.unattended(sh))
+        self.assertEqual((sh.state, sh.co["handoff"]["by"], sh.co["handoff"]["note"]), ("changeover", "M. Lee", "Steps 1-2 done, wheels on the cart"))
+        self.assertContains(c.get("/kiosk/v/controls"), "Changeover waiting to be picked up")
+        self.tick(day + timedelta(minutes=41))                              # 14:01: the Late shift's log carries it on
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((sh.shift_name, sh.state, len(sh.co["done"])), ("Late", "changeover", 2))
+        run("startShift", {"safety": safety}, other, 50)                    # 14:10 the next operator picks it up
+        for i in range(2, n):
+            run("coStep", {"i": i, "checked": True}, other, 55)
+        run("coFinish", {}, other, 80)                                       # 14:40
+        ps = list(ChangeoverPiece.objects.order_by("start"))
+        self.assertEqual([(p.by, p.shift_name, p.minutes, len(p.steps), p.ended) for p in ps], [
+            ("M. Lee", "All day", 25, 2, "passed over"),
+            ("", "All day", 5, 0, "shift change"),
+            ("", "Late", 10, 0, "picked up"),
+            ("Plant Admin", "Late", 30, n - 2, "finished"),
+        ])
+        self.assertEqual(len({p.co_id for p in ps}), 1)
+        self.assertEqual(ps[0].note, "Steps 1-2 done, wheels on the cart")
+        self.assertEqual(ShiftRun.objects.get(machine=self.m, active=True).mo, mos[1])
+
+    def test_ending_the_shift_mid_changeover_passes_it_over(self):
+        day = local(self.t).replace(hour=10, minute=0)
+        mo = MO.objects.filter(status="OPEN").first()
+        safety = [True] * len(engine.config()["safety"])
+        ctx = lambda m: engine.Ctx(user=self.op, t=day + timedelta(minutes=m))  # noqa: E731
+        self.tick(day)
+        for name, p, m in (("startShift", {"mo": mo.number, "safety": safety}, 1), ("coOpen", {}, 2), ("coEnd", {"qty": 5, "scrap": 0}, 3)):
+            self.assertTrue(engine.execute(name, {"line": self.m.name, **p}, ctx(m))["ok"])
+        r = engine.execute("endShift", {"line": self.m.name, "issues": "Old die off"}, ctx(20))
+        self.assertTrue(r["ok"], r)
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        self.assertEqual((engine.unattended(sh), sh.state, sh.co["handoff"]["note"]), (True, "changeover", "Old die off"))

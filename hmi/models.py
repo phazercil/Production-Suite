@@ -440,3 +440,27 @@ class PlannedTime(models.Model):
     class Meta:
         db_table = "hmi_planned"
         ordering = ["start"]
+
+
+class ChangeoverPiece(models.Model):
+    """One person's (or one shift's) part of a changeover: a changeover passed over at the end of a shift, or handed
+    to another operator, is several pieces with the same co_id. Time with nobody logged in is a piece with no one."""
+    machine = models.ForeignKey("plant.Machine", null=True, blank=True, on_delete=models.SET_NULL)
+    line = models.CharField(max_length=60, db_index=True)
+    co_id = models.CharField(max_length=32, db_index=True)
+    shift = models.ForeignKey(ShiftRun, null=True, blank=True, on_delete=models.SET_NULL)
+    by = models.CharField(max_length=120, blank=True, help_text="Who worked this piece; blank = nobody logged in")
+    shift_name = models.CharField(max_length=60, blank=True)
+    start = models.DateTimeField(db_index=True)
+    end = models.DateTimeField()
+    minutes = models.IntegerField(default=0)
+    old_mo = models.CharField(max_length=40, blank=True)
+    new_mo = models.CharField(max_length=40, blank=True)
+    steps = models.JSONField(default=list, blank=True, help_text="The steps checked off in this piece (their text)")
+    steps_total = models.IntegerField(default=0)
+    ended = models.CharField(max_length=40, blank=True, help_text="finished / passed over / shift change / operator change / picked up")
+    note = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "hmi_changeover_piece"
+        ordering = ["start"]

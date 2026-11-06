@@ -1,0 +1,9 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Pass over the changeover{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/coPass"{% endblock %}
+{% block body %}
+  <p>Hand this changeover{% if newMo %} to MO {{ newMo.number }} · {{ newMo.part }}{% endif %} to {{ nextShift }}. Your time and the steps you checked off ({{ done }} of {{ n }} done so far) stay yours; whoever starts their shift on {{ sh.line }} next picks it up where you left off.</p>
+  <label class="f">Where you left off<textarea name="note" rows="3" autofocus placeholder="e.g. Steps 1–6 done. New score wheels are on the cart; guide rails not set yet."></textarea></label>
+  <p class="note">Your log on {{ sh.line }} ends now. The changeover timer keeps running until someone picks it up.</p>
+{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" hx-get="/kiosk/m/changeover?refresh=1" hx-target="#modal" hx-swap="innerHTML">Back</button><button class="btn warn" type="submit">Pass over</button>{% endblock %}
