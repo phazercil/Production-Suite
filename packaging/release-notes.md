@@ -19,6 +19,8 @@
   - With a counter, parts count only when the counter goes up.
   - Speed, counts and downtime are recorded during a machine's shift even with nobody logged in; the operator who starts their shift takes it over.
 - **Kiosk:** a pop-up when one of the operator's machines stops.
+- **Admin › Machine schedule** (was Shifts & breaks) owns the shifts: times, days, lunch and authorized downtimes (Add start-up, Add shut-down). The Labor Budget keeps lines and crews but no longer changes shift times.
+- **Downtime fix:** another shift's lunch, authorized downtime and hours with no shift scheduled are no longer logged as downtime when a run stays open across shifts or overnight.
 - **Admin › Backup › Back up the database now**, with downloads.
 
 ## What's new in 1.8.3

@@ -20,7 +20,7 @@ from suite import thin
 from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
-TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Shifts & breaks"),
+TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("qc", "QC checks"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
@@ -100,7 +100,7 @@ def tab_data(s, tab, request):
             ln = hm(sh["end"]) - hm(sh["start"])
             ln = ln if ln > 0 else ln + 1440
             paid = ln - sum(int(b.get("mins") or 0) for b in sh.get("breaks") or [])
-            out.append({"i": i, "sh": sh, "len": ln, "paid": paid})
+            out.append({"i": i, "sh": sh, "len": ln, "paid": paid, "lunch": any("lunch" in (b["name"] or "").lower() for b in sh["breaks"])})
         return {"shifts": out}
     if tab == "parts":
         from plant.models import PartSpec

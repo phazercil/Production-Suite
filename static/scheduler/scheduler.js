@@ -477,8 +477,8 @@ function renderLines(){
   <div class="shift-grid">${shifts}</div>`;
   if(S.labor&&S.labor.master){
     // the Labor Budget is the master of lines and shifts: they're shown here, changed there
-    $("#main").querySelector(".page-head").insertAdjacentHTML("afterend",`<div class="card" style="border-left:4px solid var(--accent);margin-bottom:14px"><b>Lines and shifts come from the Labor Budget.</b> Add, rename or remove lines, change which shifts a line runs, whether it runs through lunch, and shift times, days and lunch in the <a href="/labor/">Labor Budget</a>; this page follows it when it's saved. Speeds, scrap, downtime and changeover times are still set here.</div>`);
-    $$('#main [data-f="name"],#main [data-f="stage"],#main [data-f="runLunch"],#main [data-shift],#main [data-del],#main #addm,#main .shift input,#main .shift button,#main #adds').forEach(el=>{el.disabled=true;el.title="Set in the Labor Budget"});
+    $("#main").querySelector(".page-head").insertAdjacentHTML("afterend",`<div class="card" style="border-left:4px solid var(--accent);margin-bottom:14px"><b>Lines come from the Labor Budget.</b> Add, rename or remove lines, change which shifts a line runs and whether it runs through lunch in the <a href="/labor/">Labor Budget</a>; this page follows it when it's saved. Speeds, scrap, downtime and changeover times, and the shifts below (the machine schedule, also in the kiosk's Admin › Machine schedule), are set here.</div>`);
+    $$('#main [data-f="name"],#main [data-f="stage"],#main [data-f="runLunch"],#main [data-shift],#main [data-del],#main #addm').forEach(el=>{el.disabled=true;el.title="Set in the Labor Budget"});
   }
   const tb=$("tbody");
   tb.oninput=tb.onchange=e=>{const c=S.cfg;const tr=e.target.closest("tr");if(!tr)return;const m=c.machines[+tr.dataset.i];if(!m)return;

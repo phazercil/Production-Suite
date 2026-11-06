@@ -84,7 +84,7 @@ class LaborSyncTests(TestCase):
         self.assertIn("J. Ortiz", data["suite"]["people"])
         self.assertEqual(data["suite"]["notOnTeam"], ["Somebody Else"])
 
-    def test_the_labor_budget_is_the_master_of_lines_and_shifts(self):
+    def test_the_labor_budget_is_the_master_of_lines_not_shift_times(self):
         c = lead()
         data, _ = self.merged()
         bar_id = data["lines"][0]["machineId"]
@@ -92,8 +92,10 @@ class LaborSyncTests(TestCase):
         data["lines"][0]["name"] = "Barbara II"                                     # renamed here: the machine follows
         sal = next(ln for ln in data["lines"] if ln["name"] == "Salvatore")
         sal["activeShifts"]["2"] = False                                            # which shifts it runs
+        s1 = Shift.objects.get(name="1st shift")
+        before = (s1.start, s1.end, list(s1.breaks.values_list("label", "start", "end")))
         a = next(x for x in data["schedules"] if x["id"] == "S1A")
-        a.update(startTime="07:00", endTime="15:30", lunchMins=45)                  # shift times and lunch
+        a.update(startTime="07:00", endTime="15:30", lunchMins=45)                  # shift times and lunch: the machine schedule's
         data["lines"].append({"id": "LNEW", "name": "Hilda", "stage": "Stage 1", "activeShifts": {"1": True, "2": False}})
         r = post(c, "/api/labor/save", {"version": 0, "data": data})
         self.assertTrue(r["ok"], r)
@@ -102,11 +104,8 @@ class LaborSyncTests(TestCase):
         stored = LaborPlan.objects.get(pk=1).data
         self.assertGreater(next(ln for ln in stored["lines"] if ln["name"] == "Barbara II")["hourlyRate"], 1)
         self.assertEqual([s.name for s in Machine.objects.get(name="Salvatore").shifts.all()], ["1st shift"])
-        s1 = Shift.objects.get(name="1st shift")
-        self.assertEqual((s1.start, s1.end), ("07:00", "15:30"))
-        lunch = s1.breaks.get(label__icontains="lunch")
-        from plant.util import hm
-        self.assertEqual((hm(lunch.end) - hm(lunch.start)) % 1440, 45)
+        s1.refresh_from_db()
+        self.assertEqual((s1.start, s1.end, list(s1.breaks.values_list("label", "start", "end"))), before)
         hilda = Machine.objects.get(name="Hilda")                                   # added here: a new machine
         self.assertEqual((hilda.stage, [s.name for s in hilda.shifts.all()]), ("s1", ["1st shift"]))
         self.assertEqual(next(ln for ln in stored["lines"] if ln["name"] == "Hilda")["machineId"], hilda.id)
@@ -175,3 +174,58 @@ class LaborSyncTests(TestCase):
         self.assertEqual(len(Machine.objects.get(name="Salvatore").shifts.all()), 2)  # only budget A changes the machines
         self.assertEqual(len(c.get("/api/labor/history?budget=B").json()["items"]), 1)
         self.assertEqual(c.get("/api/labor/history?budget=A").json()["items"], [])
+
+
+class MachineScheduleTests(TestCase):
+    """Admin › Machine schedule owns the shifts; downtime leaves out everything planned in it."""
+
+    def setUp(self):
+        seed_demo(reset=True)
+        self.c = Client(HTTP_HX_REQUEST="true")
+        self.c.post("/kiosk/do/login", {"pin": "9999"})
+
+    def test_edit_with_the_labor_budget_on_and_add_authorized_downtime(self):
+        LaborPlan.objects.create(pk=1, data=json.loads(json.dumps(OLD_PLAN)), version=1)
+        from labor.sync import master_on
+        self.assertTrue(master_on())
+        i = list(Shift.objects.values_list("name", flat=True)).index("2nd shift")
+        self.c.post("/kiosk/do/run", {"c": "shiftSet", "s:n": i, "f": "end", "v": "00:00"})
+        self.c.post("/kiosk/do/run", {"c": "breakAdd", "s:n": i, "kind": "shutdown"})
+        s2 = Shift.objects.get(name="2nd shift")
+        self.assertEqual(s2.end, "00:00")
+        self.assertTrue(s2.breaks.filter(label="Shut-down", start="23:45", end="00:00").exists())
+        r = self.c.get("/kiosk/v/admin?tab=shifts")
+        self.assertContains(r, "Machine schedule")
+        self.assertContains(r, "Add shut-down")
+
+    def test_lunch_of_another_shift_and_hours_with_no_shift_are_not_downtime(self):
+        from datetime import datetime, timedelta
+
+        from django.utils import timezone
+
+        from hmi import engine
+        from hmi.models import ShiftRun
+        from plant.models import ShiftBreak
+        s1, s2 = Shift.objects.get(name="1st shift"), Shift.objects.get(name="2nd shift")
+        Shift.objects.filter(pk=s1.pk).update(start="07:00", end="16:00", days=[0, 1, 2, 3, 4, 5, 6])
+        Shift.objects.filter(pk=s2.pk).update(start="16:00", end="00:00", days=[0, 1, 2, 3, 4, 5, 6])
+        ShiftBreak.objects.filter(shift=s2).delete()
+        ShiftBreak.objects.create(shift=s2, label="Lunch", start="20:00", end="20:30")
+        ShiftBreak.objects.create(shift=s2, label="Shut-down", start="23:45", end="00:00")
+        bar = Machine.objects.get(name="Barbara")
+        Machine.objects.filter(pk=bar.pk).update(run_lunch=False)
+        bar.refresh_from_db()
+        bar.shifts.set([s1, s2])
+        day = timezone.localdate() - timedelta(days=2)
+        at = lambda h, m=0: timezone.make_aware(datetime(day.year, day.month, day.day)) + timedelta(hours=h, minutes=m)  # noqa: E731
+        ShiftRun.objects.filter(machine=bar).update(active=False)
+        sh = ShiftRun.objects.create(machine=bar, line="Barbara", user_name="J. Ortiz", shift_name="1st shift", start=at(15), state="running")
+        win = engine.planned_windows(sh, kinds=True)
+        kinds = {k for _, _, k in win}
+        self.assertTrue({"Lunch", "Shut-down", "No shift scheduled"} <= kinds, kinds)
+        # the run left open from 3 pm to 7:47 am: only the stops in shift time outside lunch and shut-down count
+        left = engine.minus_planned(at(20), at(20, 30), engine.planned_windows(sh))
+        self.assertEqual(left, [])                                                   # 2nd shift's lunch
+        left = engine.minus_planned(at(23, 46), at(31, 47), engine.planned_windows(sh))
+        grace = engine.rules().get("startGrace", 0) or 0
+        self.assertEqual(left, [(at(31, grace), at(31, 47))])                        # midnight–7 am: no shift; then start-up; the rest counts
