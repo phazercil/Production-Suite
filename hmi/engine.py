@@ -167,6 +167,11 @@ def spec_for(item):
     return part_spec(item)
 
 
+def has_counter(machine, sample=None):
+    """True when the machine reports a parts counter: its feed has a count field, or the reading carries a count."""
+    return bool(machine.feed_count_field) or "count" in (sample or {})
+
+
 def pleats_for(sh):
     """Speed-minutes one part takes on this run's machine (pleats per part on a pleater; see plant/units.py), so
     speed readings add up to parts when the machine has no counter. 0 when it can't be told."""
@@ -321,7 +326,12 @@ def tick(machine, sample, t):
                                         recipe=recipe)
     units = 0
     cnt = to_number(sample.get("count"))
-    if cnt is not None and cnt >= 0:
+    # A machine with a counter makes parts only when its counter goes up: speed on the screen isn't parts made
+    # (it can run without cutting). Speed only stands in for parts on a machine with no counter at all.
+    counted = has_counter(machine, sample)
+    if counted and (cnt is None or cnt < 0):
+        pass   # no counter value this minute: nothing counted, never a guess from speed
+    elif cnt is not None and cnt >= 0:
         c = int(cnt)
         if not co and sh.last_count is not None and c >= sh.last_count:
             units = c - sh.last_count

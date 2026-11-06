@@ -358,8 +358,14 @@ class Screen:
             except (TypeError, ValueError):
                 ov = None
             per = units.per_part(self.machine or sh.machine, p, ov)   # speed-minutes per part (plant/units.py)
-            out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0,
-                       rate=f"{last_ppm / per:.1f}" if per else "—", eta=self.eta())
+            from .engine import has_counter
+            if self.machine and has_counter(self.machine):
+                # a machine with a counter: parts per minute are what the counter added (last 5 minutes), not the speed
+                last = list(PpmReading.objects.filter(shift=sh).order_by("-t").values_list("units", flat=True)[:5])
+                rate = f"{sum(u or 0 for u in last) / len(last):.1f}" if last else "—"
+            else:
+                rate = f"{last_ppm / per:.1f}" if per else "—"
+            out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0, rate=rate, eta=self.eta())
         from . import runinfo
         use_db = bool(self.settings.get("useDb"))
         code = self.machine.code if self.machine else ""
