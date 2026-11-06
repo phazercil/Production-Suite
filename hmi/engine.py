@@ -187,12 +187,23 @@ def close_log(sh, end, why="window"):
     event("shift_end", {"line": sh.line, "count": sh.count, "uptime": st["uptime"], "down": st["down"], "auto": why})
 
 
+def log_window(sh, t):
+    """The window a log belongs to: the one it started in, or, when the log is named for a later shift (an operator
+    who clocked in a few minutes early for 2nd shift, say), that shift once it has begun (within 16 hours)."""
+    w = machine_window(sh.machine, sh.start + timedelta(seconds=30))
+    if sh.shift_name and w["name"] != sh.shift_name:
+        cur = machine_window(sh.machine, t - timedelta(seconds=30))
+        if cur["name"] == sh.shift_name and sh.start <= cur["s"] <= sh.start + timedelta(hours=16):
+            return cur
+    return w
+
+
 def roll_over(sh, t):
     """When the window of a log has ended, close it and start the next window's log (same MO, the changeover going
     on carried over, and the operator asked whether they are working into it). Returns the log for t."""
     if rules().get("autoRuns", True) is False or not sh.machine_id:
         return sh
-    w = machine_window(sh.machine, sh.start + timedelta(seconds=30))
+    w = log_window(sh, t)
     if t <= w["e"]:
         return sh
     end = w["e"]
@@ -206,7 +217,7 @@ def roll_over(sh, t):
 
 def close_unattended_if_over(sh, t):
     """(Kept for callers: True when the log's window is over; the log is closed.)"""
-    w = machine_window(sh.machine, sh.start + timedelta(seconds=30)) if sh.machine_id else None
+    w = log_window(sh, t) if sh.machine_id else None
     if w and t <= w["e"]:
         return False
     close_log(sh, w["e"] if w else t)

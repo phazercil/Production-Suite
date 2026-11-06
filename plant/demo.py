@@ -118,7 +118,7 @@ def seed_demo(reset=True):
 
     # a shift on Barbara that started 150 minutes ago, replayed minute by minute
     jo = people["jortiz"]
-    sh = ShiftRun.objects.create(machine=bar, line=bar.name, person=jo, user_name=jo.name, shift_name=(shift_at(ms(start)) or {}).get("name", ""),
+    sh = ShiftRun.objects.create(machine=bar, line=bar.name, person=jo, user_name=jo.name, shift_name=_demo_window_name(bar, t),
                                  start=start, mo=running, mo_start=start, state="running", safety=[True] * 5, pm=[True] * 5, qc_last=start)
     for m in (bar, sal):
         LineState.objects.create(machine=m, next_tick=t + timedelta(minutes=1))
@@ -155,6 +155,12 @@ def seed_demo(reset=True):
     ShiftRun.objects.filter(pk=sh.pk).update(issues="Side band guide on the left was loose at start-up; tightened it.")
     _demo_history(bar, sal, people, start)
     PlantSettings.bump()
+
+
+def _demo_window_name(bar, t):
+    """The demo run is named for the shift going on now, so it stays one log even when it began in the shift before."""
+    from hmi.engine import machine_window
+    return machine_window(bar, t)["name"]
 
 
 def _demo_history(bar, sal, people, cur_start):

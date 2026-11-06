@@ -121,3 +121,31 @@ class UnattendedTests(TestCase):
         self.assertFalse(late.active)
         now_run = ShiftRun.objects.get(machine=self.m, active=True)
         self.assertEqual((now_run.person, now_run.mo, now_run.shift_name), (other, mo, "Late"))
+
+
+class LogWindowTests(TestCase):
+    """A log belongs to the shift named on it: clocking in a few minutes early for 2nd shift is not split at 1st
+    shift's end, and the demo run (named for the shift going on now) stays one log at any time of day."""
+    def setUp(self):
+        seed_demo(reset=True)
+        self.m = Machine.objects.get(name="Salvatore")
+        ShiftRun.objects.filter(machine=self.m).delete()
+        self.m.shifts.set(Shift.objects.filter(name__in=["1st shift", "2nd shift"]))
+        from datetime import datetime
+        self.day = timezone.make_aware(datetime(2026, 11, 4))   # a Wednesday
+
+    def at(self, h, m=0):
+        return self.day + timedelta(hours=h, minutes=m)
+
+    def test_early_clock_in_for_the_next_shift_is_not_split(self):
+        sh = ShiftRun.objects.create(machine=self.m, line=self.m.name, person=Person.objects.get(name="M. Lee"),
+                                     user_name="M. Lee", shift_name="2nd shift", start=self.at(14, 25), state="running")
+        self.assertEqual(engine.roll_over(sh, self.at(14, 31)).pk, sh.pk)
+        self.assertEqual(engine.log_window(sh, self.at(14, 31))["e"], self.at(23))
+
+    def test_a_log_named_for_its_own_shift_still_splits(self):
+        sh = ShiftRun.objects.create(machine=self.m, line=self.m.name, person=Person.objects.get(name="M. Lee"),
+                                     user_name="M. Lee", shift_name="1st shift", start=self.at(10), state="running")
+        nxt = engine.roll_over(sh, self.at(14, 31))
+        self.assertNotEqual(nxt.pk, sh.pk)
+        self.assertEqual((nxt.shift_name, nxt.offer), ("2nd shift", str(sh.person_id)))
