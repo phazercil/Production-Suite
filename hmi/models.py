@@ -291,6 +291,24 @@ class SavedQuery(models.Model):
         db_table = "hmi_saved_queries"
 
 
+class SourceCard(models.Model):
+    """A source card of the connector builder (Admin › Connector builder): one table, the columns picked from it,
+    and the rows it keeps (filters). Several cards can read the same table, e.g. one table that logs every machine,
+    with a card per machine. The data needs wired to a card take its table and its filters."""
+    title = models.CharField(max_length=80)
+    db = models.CharField(max_length=12)
+    table = models.CharField(max_length=200)
+    columns = models.JSONField(default=list, blank=True)   # the columns shown on the card; empty = all of them
+    filters = models.JSONField(default=list, blank=True)   # [{"col": .., "val": ..}]: only rows where col = val (all of them)
+    sort = models.IntegerField(default=0)
+    updated_by = models.CharField(max_length=120, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "hmi_source_cards"
+        ordering = ["sort", "id"]
+
+
 class ToolingCache(models.Model):
     """Last tooling the asset database returned for a part on a machine (screws, helix, media, side bands)."""
     part = models.CharField(max_length=40)

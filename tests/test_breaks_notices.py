@@ -58,7 +58,11 @@ class ExtraBreakTests(TestCase):
         ExtraBreak.objects.create(day=a.date(), start=a.strftime("%H:%M"), minutes=15, label="Heat break")
         engine._planned_cache.clear()
         kinds = [k for _, _, k in engine.planned_windows(sh, kinds=True)]
-        if a.date() == local(sh.start).date():
+        from plant.models import Shift
+        from plant.util import hm
+        shift = Shift.objects.filter(name=sh.shift_name).first()
+        inside = shift and ((a.hour * 60 + a.minute - hm(shift.start)) % 1440) + 15 <= (hm(shift.end) - hm(shift.start)) % 1440
+        if a.date() == local(sh.start).date() and inside:   # the break falls within the run's shift at this time of day
             self.assertIn("Heat break", kinds)
             before = Downtime.objects.filter(shift=sh).count()
             engine.add_down(sh, a + timedelta(minutes=2), a + timedelta(minutes=12))      # all inside the break
