@@ -1,3 +1,4 @@
+{% include "hmi/k/admin/_dbbackup.html" with DB=A.DB msg=None %}
 <div class="panel"><h2 class="h2">Copy settings to another station</h2><p class="sub" style="margin-top:4px">Machines, shifts, reasons, checklists, parts, rules, feed rates and people (without PINs).</p>
   <textarea id="expJson" readonly style="min-height:160px;font-family:var(--f-mono);font-size:12px;margin-top:10px">{{ A.export }}</textarea><div class="row" style="margin-top:8px"><button class="btn" data-copy="#expJson">Copy settings</button></div></div>
 <div class="panel"><h2 class="h2">Load settings</h2>

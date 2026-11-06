@@ -2375,7 +2375,7 @@ def _schema_of(db):
         raise Need(str(e))
 
 
-def _apply_group(g, c, mp, ctx):
+def _apply_group(g, c, mp, ctx, slot_where=None):
     """Save one data need as reading source card c (its table and filters) with these column links."""
     from . import connector
     db, table = c.db, c.table
@@ -2392,17 +2392,29 @@ def _apply_group(g, c, mp, ctx):
     filters = [{"col": f["col"], "val": str(f.get("val", ""))} for f in c.filters or []]
     if g["kind"] == "machine":
         m = Machine.objects.select_for_update().get(pk=int(g["key"][2:]))
-        # one table can log every machine: each machine needs a card that keeps only its own rows
-        mine = connector.norm_filters(filters)
+        sw = connector.clean_slot_where(g["state"].get("where") if slot_where is None else slot_where)
+        sw = {k: v for k, v in sw.items() if mp.get(k)}
+        bad = sorted({f["col"] for v in sw.values() for f in v if f["col"] not in sch[table]})
+        need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{x}"' for x in bad) + ".")
+        empty = [slots[k]["label"].split(" (")[0] for k, v in sw.items() if any(not f["val"] for f in v)]
+        need(not empty, "Type the value to keep for: " + ", ".join(empty) + ".")
+
+        def rows_of(f_card, f_slots):   # what tells a machine's own rows apart: its card's filter and its speed's own filter
+            return connector.norm_filters(list(f_card or []) + list((f_slots or {}).get("ppm") or []))
+        # one table can log every machine: each machine reads only its own rows
+        mine = rows_of(filters, sw)
         others = [o for o in Machine.objects.filter(active=True, feed_type="db").exclude(pk=m.pk)
                   if (o.feed_src or {}).get("db", "machines") == db and (o.feed_src or {}).get("table") == table]
-        need(not others or filters, f"{', '.join(o.name for o in others)} also read{'s' if len(others) == 1 else ''} {table}. "
-                                    f"Give {m.name} a card with a filter for its rows (e.g. machine = {m.name}).")
-        same = [o.name for o in others if connector.norm_filters((o.feed_src or {}).get("where") or (
-            [{"col": o.feed_src["keyCol"], "val": o.feed_src.get("keyVal", "")}] if (o.feed_src or {}).get("keyCol") else [])) == mine]
+        need(not others or mine, f"{', '.join(o.name for o in others)} also read{'s' if len(others) == 1 else ''} {table}. "
+                                 f"Give {m.name} a card with a filter for its rows (e.g. machine = {m.name}), or a filter on its speed "
+                                 f"(e.g. tag = {m.name}_Speed).")
+        same = [o.name for o in others if rows_of((o.feed_src or {}).get("where") or (
+            [{"col": o.feed_src["keyCol"], "val": o.feed_src.get("keyVal", "")}] if (o.feed_src or {}).get("keyCol") else []),
+            (o.feed_src or {}).get("slotWhere")) == mine]
         need(not same, f"{', '.join(same)} already read{'s' if len(same) == 1 else ''} exactly these rows of {table}. "
-                       f"Give {m.name} its own card with a filter for its rows (e.g. machine = {m.name}).")
+                       f"Give {m.name} its own card or speed filter for its rows (e.g. machine = {m.name}).")
         src = dict(m.feed_src or {}) if m.feed_type == "db" else {}
+        src["slotWhere"] = sw
         src.update(db=db, table=table, orderCol=mp["orderCol"], source=c.pk, where=filters,
                    keyCol=filters[0]["col"] if len(filters) == 1 else "", keyVal=filters[0]["val"] if len(filters) == 1 else "")
         src.setdefault("maxAge", 3)
@@ -2441,6 +2453,33 @@ def _apply_group(g, c, mp, ctx):
     return f"{g['title']} saved: {c.title}"
 
 
+def _disconnect(g, ctx):
+    """Take a data need off the database: a machine stops reading its table (no machine data until it gets another
+    source), S2K's open MOs and changeover queries go back to having no query."""
+    if g["kind"] == "machine":
+        m = Machine.objects.select_for_update().get(pk=int(g["key"][2:]))
+        if m.feed_type != "db":   # it reads its data some other way (URL, push, InfluxDB): leave that alone
+            return f"{m.name} isn't wired to a database table; nothing to disconnect."
+        m.feed_type, m.feed_src = "none", {}
+        if (m.uptime_src or {}).get("type") == "feed":
+            m.uptime_src = {}
+        if (m.error_src or {}).get("type") == "feed":
+            m.error_src = {}
+        m.save()
+        LineState.objects.filter(machine=m).update(feed={})
+        audit(ctx, f"Connector builder: {m.name} disconnected from its table")
+        return f"{m.name} disconnected: it has no machine data until it's wired again."
+    name = "s2k_mos" if g["kind"] == "s2k" else g["key"][2:]
+    SavedQuery.objects.filter(name=name).delete()
+    if g["kind"] == "s2k":
+        st = settings_obj()
+        if st.settings.get("s2kSource") == "db":
+            st.settings["s2kSource"] = ""
+            st.save(update_fields=["settings"])
+    audit(ctx, f"Connector builder: {g['title']} disconnected")
+    return f"{g['title']} disconnected."
+
+
 @cmd("connectorSave", "connections.edit")
 def connector_save(p, ctx):
     """Save one data need from the connector builder: a machine's readings, S2K's open MOs or a changeover query,
@@ -2450,9 +2489,13 @@ def connector_save(p, ctx):
     gs = {g["key"]: g for g in connector.groups()}
     g = gs.get(str(p.get("group") or ""))
     need(g, "Unknown data need.")
+    mp = p.get("map") if isinstance(p.get("map"), dict) else {}
+    if not any(str(v or "").strip() for v in mp.values()):   # every wire taken off: disconnect this need
+        return {"msg": _disconnect(g, ctx)}
     c = SourceCard.objects.filter(pk=p.get("src") or 0).first() if str(p.get("src") or "").isdigit() else None
     need(c, "Drag a column in first: the box reads the card its columns come from.")
-    return {"msg": _apply_group(g, c, p.get("map") if isinstance(p.get("map"), dict) else {}, ctx)}
+    return {"msg": _apply_group(g, c, p.get("map") if isinstance(p.get("map"), dict) else {}, ctx,
+                                slot_where=p.get("where") if isinstance(p.get("where"), dict) else {})}
 
 
 def _clean_filters(raw, cols):

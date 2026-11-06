@@ -72,20 +72,23 @@ def text(v, n=80):
     return str(v).strip()[:n]
 
 
-def add_extras(machine, out, get):
-    """Recipe, and the run signal when it is a field of the same reading. get(field) reads the source's record."""
+def add_extras(machine, out, get, slot=None):
+    """Recipe, errors and the run signal when they are fields of the same reading. get(field) reads the source's
+    record; slot(name, field) instead when each input has its own row (a table with a tag per value)."""
+    def val(name, field):
+        return slot(name, field) if slot else get(field)
     if machine.feed_recipe_field:
-        r = get(machine.feed_recipe_field)
+        r = val("recipe", machine.feed_recipe_field)
         if r is not None:
             out["recipe"] = text(r)
     e = machine.error_src or {}
     if e.get("type") == "feed" and e.get("field"):
-        out["error"] = get(e["field"])
+        out["error"] = val("errCode", e["field"])
         if e.get("textField"):
-            out["errorText"] = get(e["textField"])
+            out["errorText"] = val("errText", e["textField"])
     u = machine.uptime_src or {}
     if u.get("type") == "feed" and u.get("field"):
-        out["run"] = is_running(get(u["field"]), u.get("runWhen"))
+        out["run"] = is_running(val("run", u["field"]), u.get("runWhen"))
         if out["run"] is None:
             out["runErr"] = f'The run signal "{u["field"]}" is missing or isn\'t High/Low'
     return out
@@ -182,33 +185,75 @@ def _src(machine):
     return s
 
 
+SLOTS = ("ppm", "count", "recipe", "run", "errCode", "errText")
+
+
+def slot_fields(machine):
+    """Each input the machine reads from its table: {input: column}."""
+    out = {"ppm": machine.feed_ppm_field or "ppm"}
+    if machine.feed_count_field:
+        out["count"] = machine.feed_count_field
+    if machine.feed_recipe_field:
+        out["recipe"] = machine.feed_recipe_field
+    u, e = machine.uptime_src or {}, machine.error_src or {}
+    if u.get("type") == "feed" and u.get("field"):
+        out["run"] = u["field"]
+    if e.get("type") == "feed":
+        if e.get("field"):
+            out["errCode"] = e["field"]
+        if e.get("textField"):
+            out["errText"] = e["textField"]
+    return out
+
+
+def read_slots(machine, s=None):
+    """The newest value of each input. Inputs with their own filter (slotWhere: a table that keeps one value per row
+    with a tag, e.g. tag = Salvatore_Speed and tag = Salvatore_Count in the same value column) each read their own
+    newest row; the others share one row. Returns {input: {"col", "value", "newest", "where", "err"}}."""
+    s = s or _src(machine)
+    fields = slot_fields(machine)
+    base = [f for f in (s.get("where") or []) if f.get("col")] or (
+        [{"col": s["keyCol"], "val": s.get("keyVal", "")}] if s.get("keyCol") else [])
+    own = s.get("slotWhere") or {}
+    groups = {}
+    for name, col in fields.items():
+        w = [f for f in (own.get(name) or []) if f.get("col")]
+        groups.setdefault(tuple((f["col"], str(f.get("val", ""))) for f in w), []).append(name)
+    out = {}
+    for key, names in groups.items():
+        where = base + [{"col": c, "val": v} for c, v in key]
+        try:
+            row, order_val = latest_row(s["db"], s.get("table", ""), [fields[n] for n in names], s["orderCol"], where=where)
+            for n in names:
+                out[n] = {"col": fields[n], "value": row[fields[n]], "newest": order_val, "where": where, "err": ""}
+        except ConnError as e:
+            for n in names:
+                out[n] = {"col": fields[n], "value": None, "newest": None, "where": where, "err": str(e)}
+        except Exception as e:  # the database's own error (timeout, lost connection, permissions)
+            for n in names:
+                out[n] = {"col": fields[n], "value": None, "newest": None, "where": where,
+                          "err": f"{integrations.DB_NAMES.get(s['db'], 'The database')}: {str(e)[:160]}"}
+    return out
+
+
 def fetch_feed(machine, prev, t_ms):
     """One reading from the machine's table: ({"ppm", "count", "recipe", "run"?}, freshness state)."""
     s = _src(machine)
-    want = [machine.feed_ppm_field or "ppm"] + [c for c in (machine.feed_count_field, machine.feed_recipe_field) if c]
-    u = machine.uptime_src or {}
-    if u.get("type") == "feed" and u.get("field"):
-        want.append(u["field"])
-    e = machine.error_src or {}
-    if e.get("type") == "feed":
-        want += [c for c in (e.get("field"), e.get("textField")) if c]
     if not s.get("orderCol"):
         raise ConnError("Pick the column that tells which row is newest (a time stamp or an ID).")
+    vals = read_slots(machine, s)
+    sp = vals["ppm"]
+    if sp["err"]:
+        raise ConnError(sp["err"])
+    state = check_fresh(prev or {}, sp["newest"], t_ms, s["maxAge"])   # the speed's row tells whether data still comes
+    field = sp["col"]
     try:
-        row, order_val = latest_row(s["db"], s.get("table", ""), want, s["orderCol"], s.get("keyCol", ""), s.get("keyVal", ""), s.get("where"))
-    except ConnError:
-        raise
-    except Exception as e:  # the database's own error (timeout, lost connection, permissions)
-        raise ConnError(f"{integrations.DB_NAMES.get(s['db'], 'The database')}: {str(e)[:160]}")
-    state = check_fresh(prev or {}, order_val, t_ms, s["maxAge"])
-    field = machine.feed_ppm_field or "ppm"
-    try:
-        out = {"ppm": float(row[field])}
+        out = {"ppm": float(sp["value"])}
     except (TypeError, ValueError):
-        raise FeedError(f'"{field}" is not a number ({text(row[field], 30)})', state)
-    if machine.feed_count_field:
-        out["count"] = row[machine.feed_count_field]
-    add_extras(machine, out, row.get)
+        raise FeedError(f'"{field}" is not a number ({text(sp["value"], 30)})', state)
+    if "count" in vals:
+        out["count"] = vals["count"]["value"]
+    add_extras(machine, out, None, slot=lambda name, f: (vals.get(name) or {}).get("value"))
     return out, state
 
 

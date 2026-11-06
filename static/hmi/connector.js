@@ -16,6 +16,7 @@
     if (!g._st) {
       try { g._st = JSON.parse(g.dataset.state || "{}"); } catch (e) { g._st = {}; }
       g._st.map = g._st.map || {};
+      g._st.where = g._st.where || {};
       g._orig = JSON.stringify(g._st);
     }
     return g._st;
@@ -38,8 +39,10 @@
       sl.classList.toggle("set", !!col);
       sl.querySelector(".sv").textContent = col;
       const x = sl.querySelector(".sx"); if (x) x.hidden = !col;
+      const f = sl.querySelector(".sf"); if (f) { f.hidden = !col; f.classList.toggle("on", !!(st.where[sl.dataset.slot] || []).length); }
       sl.setAttribute("aria-label", label(sl) + ": " + (col || "empty"));
     });
+    paintFilters(g);
     const tb = g.querySelector(".gsrc .tb"); if (tb) tb.textContent = title(root, st.src) || "none yet";
     const changed = JSON.stringify(st) !== g._orig;
     const save = g.querySelector("[data-save]"); if (save) save.disabled = !changed;
@@ -49,13 +52,39 @@
     if (changed) {
       const shared = g.dataset.kind === "machine" && st.src &&
         [...root.querySelectorAll('.cgroup[data-kind="machine"]')].filter(o => o !== g && String(state(o).src) === String(st.src)).map(o => o.querySelector(".wh b").textContent);
-      say(g, !st.src && Object.keys(st.map).length ? "Drag one column from this box's card to pick the card it reads." :
+      const none = !Object.keys(st.map).length && Object.keys(orig(g).map || {}).length;
+      say(g, none ? "No wires left: Save disconnects this from the database." :
+             !st.src && Object.keys(st.map).length ? "Drag one column from this box's card to pick the card it reads." :
              missing.length ? "Still needed: " + missing.join(", ") :
              shared && shared.length ? shared.join(", ") + " read" + (shared.length > 1 ? "" : "s") + " this card too: give each machine its own card with a filter for its rows (✎ on the card, or Duplicate)." : "Ready to save.",
-          !!missing.length || !!(shared && shared.length) || !st.src);
+          !none && (!!missing.length || !!(shared && shared.length) || !st.src));
     }
     soon(root);
   }
+
+  /* an input's own rows: "rows where <column> = <value>" for a table with one value per row and a tag */
+  const cardCols = (root, src) => { const c = card(root, src); return c ? [...c.querySelectorAll('.cpick input[name=col]')].map(x => x.value) : []; };
+  function paintFilters(g) {
+    const st = state(g), root = g.closest(".connector");
+    g.querySelectorAll(".sfil").forEach(row => {
+      const k = row.dataset.for, f = (st.where[k] || [])[0];
+      row.hidden = !f || !st.map[k];
+      if (row.hidden) return;
+      const sel = row.querySelector(".sfcol"), cols = cardCols(root, st.src);
+      if (sel.dataset.src !== String(st.src)) {   // the columns of the card this box reads
+        sel.innerHTML = '<option value="">Column…</option>' + cols.map(c => `<option>${c.replace(/[&<>"]/g, m => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[m])}</option>`).join("");
+        sel.dataset.src = String(st.src);
+      }
+      if (document.activeElement !== sel) sel.value = f.col || "";
+      const v = row.querySelector(".sfval"); if (document.activeElement !== v) v.value = f.val || "";
+    });
+  }
+  function suggest(input, src, col) {   // the values the column has, as a dropdown (a datalist)
+    const dl = input.list; if (!dl || !src || !col || (dl.dataset.for === src + "|" + col)) return;
+    dl.dataset.for = src + "|" + col;
+    if (window.htmx) htmx.ajax("POST", "/kiosk/do/connectorValues", {target: dl, swap: "innerHTML", values: {src: String(src), col}});
+  }
+  const TAGGY = /^(tag|tagname|tag_name|name|id|item|label|point|signal|key|variable|metric)$/i;
 
   function flash(el, kind) { el.classList.remove("fl-ok", "fl-no"); void el.offsetWidth; el.classList.add("fl-" + kind); }
 
@@ -194,12 +223,37 @@
       });
     }
     root.addEventListener("input", e => {
+      const row = e.target.closest(".sfil");
+      if (row && e.target.matches(".sfcol,.sfval")) {
+        const g = row.closest(".cgroup"), st = state(g), f = (st.where[row.dataset.for] || [])[0];
+        if (f) { f[e.target.matches(".sfcol") ? "col" : "val"] = e.target.value; paint(g); }
+        if (e.target.matches(".sfcol")) suggest(row.querySelector(".sfval"), st.src, e.target.value);
+        return;
+      }
       if (!e.target.matches(".cfilter")) return;
       const v = e.target.value.trim().toLowerCase();
       e.target.closest(".srcard").querySelectorAll(".port.out").forEach(t => { t.hidden = v && !t.dataset.col.toLowerCase().includes(v); });
       soon(root);
     });
+    root.addEventListener("focusin", e => {
+      if (e.target.matches(".sfil .sfval")) {
+        const row = e.target.closest(".sfil"), st = state(row.closest(".cgroup"));
+        suggest(e.target, st.src, row.querySelector(".sfcol").value);
+      } else if (e.target.matches(".cedit .frow input[name=fval]")) {   // a card's own filter
+        const fr = e.target.closest(".frow"), c = e.target.closest(".srcard");
+        if (!e.target.list) {
+          const dl = document.createElement("datalist"); dl.id = "dlc-" + Math.random().toString(36).slice(2);
+          fr.appendChild(dl); e.target.setAttribute("list", dl.id);
+        }
+        suggest(e.target, c.dataset.src, fr.querySelector("select[name=fcol]").value);
+      }
+    });
     root.addEventListener("change", e => {
+      if (e.target.matches(".cedit .frow select[name=fcol]")) {
+        const inp = e.target.closest(".frow").querySelector("input[name=fval]");
+        if (inp.list) { inp.list.dataset.for = ""; suggest(inp, e.target.closest(".srcard").dataset.src, e.target.value); }
+        return;
+      }
       if (!e.target.matches(".gcopy") || !e.target.value) return;
       const g = e.target.closest(".cgroup"), from = root.querySelector(`.cgroup[data-group="${CSS.escape(e.target.value)}"]`);
       const name = e.target.selectedOptions[0].textContent;
@@ -207,8 +261,9 @@
       if (!from || !state(from).table) { say(g, name + " isn't wired to a table yet.", true); return; }
       const f = state(from), st = state(g);
       st.db = f.db; st.table = f.table; st.map = Object.assign({}, f.map); st.src = null;
+      st.where = JSON.parse(JSON.stringify(f.where || {}));   // the same tags, to change to this machine's (e.g. Salvatore_Speed)
       paint(g);
-      say(g, `Copied ${name}'s wires. Now drag any column from this machine's card (a card of the same table, with this machine's filter) to pick the rows it reads.`, false);
+      say(g, `Copied ${name}'s wires. Now drag any column from this machine's card to pick the rows it reads` + (Object.keys(st.where).length ? `, and change the ⚑ tags to this machine's (e.g. ${g.querySelector(".wh b").textContent.trim()}_Speed).` : "."), false);
     });
     root.addEventListener("click", e => {
       const chip = e.target.closest("[data-goto]");
@@ -229,8 +284,25 @@
       if (frm) { frm.closest(".frow").remove(); soon(root); return; }
       const all = e.target.closest("[data-all],[data-none]");
       if (all) { all.closest("fieldset").querySelectorAll("input[type=checkbox]").forEach(x => { x.checked = all.hasAttribute("data-all"); }); return; }
+      const tc = e.target.closest("[data-ctest-close]");
+      if (tc) { tc.closest(".gtest").innerHTML = ""; soon(root); return; }
+      const sf = e.target.closest(".sf");
+      if (sf) {
+        const sl = sf.closest(".slot"), g = sl.closest(".cgroup"), st = state(g), k = sl.dataset.slot;
+        if (!(st.where[k] || []).length) {
+          const cols = cardCols(root, st.src), used = new Set(Object.values(st.map));
+          st.where[k] = [{col: cols.find(c => TAGGY.test(c) && !used.has(c)) || cols.find(c => TAGGY.test(c)) || "", val: ""}];
+          paint(g);
+          const row = g.querySelector(`.sfil[data-for="${CSS.escape(k)}"]`); if (row) row.querySelector(st.where[k][0].col ? ".sfval" : ".sfcol").focus();
+        } else { const row = g.querySelector(`.sfil[data-for="${CSS.escape(k)}"]`); if (row) row.querySelector(".sfval").focus(); }
+        e.stopPropagation(); return;
+      }
+      const sfx = e.target.closest(".sfx");
+      if (sfx) { const row = sfx.closest(".sfil"), g = row.closest(".cgroup"); delete state(g).where[row.dataset.for]; paint(g); return; }
       const x = e.target.closest(".sx");
-      if (x) { const sl = x.closest(".slot"), g = sl.closest(".cgroup"); delete state(g).map[sl.dataset.slot]; paint(g); e.stopPropagation(); return; }
+      if (x) { const sl = x.closest(".slot"), g = sl.closest(".cgroup"), st = state(g); delete st.map[sl.dataset.slot]; delete st.where[sl.dataset.slot];
+        if (!Object.keys(st.map).length) { st.src = null; st.db = ""; st.table = ""; st.where = {}; }
+        paint(g); e.stopPropagation(); return; }
       const undo = e.target.closest("[data-undo]");
       if (undo) { const g = undo.closest(".cgroup"); g._st = JSON.parse(g._orig); paint(g); say(g, "Changes undone.", false); return; }
       const tag = e.target.closest(".port.out");
@@ -248,14 +320,16 @@
     root.querySelector("svg.wires")?.addEventListener("click", e => {
       const p = e.target.closest("path[data-slot]"); if (!p) return;
       const g = root.querySelector(`.cgroup[data-group="${CSS.escape(p.dataset.group)}"]`); if (!g) return;
-      delete state(g).map[p.dataset.slot]; paint(g); say(g, `Unwired ${p.dataset.col}.`, false);
+      const st = state(g); delete st.map[p.dataset.slot]; delete st.where[p.dataset.slot];
+      if (!Object.keys(st.map).length) { st.src = null; st.db = ""; st.table = ""; st.where = {}; }
+      paint(g); if (Object.keys(st.map).length) say(g, `Unwired ${p.dataset.col}.`, false);
     });
     root.addEventListener("keydown", e => {
       if ((e.key === "Enter" || e.key === " ") && e.target.matches(".slot") && picked) { e.preventDefault(); place(e.target, picked); unpick(); }
       if (e.key === "Escape") unpick();
     });
     root.addEventListener("pointerdown", e => {
-      if (e.button > 0 || e.target.closest(".sx,select,input,textarea,.cedit,[data-edit]")) return;
+      if (e.button > 0 || e.target.closest(".sx,.sf,.sfil,select,input,textarea,.cedit,[data-edit]")) return;
       const from = e.target.closest(".port.out") || (e.target.closest(".slot .dot") && e.target.closest(".slot"));
       if (!from) return;
       e.preventDefault();   // no text selection while drawing a wire
@@ -266,6 +340,7 @@
       const g = e.detail.elt.closest && e.detail.elt.closest(".cgroup"); if (!g) return;
       const st = state(g);
       e.detail.parameters.map = JSON.stringify(st.map);
+      e.detail.parameters.where = JSON.stringify(st.where || {});
       e.detail.parameters.src = st.src || "";
       e.detail.parameters.db = st.db || "";
       e.detail.parameters.table = st.table || "";
