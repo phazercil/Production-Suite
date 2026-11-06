@@ -109,18 +109,18 @@ textarea{width:100%;font-family:var(--f-mono);font-size:12px}
 .g-lab .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g-lab .ds{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g-lab .tot{font-family:var(--f-mono);font-size:11px;color:var(--fg)}
-.g-track{position:relative;flex:none;height:72px}
+.g-track{position:relative;flex:none;height:52px}
 .g-row.group{background:var(--surface-2)}
 .g-row.group .g-lab{background:var(--surface-2);gap:0}
 .g-row.group .g-lab .nm{font-family:var(--f-display);font-size:14px;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:6px}
-.g-row.group .g-track{height:38px}
+.g-row.group .g-track{height:30px}
 .swatch{width:10px;height:10px;border-radius:2px;flex:none}
-.off{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,var(--off) 0 6px,var(--off-stripe) 6px 12px);pointer-events:none}
-.gridline{position:absolute;top:0;bottom:0;border-left:1px solid var(--line-2);pointer-events:none}
+.off{position:absolute;top:0;bottom:0;background:rgba(0,0,0,.32);pointer-events:none}
+.gridline{position:absolute;top:0;bottom:0;border-left:1px solid rgba(255,255,255,.05);pointer-events:none}
 .qcell{position:absolute;bottom:0;height:18px;font-family:var(--f-mono);font-size:10.5px;color:var(--muted);text-align:center;line-height:18px;overflow:hidden;white-space:nowrap;border-top:1px solid var(--line-2);pointer-events:none}
 .qcell.has{color:var(--fg)}
-.g-row.group .qcell{height:38px;line-height:38px;border-top:0;font-weight:500;color:var(--fg)}
-.bar{position:absolute;top:6px;height:42px;border-radius:5px;overflow:hidden;cursor:grab;display:flex;align-items:stretch;box-shadow:0 1px 2px rgba(0,0,0,.15);z-index:2;min-width:4px}
+.g-row.group .qcell{height:30px;line-height:30px;border-top:0;font-weight:500;color:var(--fg);font-size:10.5px}
+.bar{position:absolute;top:5px;height:42px;border-radius:5px;overflow:hidden;cursor:grab;display:flex;align-items:stretch;box-shadow:0 1px 2px rgba(0,0,0,.15);z-index:2;min-width:4px}
 .bar .co{flex:none;position:relative;background:repeating-linear-gradient(135deg,var(--c) 0 3px,var(--surface) 3px 7px);border-right:2px solid var(--c);overflow:hidden}
 .bar .co span{position:absolute;inset:auto 0 3px 0;text-align:center;font-family:var(--f-mono);font-size:10px;font-weight:500;color:var(--fg);white-space:nowrap}
 .bar .co span i{font-style:normal;background:var(--surface);padding:0 3px;border-radius:2px}
@@ -246,3 +246,13 @@ td input[type=text]{width:140px}
 .splitopts .opt span{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
 .splitopts .opt small{color:var(--muted);font-size:12px}
 .splitopts .opt input[type=datetime-local],.splitopts .opt input[type=number]{max-width:240px}
+
+/* a compact board: days no line works are a thin strip; one detail line per machine (the rest is in its tooltip) */
+.closedday{position:absolute;top:0;bottom:0;background:var(--bg,#0f1216);border-left:1px solid var(--line-2);border-right:1px solid var(--line-2);pointer-events:none;z-index:1}
+.tick.closed{background:var(--bg,#0f1216);color:var(--muted);text-align:center;padding:3px 0 0;font-size:10px}
+.tick.closed .big{font-size:11px;color:var(--muted)}
+.g-lab{padding:4px 10px}
+.g-lab .ds b{font-family:var(--f-mono);font-weight:500;color:var(--fg)}
+.g-row.idle .g-lab .nm{color:var(--muted);font-weight:500}
+.g-row.idle .g-track{opacity:.75}
+.legend .offkey{display:inline-block;width:14px;height:10px;border-radius:2px;background:#15181c;border:1px solid var(--line);vertical-align:-1px}
