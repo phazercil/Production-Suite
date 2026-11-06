@@ -151,6 +151,8 @@ class Screen:
 
     def reason_prompt(self):
         """Open the "Why did the line stop?" dialog by itself? Not while it was put off a few minutes ago."""
+        if self.unattended:   # nobody on the log: the reasons wait for whoever fills them in later
+            return False
         snooze = self.request.session.get("down_snooze", 0)
         return self.reason_due() and ms(self.t) > snooze
 
@@ -360,7 +362,8 @@ class Screen:
         last_ppm = hist[-1][1] if hist else 0
         st = shift_stats(sh) if sh else {"mins": 0, "run": 0, "down": 0, "uptime": 100}
         nx = self.up_next()
-        out = {"on": bool(sh), "unattended": self.unattended, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
+        offer = Person.objects.filter(pk=int(sh.offer)).values_list("name", flat=True).first() if sh and sh.offer.isdigit() and self.unattended else None
+        out = {"on": bool(sh), "unattended": self.unattended, "offerName": offer, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,
                "grafana": self.grafana_src((self.settings.get("grafana") or {}).get("ppm")),

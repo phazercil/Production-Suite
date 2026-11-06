@@ -17,8 +17,11 @@
 - **Machines**
   - Speed in pleats per minute, linear mm per second or parts per minute.
   - With a counter, parts count only when the counter goes up.
-  - Speed, counts and downtime are recorded during a machine's shift even with nobody logged in; the operator who starts their shift takes it over.
-- **Kiosk:** a pop-up when one of the operator's machines stops.
+  - **The log always runs**, with or without a shift or an operator. It splits at each shift's start and end, so every stretch of time belongs to a shift (or "No shift", which is logged but never counted as downtime). The operator who starts their shift takes over what was logged in it.
+- **Kiosk**
+  - A pop-up when one of the operator's machines stops.
+  - When a shift ends with the operator still running, the kiosk asks "[Name], working into 2nd shift?" — Yes keeps them on the new shift's log.
+  - **Change operator** hands the machine to the next person who logs in; the previous operator keeps everything up to that moment.
 - **Admin › Machine schedule** (was Shifts & breaks) owns the shifts: times, days, lunch and authorized downtimes (Add start-up, Add shut-down). The Labor Budget keeps lines and crews but no longer changes shift times.
 - **Downtime fix:** another shift's lunch, authorized downtime and hours with no shift scheduled are no longer logged as downtime when a run stays open across shifts or overnight.
 - **Admin › Backup › Back up the database now**, with downloads.

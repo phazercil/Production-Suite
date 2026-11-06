@@ -5,8 +5,13 @@
     <p class="sub">Log in, walk the safety checklist and scan the first MO to start running.{% if R.first %} First up from the planner: MO {{ R.first.m.number }} · {{ R.first.m.part }}.{% endif %}</p>
     <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>
   {% else %}
-  {% if R.unattended %}<div class="panel idlecard" style="border-color:var(--warn)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name|default:"this shift" }}</span><h2>No one logged in</h2>
-    <p class="sub">The machine's speed, counts and downtime are being recorded since {{ R.sh.start|time:"g:i a" }}. Start your shift to take over: everything recorded this shift becomes yours, and the count goes on the MO you scan.</p>
+  {% if R.unattended and R.offerName %}<div class="panel idlecard" style="border-color:var(--accent)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name }} started {{ R.sh.start|time:"g:i a" }}</span>
+    <h2>{{ R.offerName }}, working into {{ R.sh.shift_name }}?</h2>
+    <p class="sub">Your log for the last shift closed at {{ R.sh.start|time:"g:i a" }}{% if R.sh.mo %}; MO {{ R.sh.mo.number }} carries on{% endif %}. Yes: what's recorded from now on is yours too.</p>
+    <div class="row" style="gap:10px;margin-top:10px"><button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-post="/kiosk/do/carryOn" hx-vals='{"id": "{{ R.sh.pk }}", "yes": "1"}'>Yes, I'm staying</button>
+      <button class="btn bigbtn" style="width:auto;padding-inline:28px" hx-post="/kiosk/do/carryOn" hx-vals='{"id": "{{ R.sh.pk }}", "yes": "0"}'>No, I'm leaving</button></div></div>
+  {% elif R.unattended %}<div class="panel idlecard" style="border-color:var(--warn)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name|default:"this shift" }}</span><h2>{% if R.sh.shift_name == "No shift" %}No shift scheduled now{% else %}No one logged in{% endif %}</h2>
+    <p class="sub">{% if R.sh.shift_name == "No shift" %}The machine's speed and counts are still recorded since {{ R.sh.start|time:"g:i a" }}; stops now aren't downtime. Start a shift if you're running it.{% else %}The machine's speed, counts and downtime are being recorded since {{ R.sh.start|time:"g:i a" }}. Start your shift to take over: everything recorded this shift becomes yours, and the count goes on the MO you scan.{% endif %}</p>
     <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>{% endif %}
   <div class="panel order">
     <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
@@ -54,7 +59,8 @@
   <button class="act" hx-get="/kiosk/m/drawing" hx-target="#modal" hx-swap="innerHTML">{% icon "draw" %}<span>Instructions</span></button>
   <button class="act" hx-get="/kiosk/m/rolls" hx-target="#modal" hx-swap="innerHTML">{% icon "rolls" %}<span>Roll tags</span></button>
   <button class="act" hx-get="/kiosk/m/notes" hx-target="#modal" hx-swap="innerHTML">{% icon "notes" %}<span>Shift notes</span></button>
-  {% if R.on and not R.unattended %}<button class="act" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">{% icon "end" %}<span>End shift</span></button>
+  {% if R.on and not R.unattended %}<button class="act" hx-get="/kiosk/m/changeop" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}<span>Change operator</span></button>
+  <button class="act" hx-get="/kiosk/m/end" hx-target="#modal" hx-swap="innerHTML">{% icon "end" %}<span>End shift</span></button>
   {% else %}<button class="act due" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}<span>Start shift</span></button>{% endif %}
   <button class="act bad" hx-get="/kiosk/m/ticket" hx-target="#modal" hx-swap="innerHTML">{% icon "maint" %}<span>Call maintenance</span></button>
 </div>
