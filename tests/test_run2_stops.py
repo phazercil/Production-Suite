@@ -36,7 +36,7 @@ class Run2Tests(TestCase):
         self.tick(11)
         sh = ShiftRun.objects.get(pk=self.sh.pk)
         self.assertEqual((sh.state, sh.stop_what), ("running", ""))
-        d = Downtime.objects.filter(shift=sh).order_by("-start_time").first()
+        d = Downtime.objects.filter(shift=sh, start_time__gte=self.t).order_by("-start_time").first()
         if d:   # (unless the whole stop fell in planned time at this hour)
             self.assertEqual(d.notes, "Folder stopped")
 

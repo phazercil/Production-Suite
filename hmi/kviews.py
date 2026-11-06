@@ -306,12 +306,31 @@ def m_changeover(request, s):
     return changeover_modal(request, s)
 
 
+def co_history(co):
+    """Who has worked on this changeover so far (pieces passed over or handed on), for the kiosk."""
+    from plant.util import from_ms
+    out = []
+    for x in (co or {}).get("pieces") or []:
+        out.append({**x, "who": x.get("by") or "Nobody logged in", "from": engine.fmt_t(from_ms(x["start"])), "to": engine.fmt_t(from_ms(x["end"])),
+                    "stepsTxt": ", ".join(str(n) for n in x.get("steps") or []) or "none"})
+    h = (co or {}).get("handoff")
+    hand = {**h, "at": engine.fmt_t(from_ms(h["t"]))} if h and h.get("t") else None
+    return out, hand
+
+
 def changeover_modal(request, s):
     sh = s.shift
     if not sh or not sh.co:
         return thin.done(close=True)
     co = sh.co
-    c = {"co": co, "sh": sh, "step": co.get("step", 1)}
+    from plant.util import from_ms
+    hist, hand = co_history(co)
+    c = {"co": co, "sh": sh, "step": co.get("step", 1), "history": hist, "handoff": hand}
+    if co.get("start") and co.get("step", 1) >= 2 and sh.person_id:
+        w = engine.log_window(sh, s.t)
+        left = (w["e"] - s.t).total_seconds() / 60
+        c.update(canPass=True, shiftEnd=engine.fmt_t(w["e"]), nearEnd=not w.get("noShift") and left <= 30, shiftName=sh.shift_name,
+                 coTotal=kscreen.hms((s.t - from_ms(co.get("first") or co["start"])).total_seconds()))
     if c["step"] == 1:
         mo = s.mo(co.get("oldMo"))
         c.update(mo=mo, moTimer=kscreen.hms((s.t - sh.mo_start).total_seconds()) if sh.mo_start else "0:00:00",
@@ -326,7 +345,9 @@ def changeover_modal(request, s):
         def step(i, st):
             st = dict(st)
             setting, value, unit = str(st.get("setting") or ""), str(st.get("value") if st.get("value") is not None else ""), str(st.get("unit") or "")
-            st.update(i=i, done=i in (co.get("done") or []), tag=f"{setting} {value}{unit}".strip() if (setting or value) else "",
+            who = (co.get("doneBy") or {}).get(str(i)) if i in (co.get("done") or []) else None
+            st.update(whoDone=f"{who.get('by') or 'Nobody logged in'} · {engine.fmt_t(from_ms(who['t']))}" if who and who.get("t") else "",
+                      i=i, done=i in (co.get("done") or []), tag=f"{setting} {value}{unit}".strip() if (setting or value) else "",
                       imageOk=str(st.get("image") or "").lower().startswith(("http://", "https://")))
             return st
         c.update(nmo=nmo, p=p, steps=[step(i, st) for i, st in enumerate(steps)],
@@ -334,6 +355,18 @@ def changeover_modal(request, s):
                  canReload=bool(s.settings.get("useDb")) and engine.integrations.assets_ready(),
                  override=" · ".join(f"{k} {v}" for k, v in (sh.override or {}).items()))
     return modal_response(request, "hmi/k/m_changeover.html", **ctx_for(s, **c))
+
+
+@modal("copass", login=True)
+def m_copass(request, s):
+    sh = s.shift
+    if not (sh and sh.co and sh.co.get("start") and sh.person_id):
+        return thin.refused("There's no changeover under way to pass over.")
+    co = sh.co
+    n, done = len(engine.co_steps(co)), len(co.get("done") or [])
+    w = engine.log_window(sh, s.t)
+    return modal_response(request, "hmi/k/m_copass.html", **ctx_for(s, sh=sh, n=n, done=done, nextShift="the next operator" if w.get("noShift") else "the next shift",
+                                                                 newMo=s.mo(co.get("newMo"))))
 
 
 @modal("qc", login=True)
@@ -689,6 +722,12 @@ ACTIONS["coEnd"] = simple("coEnd", toast=False, then=_co_next)
 ACTIONS["coPick"] = simple("coPick", toast=False, then=_co_next)
 ACTIONS["coReload"] = simple("coReload", toast=False, then=_co_next)
 ACTIONS["coFinish"] = simple("coFinish", close=True)
+@action("coPass")
+def a_co_pass(request, s, p):
+    r = run(request, s, "coPass", {"note": p.get("note", "")})
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return go("controls", toast=r.get("msg"), s=s)
 @action("coStep")
 def a_co_step(request, s, p):
     try:
