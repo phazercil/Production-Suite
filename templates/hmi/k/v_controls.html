@@ -12,7 +12,7 @@
     <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
     <div class="prog"><div class="lbl"><span>Good parts</span><b class="num">{{ R.good|num }} <small>/ {{ R.mo.qty|num }}</small></b></div><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ R.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ R.pct|floatformat:1 }}%"></i></div></div>
     <div class="metrics">
-      <div class="metric"><span>Rate (pcs/min)</span><b class="num">{{ R.rate }} <small>{{ R.lastPpm }} P/m</small></b></div>
+      <div class="metric"><span>Rate (pcs/min)</span><b class="num">{{ R.rate }} <small>{{ R.lastPpm }} {{ R.unit|default:"P/m" }}</small></b></div>
       <div class="metric {% if R.mo.scrap %}bad{% endif %}"><span>Scrap</span><b class="num">{{ R.mo.scrap|num }}</b></div>
       <div class="metric"><span>Est. finish</span><b class="num">{% if R.eta %}{{ R.eta|plan:S.t }}{% else %}—{% endif %}</b></div>
     </div>

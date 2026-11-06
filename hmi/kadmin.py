@@ -81,11 +81,13 @@ def tab_data(s, tab, request):
     if tab in LISTS:
         return {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
     if tab == "machines":
+        from plant import units
         base = request.build_absolute_uri("/station/")
+        unit_opts = [(k, v[0]) for k, v in units.UNITS.items()]
         rows = []
         for m in s.lines:
             rows.append({"m": m, "queued": MO.objects.filter(line=m, status="OPEN").count(), "trained": m.trained_people.count(),
-                         "url": base + quote(m.name) + "/"})
+                         "url": base + quote(m.name) + "/", "units": unit_opts})
         return {"rows": rows}
     if tab == "shifts":
         out = []

@@ -44,7 +44,8 @@ def load_world(jobs_override=None):
     for m in Machine.objects.prefetch_related("shifts"):
         machines.append({"id": m.id, "name": m.name, "stage": m.stage, "mode": m.speed_mode, "ppm": m.ppm, "rate": m.rate,
                          "scrap": m.scrap_pct, "downtime": m.downtime_pct, "changeover": m.changeover_min, "runLunch": m.run_lunch,
-                         "shifts": [s.id for s in m.shifts.all()], "active": m.active, "color": m.color, "code": m.code})
+                         "shifts": [s.id for s in m.shifts.all()], "active": m.active, "color": m.color, "code": m.code,
+                         "unit": m.speed_unit, "mmPerPart": m.mm_per_part})
     # Open orders take time on the board. A closed MO has finished Stage 1 at the pleater: it no longer holds a
     # Stage 1 slot, but any End Band / Arts & Crafts / Glue Bead work already on the board stays scheduled.
     from django.db.models import Q
@@ -107,6 +108,14 @@ def rate_for(m, item, mo):
             ppm = (item and item.get("nppm")) or m["ppm"]
         else:
             ppm = m["ppm"]
+        from plant import units
+        if units.unit(m) != "ppm":   # speed in mm/s or parts per minute: the machine's own speed, per part
+            from plant.util import part_spec
+            spec = part_spec(mo.get("part") or "")
+            per = units.per_part(m, spec, pleats or None)
+            if not per:
+                return 0, units.basis(m, spec)
+            return m["ppm"] * 60 / per, f"{fmt_n(m['ppm'])} {units.short(m)}: " + units.basis(m, spec, pleats or None)
         if not pleats:
             return 0, "No pleat count for this part"
         return ppm * 60 / pleats, f"{fmt_n(ppm)} PPM × 60 ÷ {fmt_n(pleats)} pleats"

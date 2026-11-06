@@ -123,9 +123,11 @@ def spec_for(item):
 
 
 def pleats_for(sh):
-    if sh.override and sh.override.get("pleats"):
-        return float(sh.override["pleats"])
-    return float(spec_for(sh.mo.part if sh.mo else "")["pleats"]) or 24
+    """Speed-minutes one part takes on this run's machine (pleats per part on a pleater; see plant/units.py), so
+    speed readings add up to parts when the machine has no counter. 0 when it can't be told."""
+    from plant import units
+    pleats = float(sh.override["pleats"]) if sh.override and sh.override.get("pleats") else None
+    return units.per_part(sh.machine, spec_for(sh.mo.part if sh.mo else ""), pleats)
 
 
 # ------------------------------------------------------------------ machine
@@ -278,8 +280,8 @@ def tick(machine, sample, t):
     elif not co:
         sh.acc += ppm
         per = pleats_for(sh)
-        units = int(sh.acc // per)
-        sh.acc -= units * per
+        units = int(sh.acc // per) if per > 0 else 0
+        sh.acc = sh.acc - units * per if per > 0 else 0.0
     if units > 0:
         reading.units = units
         reading.save(update_fields=["units"])
@@ -1373,6 +1375,17 @@ def line_set(p, ctx):
     elif f == "rated":
         need(float(v or 0) > 0, "Rated speed must be above 0.")
         m.ppm = float(v)
+    elif f == "unit":
+        from plant import units
+        need(v in units.UNITS, "Pick pleats per minute, linear mm per second or parts per minute.")
+        m.speed_unit = v
+    elif f == "mmpp":
+        try:
+            n = float(v) if str(v or "").strip() else None
+        except (TypeError, ValueError):
+            raise Need("Type the mm per part as a number, or leave it blank.")
+        need(n is None or 0 < n < 100000, "mm per part must be above 0.")
+        m.mm_per_part = n
     elif f == "color":
         need(re.match(r"^#[0-9a-fA-F]{6}$", str(v or "")), "Pick a color.")
         m.color = v
@@ -1420,7 +1433,7 @@ def line_set(p, ctx):
     m.save()
     LineState.objects.filter(machine=m).update(feed={})
     audit(ctx, f"{m.name} {f} set to {m.feed_url or '(blank)' if f == 'feed.url' else '(query changed)' if f == 'feed.query' else json.dumps(v)}")
-    if f in ("rated", "active"):
+    if f in ("rated", "active", "unit", "mmpp"):
         refresh_schedule("a machine change")
 
 
