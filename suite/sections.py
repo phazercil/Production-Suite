@@ -4,8 +4,6 @@ from django.shortcuts import render
 from plant import perms
 
 SOON = {
-    "supervisor": ("Supervisor", "Arranging people in the packaging department, and the other day-to-day work of running a shift.",
-                   "section.supervisor"),
     "maintenance": ("Maintenance", "Maintenance's own view of the plant: requests from the lines, repairs and their notes, and planned work.",
                     "section.maintenance"),
 }

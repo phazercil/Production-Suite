@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     "datakiosk",
     "labor",
     "reports",
+    "supervisor",
     "suite",   # display helpers for the server-built screens (suite/templatetags)
 ]
 

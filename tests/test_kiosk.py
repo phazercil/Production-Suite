@@ -219,7 +219,7 @@ class KioskTests(TestCase):
         r = Client().get("/operator/")
         for href in ("/supervisor/", "/maintenance/", "/admin/", "/labor/"):
             self.assertContains(r, f'href="{href}"')
-        self.assertContains(Client().get("/supervisor/"), "packaging")
+        self.assertContains(Client().get("/supervisor/"), "Open Supervisor")   # its PIN login
         self.assertContains(Client().get("/maintenance/"), "Maintenance")
         # /budget/: the Labor Budget alone, for someone allowed only that
         op = Person.objects.get(pin="1111")
