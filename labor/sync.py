@@ -1,14 +1,12 @@
 """Keeps the Labor Budget plan and the rest of the suite in step.
 
-Budget A of the Labor Budget is the master of the lines and the shifts (`apply_to_suite`, run when it's saved):
-- Shifts: how many there are (up to 3), each one's start, end and work days (its main crew schedule, code A) and
-  its lunch length. When lunch starts, other breaks and shift names stay the suite's (the plan has no times for them).
+Budget A of the Labor Budget is the master of the lines (`apply_to_suite`, run when it's saved). The shifts (their
+times, days, lunch and authorized downtimes such as start-up and shut-down) belong to Admin › Machine schedule.
 - Lines: a production line (Stage 1, Stage 2, Stage 3, Glue Bead) is a machine. Adding one adds the machine,
   renaming it renames the machine (its records follow), deleting it takes the machine out of service (records
   kept), and which shifts it runs and whether it runs through lunch are set there. Labor-only lines (Packaging
   Only, Non Production, Backup) aren't machines.
-Admin › Machines, Admin › Shifts & breaks and the Scheduler's Lines & Shifts show these and can't change them
-(`master_on`). Machine settings stay the suite's and are put into the plan by `merge()` whenever it is read or
+Admin › Machines and the Scheduler's Lines & Shifts show the lines and can't change them (`master_on`). Machine settings stay the suite's and are put into the plan by `merge()` whenever it is read or
 saved: each line's color and speed, and machines added in Admin before or outside the plan. Crew names are
 offered from the Team list; wages stay in the plan (shift leads only).
 """
@@ -171,72 +169,19 @@ def _hhmm(v, default):
 
 
 def apply_to_suite(data, old=None):
-    """The Labor Budget (budget A) is the master of lines and shifts: put its shifts (how many, start, end, work
-    days, lunch length), its production lines (added, renamed, removed, which shifts each runs, running through
-    lunch) into the suite. Machine settings the plan doesn't have (speeds, feeds, colors, training, breaks other
-    than lunch, when lunch starts) stay the suite's. Returns (data with new lines linked by machineId, changes).
+    """The Labor Budget (budget A) is the master of the production lines: put its lines (added, renamed, removed,
+    which shifts each runs, running through lunch) into the suite. The shifts themselves (times, days, lunch and
+    authorized downtimes) are Admin › Machine schedule's; machine settings the plan doesn't have (speeds, feeds,
+    colors, training) stay the suite's. Returns (data with new lines linked by machineId, changes).
     A line is only taken out of service when it was in the plan saved before (`old`) and has been deleted since."""
-    from plant.models import ShiftBreak
-
     from hmi.models import ShiftRun
     if not isinstance(data, dict):
         return data, []
     changes = []
-    # ---- shifts: the plan's shift k is the suite's k-th shift
-    scheds = [x for x in (data.get("schedules") or []) if isinstance(x, dict)]
-    suite = list(Shift.objects.prefetch_related("breaks").order_by("sort", "id"))
-    if data.get("shiftCount") in (None, ""):   # a plan without a shift count leaves the suite's shifts as they are
-        count = max([len(suite)] + [int(_num(x.get("shift"))) for x in scheds if _num(x.get("shift"))])
-    else:
-        count = int(_num(data.get("shiftCount")) or 1)
-    count = max(1, min(MAX_SHIFTS, count))
-    by_num = {}
-    for k in range(1, count + 1):
-        a = next((x for x in scheds if x.get("shift") == k and str(x.get("code") or "").upper() == "A"), None) or \
-            next((x for x in scheds if x.get("shift") == k), None)
-        sh = suite[k - 1] if k - 1 < len(suite) else None
-        if a is None:
-            if sh:
-                by_num[k] = sh
-            continue
-        start, end = _hhmm(a.get("startTime"), sh.start if sh else "06:00"), _hhmm(a.get("endTime"), sh.end if sh else "14:30")
-        if isinstance(a.get("daysOfWeek"), list):   # a field the plan doesn't have leaves the suite's value alone
-            days = sorted({int(d) for d in a["daysOfWeek"] if str(d).isdigit() and 0 <= int(d) <= 6})
-        else:
-            days = sorted(sh.days or []) if sh else [1, 2, 3, 4, 5]
-        if sh is None:
-            sh = Shift.objects.create(name=str(a.get("suiteName") or f"{_ordinal(k)} shift")[:60], start=start, end=end, days=days, sort=k - 1)
-            changes.append(f"added {sh.name} {start}–{end}")
-        elif (sh.start, sh.end, sorted(sh.days or [])) != (start, end, days):
-            changes.append(f"{sh.name} set to {start}–{end}")
-            sh.start, sh.end, sh.days = start, end, days
-            sh.save(update_fields=["start", "end", "days"])
-        by_num[k] = sh
-        # lunch: its length comes from the plan; when it starts stays the suite's (the plan has no time for it)
-        if a.get("lunchMins") in (None, ""):
-            continue
-        mins = max(0, int(_num(a.get("lunchMins"))))
-        lunch = next((b for b in sh.breaks.all() if "lunch" in (b.label or "").lower()), None)
-        if not mins and lunch:
-            lunch.delete()
-            changes.append(f"{sh.name}: no lunch")
-        elif mins:
-            if lunch:
-                b0 = _hm(lunch.start)
-            else:
-                s0, e0 = _hm(start), _hm(end)
-                length = (e0 - s0) % 1440 or 1440
-                b0 = (s0 + max(0, (length - mins) // 2) // 15 * 15) % 1440
-                lunch = ShiftBreak(shift=sh, label="Lunch")
-            new_end = f"{(b0 + mins) // 60 % 24:02d}:{(b0 + mins) % 60:02d}"
-            if lunch.pk is None or lunch.end != new_end:
-                lunch.start, lunch.end = f"{b0 // 60:02d}:{b0 % 60:02d}", new_end
-                lunch.save()
-                changes.append(f"{sh.name}: lunch {mins} min")
-    for sh in suite[count:]:
-        if not ShiftRun.objects.filter(active=True, shift_name=sh.name).exists():
-            changes.append(f"removed {sh.name}")
-            sh.delete()
+    # ---- shifts: Admin › Machine schedule owns the shifts (times, days, lunch, start-up and shut-down). The plan's
+    # shift k is the suite's k-th shift, only to know which shifts each of its lines runs.
+    suite = list(Shift.objects.order_by("sort", "id"))
+    by_num = {k + 1: sh for k, sh in enumerate(suite[:MAX_SHIFTS])}
     # ---- lines
     old_ids = {ln.get("machineId") for ln in ((old or {}).get("lines") or []) if isinstance(ln, dict) and ln.get("machineId")}
     machines = {m.id: m for m in Machine.objects.prefetch_related("shifts")}

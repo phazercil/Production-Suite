@@ -357,7 +357,7 @@ def save_config(request):
                   "useLabor": p.get("useLabor") is not False}
     st.save(update_fields=["planner"])
     keep_s, sid_map = [], {}
-    for i, sh in enumerate([] if labor else shifts_in):
+    for i, sh in enumerate(shifts_in):   # the shifts are the machine schedule's (Admin › Machine schedule), also with the Labor Budget on
         if not isinstance(sh, dict):
             raise BadRequest("A shift didn't come through. Reload the page and try again.")
         name = str(sh.get("name") or "").strip()[:60] or f"Shift {i + 1}"
@@ -379,7 +379,7 @@ def save_config(request):
             ShiftBreak.objects.create(shift=obj, label=str(b.get("label") or "Break").strip()[:60] or "Break",
                                       start=hhmm(b.get("start"), f"{name} break start"), end=hhmm(b.get("end"), f"{name} break end"))
     # Delete only what this planner removed. Lines or shifts added meanwhile from another screen are kept.
-    removed_s = [] if labor else [x for x in p.get("removedShifts") or [] if isinstance(x, int) and x not in keep_s]
+    removed_s = [x for x in p.get("removedShifts") or [] if isinstance(x, int) and x not in keep_s]
     Shift.objects.filter(id__in=removed_s).delete()
     if not Shift.objects.exists():
         raise BadRequest("Keep at least one shift.")

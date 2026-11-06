@@ -193,46 +193,69 @@ def to_number(v):
 
 
 def planned_windows(sh, kinds=False):
-    """Time the line is not meant to run during this shift run, per the Scheduler's shift: its breaks and lunches,
-    and the start-up allowance (Rules > startGrace minutes after the scheduled start). Stops inside these are not
-    downtime: they are not logged, need no reason and don't count against uptime."""
+    """Time the line is not meant to run during this shift run, from the machine schedule (Admin › Machine schedule)
+    of every shift the machine runs over the whole run, not only the shift it started in:
+    - each shift's lunch, breaks and authorized downtimes (start-up, shut-down), and the start-up allowance
+      (Rules > startGrace minutes after each shift starts);
+    - any time no shift of the machine is scheduled (e.g. midnight to 7 am), so a run left open overnight
+      doesn't pile up downtime;
+    - breaks an Admin or shift lead added for the day.
+    Stops inside these are not downtime: they are not logged, need no reason and don't count against uptime."""
     from datetime import datetime as _dt
 
     from django.utils import timezone as _tz
 
     from plant.models import Shift
-    from plant.util import hm, is_lunch, local
-    if not sh or not sh.shift_name:
+    from plant.util import extra_breaks, hm, is_lunch, local
+    if not sh:
         return []
-    shift = Shift.objects.filter(name=sh.shift_name).prefetch_related("breaks").first()
-    if not shift:
+    shifts = list(sh.machine.shifts.prefetch_related("breaks")) if sh.machine_id else []
+    if not shifts:
+        shifts = list(Shift.objects.prefetch_related("breaks"))
+    shifts = [x for x in shifts if x.days]
+    if not shifts:
         return []
-    started = local(sh.start)
-    for back in (0, 1):  # the shift occurrence the run belongs to: today's, or yesterday's for a run after midnight
-        day = (started - timedelta(days=back)).date()
-        s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(shift.start))
-        length = (hm(shift.end) - hm(shift.start)) % 1440 or 1440
-        e0 = s0 + timedelta(minutes=length)
-        if s0 - timedelta(hours=2) <= sh.start < e0:
-            out = []
-            grace = rules().get("startGrace", 0) or 0
+    a = sh.start
+    b = max(sh.end or now(), now()) + timedelta(days=1)
+    grace = rules().get("startGrace", 0) or 0
+    through = bool(sh.machine and sh.machine.run_lunch)
+    occ, out = [], []
+    day = local(a).date() - timedelta(days=1)
+    while day <= local(b).date():
+        dow = (day.weekday() + 1) % 7   # 0 = Sunday, as the shifts store it
+        for x in shifts:
+            if dow not in x.days:
+                continue
+            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x.start))
+            length = (hm(x.end) - hm(x.start)) % 1440 or 1440
+            e0 = s0 + timedelta(minutes=length)
+            if e0 <= a or s0 >= b:
+                continue
+            occ.append((s0, e0))
             if grace:
                 out.append((s0, s0 + timedelta(minutes=grace), "Start-up"))
-            through = bool(sh.machine and sh.machine.run_lunch)
-            for b in shift.breaks.all():
-                if through and is_lunch(b.label):
+            for br in x.breaks.all():
+                if through and is_lunch(br.label):
                     continue   # the line runs through lunch, so a stop then is downtime
-                bo = (hm(b.start) - hm(shift.start)) % 1440
-                bl = (hm(b.end) - hm(b.start)) % 1440
+                bo = (hm(br.start) - hm(x.start)) % 1440
+                bl = (hm(br.end) - hm(br.start)) % 1440
                 if bl and bo < length:
-                    out.append((s0 + timedelta(minutes=bo), s0 + timedelta(minutes=bo + bl), b.label or "Break"))
-            from plant.util import extra_breaks
-            for w in extra_breaks(s0, e0):   # breaks an Admin or shift lead added for today
-                if w["machines"] is None or sh.machine_id in w["machines"]:
-                    out.append((max(w["s"], s0), min(w["e"], e0), w["label"]))
-            out.sort()
-            return out if kinds else [(a, b) for a, b, _ in out]
-    return []
+                    out.append((s0 + timedelta(minutes=bo), s0 + timedelta(minutes=min(bo + bl, length)), br.label or "Break"))
+        day += timedelta(days=1)
+    # outside every shift of the machine: not scheduled to run
+    occ.sort()
+    cur = a
+    for s0, e0 in occ:
+        if s0 > cur:
+            out.append((cur, s0, "No shift scheduled"))
+        cur = max(cur, e0)
+    if cur < b:
+        out.append((cur, b, "No shift scheduled"))
+    for w in extra_breaks(a, b):   # breaks an Admin or shift lead added for today
+        if w["machines"] is None or sh.machine_id in w["machines"]:
+            out.append((max(w["s"], a), min(w["e"], b), w["label"]))
+    out = sorted((max(s0, a), min(e0, b), k) for s0, e0, k in out if e0 > a and s0 < b and min(e0, b) > max(s0, a))
+    return out if kinds else [(s0, e0) for s0, e0, _ in out]
 
 
 _planned_cache = {}
@@ -1547,7 +1570,6 @@ def _shift(i):
 
 @cmd("shiftAdd", "lists.edit")
 def shift_add(p, ctx):
-    labor_lock("Shifts")
     s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count())
     for m in Machine.objects.all():
         m.shifts.add(s)
@@ -1559,8 +1581,6 @@ def shift_set(p, ctx):
     s = _shift(p.get("s"))
     f, v = p.get("f"), str(p.get("v") or "").strip()
     need(f in ("name", "start", "end"), "Unknown field.")
-    if f != "name":
-        labor_lock("Shift times")
     need(v, "Cannot be blank.")
     if f != "name":
         need(TIME_RE.match(v), "Use a time like 07:00.")
@@ -1574,7 +1594,6 @@ def shift_set(p, ctx):
 
 @cmd("shiftDel", "lists.edit")
 def shift_del(p, ctx):
-    labor_lock("Shifts")
     need(Shift.objects.count() > 1, "Keep at least one shift.")
     s = _shift(p.get("s"))
     name = s.name
@@ -1590,11 +1609,23 @@ def _mins_to_hm(mins):
 
 @cmd("breakAdd", "lists.edit")
 def break_add(p, ctx):
+    """Add a break, a lunch, or an authorized downtime (start-up at the shift's start, shut-down just before its end,
+    e.g. cleaning the machines out): all of them are planned time, so a stop in them isn't downtime."""
     from plant.util import hm
     s = _shift(p.get("s"))
-    st = hm(s.start) + 120
-    ShiftBreak.objects.create(shift=s, label="Break", start=_mins_to_hm(st), end=_mins_to_hm(st + 10))
-    audit(ctx, f"Added a break to {s.name}")
+    kind = p.get("kind") or "break"
+    s0, length = hm(s.start), (hm(s.end) - hm(s.start)) % 1440 or 1440
+    if kind == "lunch":
+        need(not any("lunch" in (b.label or "").lower() for b in s.breaks.all()), f"{s.name} already has a lunch: change its time there.")
+        st, mins, label = s0 + max(0, (length - 30) // 2) // 15 * 15, 30, "Lunch"
+    elif kind == "startup":
+        st, mins, label = s0, 15, "Start-up"
+    elif kind == "shutdown":
+        st, mins, label = s0 + length - 15, 15, "Shut-down"
+    else:
+        st, mins, label = s0 + 120, 10, "Break"
+    ShiftBreak.objects.create(shift=s, label=label, start=_mins_to_hm(st), end=_mins_to_hm(st + mins))
+    audit(ctx, f"Added {label} to {s.name}")
     refresh_schedule("a break change")
 
 
@@ -1606,8 +1637,6 @@ def break_set(p, ctx):
     need(0 <= int(p.get("b", -1)) < len(brs), "Break not found.")
     b = brs[int(p["b"])]
     f, v = p.get("f"), p.get("v")
-    if "lunch" in (b.label or "").lower() and f == "mins" or f == "name" and ("lunch" in (b.label or "").lower()) != ("lunch" in str(v or "").lower()):
-        labor_lock("Lunch lengths")
     if f == "mins":
         b.end = _mins_to_hm(hm(b.start) + max(1, int(float(v or 0))))
     elif f == "start":
@@ -1632,8 +1661,6 @@ def break_del(p, ctx):
     brs = list(s.breaks.all())
     need(0 <= int(p.get("b", -1)) < len(brs), "Break not found.")
     b = brs[int(p["b"])]
-    if "lunch" in (b.label or "").lower():
-        labor_lock("Lunches")
     b.delete()
     audit(ctx, f"Removed {b.label} from {s.name}")
     refresh_schedule("a break change")
