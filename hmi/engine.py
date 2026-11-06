@@ -101,6 +101,51 @@ def active_run(machine):
     return ShiftRun.objects.filter(machine=machine, active=True).select_related("mo").first()
 
 
+# ------------------------------------------------------------------ nobody logged in
+# A machine in one of its scheduled shifts keeps being recorded when no operator has started a shift: the minute tick
+# opens an "unattended" run (no person) that collects its speed, counts and downtime. When an operator starts their
+# shift on that machine during it, they take that run over, so everything recorded since the shift began is theirs
+# (and with the MO they scan, its count goes on that MO). An unattended run closes by itself at the end of the shift.
+def unattended(sh):
+    return bool(sh and sh.active and sh.person_id is None and not sh.user_name)
+
+
+def machine_shift_at(machine, t):
+    """The machine's own shift window (Admin › Machines / Labor Budget shifts) that t falls in, or None."""
+    from plant.util import shift_at, shift_list
+    ids = set(machine.shifts.values_list("id", flat=True))
+    return shift_at(ms(t), [x for x in shift_list() if x.id in ids]) if ids else None
+
+
+def open_unattended(machine, t):
+    if rules().get("autoRuns", True) is False:
+        return None
+    w = machine_shift_at(machine, t - timedelta(seconds=30))
+    if not w:
+        return None
+    start = max(from_ms(w["s"]), t - timedelta(minutes=1))
+    sh = ShiftRun.objects.create(machine=machine, line=machine.name, person=None, user_name="", shift_name=w["name"], start=start,
+                                 state="running", qc_last=start)
+    event("shift_auto", {"line": machine.name, "shift": w["name"]})
+    return ShiftRun.objects.select_for_update().select_related("mo").get(pk=sh.pk)
+
+
+def close_unattended_if_over(sh, t):
+    """An unattended run ends with its shift. Returns True when it closed."""
+    w = machine_shift_at(sh.machine, sh.start + timedelta(seconds=30)) if sh.machine else None
+    end = from_ms(w["e"]) if w else None
+    if end is not None and t <= end:
+        return False
+    end = min(t, end) if end else t
+    close_stop(sh, end)
+    st = shift_stats(sh)
+    sh.active, sh.end, sh.state, sh.co = False, end, "idle", None
+    sh.uptime, sh.down_mins = st["uptime"], st["down"]
+    sh.save()
+    event("shift_end", {"line": sh.line, "count": sh.count, "uptime": st["uptime"], "down": st["down"], "unattended": True})
+    return True
+
+
 def shift_of(p, ctx):
     name = p.get("line") or ctx.line
     m = line_of(name)
@@ -243,6 +288,10 @@ def tick(machine, sample, t):
     ls, _ = LineState.objects.get_or_create(machine=machine)
     ls.last_tick = t
     sh = ShiftRun.objects.select_for_update().filter(machine=machine, active=True).select_related("mo").first()
+    if sh and unattended(sh) and close_unattended_if_over(sh, t):
+        sh = None
+    if not sh and sample is not None:   # data during one of the machine's shifts, nobody logged in: record it anyway
+        sh = open_unattended(machine, t)
     if not sh:
         ls.save(update_fields=["last_tick"])
         return
@@ -368,7 +417,7 @@ def start_shift(p, ctx):
     need(m.active, f"{m.name} is out of service.")
     need(ctx.user.trained.filter(pk=m.pk).exists(), f"You are not trained on {m.name}. Pick another machine or ask your shift lead.")
     cur = active_run(m)
-    need(not cur, f"{m.name} already has a shift running since {fmt_t(cur.start) if cur else ''}. End it first.")
+    need(not cur or unattended(cur), f"{m.name} already has a shift running since {fmt_t(cur.start) if cur else ''}. End it first.")
     safety = p.get("safety") or []
     need(isinstance(safety, list) and len(safety) == len(config()["safety"]) and all(safety),
          "Every safety item must be checked before the line runs.")
@@ -378,6 +427,26 @@ def start_shift(p, ctx):
         need(mo, f"MO {p['mo']} is not an open order. Check the number or pick one from the schedule.")
         need(not mo.line_id or mo.line_id == m.id, f"MO {mo.number} is scheduled on {mo.line.name if mo.line else ''}, not {m.name}.")
         need(not running_elsewhere(mo, m), f"MO {mo.number} is already running on another machine.")
+    if cur:
+        # take over what was recorded with nobody logged in: since the shift began it is this operator's
+        sh = ShiftRun.objects.select_for_update().get(pk=cur.pk)
+        sh.person, sh.user_name = ctx.user, ctx.user.name
+        sh.issues, sh.safety = str(p.get("issues") or "").strip(), safety
+        sh.pm = p.get("pm") if isinstance(p.get("pm"), list) else []
+        sh.qc_last = ctx.now
+        if mo:
+            sh.mo, sh.mo_start, sh.mo_count = mo, sh.start, sh.count
+            if sh.count:
+                MO.objects.filter(pk=mo.pk).update(produced=F("produced") + sh.count)
+        sh.save()
+        if mo and not mo.line_id:
+            mo.line, mo.seq = m, 0
+            mo.save(update_fields=["line", "seq"])
+        audit(ctx, f"Took over {m.name}'s {sh.shift_name or 'shift'} recorded since {fmt_t(sh.start)} with no one logged in"
+                   + (f" ({sh.count:,} made, now on MO {mo.number})" if mo and sh.count else ""))
+        event("shift_start", {"line": m.name, "mo": mo.number if mo else None, "user": ctx.user.name, "issues": sh.issues, "since": ms(sh.start)})
+        return {"msg": f"Shift started on {m.name}: everything recorded since {fmt_t(sh.start)} is yours"
+                       + (f" ({sh.count:,} made)" if sh.count else "")}
     w = shift_at(ms(ctx.now))
     sh = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=(w or {}).get("name", ""),
                                  start=ctx.now, mo=mo, mo_start=ctx.now, state="running", issues=str(p.get("issues") or "").strip(),
