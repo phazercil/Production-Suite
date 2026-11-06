@@ -1,3 +1,26 @@
+## What's new in 1.8.4
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Connector builder**
+  - **Source cards:** each card has a title, the columns you pick and its own row filter. A table can have several cards, e.g. one per machine.
+  - **Test data** on every box shows what its wires read now, without saving.
+  - **Tag tables** (one value per row with a tag, e.g. Salvatore_Speed / Salvatore_Count): the ⚑ on a machine input reads only its tag's rows.
+  - Filter values offer a dropdown of the values in the column.
+  - Taking every wire off a box and saving disconnects it.
+  - A **second run signal**, named on the box, for two machines that run together: the line runs only while both do.
+- **Scheduler**
+  - Every shift shows on the board, shaded (1st lighter than 2nd).
+  - The Orders list has a section per stage.
+  - A dropped MO lands with its start where you drop it.
+  - **Split** an MO run at a time of day, when the operator ends it, or by quantity.
+- **Machines**
+  - Speed in pleats per minute, linear mm per second or parts per minute.
+  - With a counter, parts count only when the counter goes up.
+  - Speed, counts and downtime are recorded during a machine's shift even with nobody logged in; the operator who starts their shift takes it over.
+- **Kiosk:** a pop-up when one of the operator's machines stops.
+- **Admin › Backup › Back up the database now**, with downloads.
+
 ## What's new in 1.8.3
 
 - **Updates on Linux servers:** Admin › Updates › Check for updates now finds new releases on a Linux server. Releases carry a signed Linux update file (with the Python packages when they changed) when the repository has the UPDATE_SIGNING_KEY secret.
