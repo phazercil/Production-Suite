@@ -73,3 +73,60 @@ class ChartTests(TestCase):
         self.assertIn("&lt;b&gt;x&lt;/b&gt;", html)
         self.assertIn("vector", open("static/suite/shell.css").read())
         self.assertIn("No readings", svg.speed_chart([], 180))
+
+
+class ChartWindowTests(TestCase):
+    """The run screen's speed chart: an operator sees the whole shift plus the last half of the shift before it; a
+    shift lead or admin sees the whole day. A gap with no readings is not joined across."""
+    def test_fixed_window_and_gaps(self):
+        t = now()
+        pts = [(t - timedelta(minutes=60 - i), 100) for i in range(10)] + [(t - timedelta(minutes=20 - i), 120) for i in range(10)]
+        html = svg.speed_chart(pts, 180, start=t - timedelta(hours=4), end=t + timedelta(hours=4), now=t,
+                               marks=[(t - timedelta(hours=1), "1st shift")], shade=(t - timedelta(hours=4), t - timedelta(hours=1)))
+        self.assertEqual(html.count('class="c-line"'), 2)    # two runs: the 30-minute gap is left empty
+        for cls in ("c-now", "c-mark", "c-shade", "1st shift"):
+            self.assertIn(cls, html)
+        self.assertIn("No readings", svg.speed_chart([], 180, empty="No readings yet", start=t, end=t + timedelta(hours=8)))
+
+    def test_operator_and_lead_windows(self):
+        from django.test import Client
+
+        from plant.demo import seed_demo
+        seed_demo(reset=True)
+        c = Client(HTTP_HX_REQUEST="true")
+        c.get("/station/Barbara/")
+        c.post("/kiosk/do/login", {"pin": "1111"}, HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
+        r = c.get("/kiosk/v/controls").content.decode()
+        self.assertIn("Line rate · this shift", r)
+        self.assertIn("c-shade", r)
+        c.post("/kiosk/do/logout", HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
+        c.post("/kiosk/do/login", {"pin": "9999"}, HTTP_X_CSRFTOKEN=c.cookies["csrftoken"].value)
+        r = c.get("/kiosk/v/controls").content.decode()
+        self.assertIn("Line rate · today", r)
+        self.assertNotIn("c-shade", r)
+        self.assertIn("1st shift", r)
+
+
+class DowntimeScopeTests(TestCase):
+    """An operator's Downtime page, alert and badge cover their own shift's stops; earlier shifts' stops without a
+    reason are for shift leads and admins."""
+    def test_earlier_shifts_are_for_leads(self):
+        from hmi.models import Downtime, ShiftRun
+        seed_demo(reset=True)
+        cur = ShiftRun.objects.get(line="Barbara", active=True)
+        old = ShiftRun.objects.create(line="Barbara", machine=cur.machine, user_name="M. Lee", shift_name="2nd shift", active=False,
+                                      start=cur.start - timedelta(hours=12), end=cur.start - timedelta(hours=4))
+        t = old.start + timedelta(hours=2)
+        Downtime.objects.create(line="Barbara", shift=old, start_time=t, end_time=t + timedelta(minutes=33), minutes=33)
+        c = Client(HTTP_HX_REQUEST="true")
+        c.get("/station/Barbara/")
+        tok = c.cookies["csrftoken"].value
+        c.post("/kiosk/do/login", {"pin": "1111"}, HTTP_X_CSRFTOKEN=tok)
+        r = c.get("/kiosk/v/downtime").content.decode()
+        self.assertNotIn("Earlier shifts", r)
+        self.assertNotIn(">33<", r)
+        c.post("/kiosk/do/logout", HTTP_X_CSRFTOKEN=tok)
+        c.post("/kiosk/do/login", {"pin": "9999"}, HTTP_X_CSRFTOKEN=tok)
+        r = c.get("/kiosk/v/downtime").content.decode()
+        self.assertIn("Earlier shifts", r)
+        self.assertIn(">33<", r)

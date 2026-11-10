@@ -40,7 +40,7 @@
     </tbody></table></div>{% else %}<p class="note">No finished runs of this part in the last {{ R.avg.days|default:180 }} days.</p>{% endif %}</div>{% endif %}
   </div>
   {% endif %}
-  <div class="panel chartpanel"><div class="row"><span class="eyebrow">Line rate · this shift</span><span class="small">{% if R.grafana %}Grafana panel{% else %}Pleats per minute{% endif %}</span></div>
+  <div class="panel chartpanel"><div class="row"><span class="eyebrow">Line rate · {% if R.chartDay %}today{% else %}this shift{% endif %}</span><span class="small">{% if R.grafana %}Grafana panel{% else %}Pleats per minute{% endif %}</span></div>
     <div class="chartcard {% if R.alert %}alert{% endif %}">{% if R.grafana %}<iframe src="{{ R.grafana }}" title="Pleater speed (Grafana)" loading="lazy" id="gf-ppm"></iframe><span class="src">Grafana</span>{% else %}{{ R.chart|safe }}{% endif %}</div></div>
 </div>
 <aside class="panel upnext"><div class="row"><span class="eyebrow">Up next</span><span class="small">from planner{% if R.planAt %} · {{ R.planAt|clock }}{% endif %}</span></div>
