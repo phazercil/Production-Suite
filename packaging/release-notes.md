@@ -9,6 +9,7 @@
   - Each shift has **Mon–Sun** buttons for the days it runs.
   - **Add seasonal variant** puts a copy of the shift for a range of dates (e.g. 2nd shift an hour longer in July): its own times, days, lunch, breaks and authorized downtime, without changing the main schedule. The kiosk, downtime and planned time, and the Scheduler use it on those dates.
   - **Past days keep their schedule:** a change counts from today on. The first change to a shift on a day keeps how it was, so the days before are still judged by the schedule they ran. A removed shift is kept for the days before it was removed; a new shift doesn't count for the days before it was added.
+- **Machine tags in other systems:** Admin › Machines › **Add system** (e.g. PIM, asset or maintenance) adds a column to fill in each machine's tag in that system, next to its S2K process code. Saved queries (Changeover data, tooling) use `:tag_pim`, the way they use `:line_code` for the S2K code.
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 

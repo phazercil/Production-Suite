@@ -40,7 +40,7 @@ S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("
              ("process", "Process code", False), ("mfg", "MFG location", False), ("hot", "Hot flag", False)]
 # Commands a field or button can run as they are (the engine checks the person and every value)
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
-               "breakSet", "breakDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
+               "breakSet", "breakDel", "tagSysAdd", "tagSysDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
                "s2kPull", "peoplePull", "paycomImport", "networkFirewallSync", "srcDelete", "alertContactDelete", "updCancel", "updGoBack",
                "updFolder", "updWhen", "permRole", "permPerson", "permReset", "qcItemAdd", "qcItemDel", "qcItemMove"}
 _tables_cache = {}
@@ -88,7 +88,11 @@ def tab_data(s, tab, request):
         for m in s.lines:
             rows.append({"m": m, "queued": MO.objects.filter(line=m, status="OPEN").count(), "trained": m.trained_people.count(),
                          "url": base + quote(m.name) + "/", "units": unit_opts})
-        return {"rows": rows}
+        from .engine import tag_param, tag_systems
+        systems = [{"name": x, "param": tag_param(x)} for x in tag_systems()]
+        for r in rows:
+            r["tags"] = [{"sys": x["name"], "v": (r["m"].tags or {}).get(x["name"], "")} for x in systems]
+        return {"rows": rows, "systems": systems}
     if tab == "shifts":
         out = []
         from plant.util import hm
@@ -1024,7 +1028,7 @@ def a_codata(request, s, p):
         return codata_panel(request, s, name, st)
     if op == "test":
         m = Machine.objects.filter(name=tp["machine"]).first()
-        r = run(request, s, "dbTest", {"sql": st["sql"], "params": {**tp, "mo": "", "line_code": m.code if m else ""}})
+        r = run(request, s, "dbTest", {"sql": st["sql"], "params": {**tp, "mo": "", **engine.machine_params(m)}})
         st["res"] = r["data"] if r["ok"] else {"error": r["error"]}
         return codata_panel(request, s, name, st)
     if op == "save":

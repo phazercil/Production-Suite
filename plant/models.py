@@ -99,6 +99,7 @@ class Machine(models.Model):
     """A line or station. Stage 1 machines are the pleaters that have an operator kiosk."""
     name = models.CharField(max_length=60, unique=True)
     code = models.CharField(max_length=12, blank=True, help_text="S2K process code, e.g. BARB")
+    tags = models.JSONField(default=dict, blank=True, help_text="This machine's tag in each other system, e.g. {\"PIM\": \"A-1023\"} (Admin › Machines)")
     stage = models.CharField(max_length=2, choices=STAGES, default="s1")
     speed_mode = models.CharField(max_length=8, default="fixed")
     ppm = models.FloatField(default=180, help_text="Stage 1: rated / fixed speed, in the machine's speed unit")

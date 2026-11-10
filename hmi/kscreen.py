@@ -464,7 +464,8 @@ class Screen:
             out.update(mo=mo, p=p, good=good, pct=min(100, good / mo.qty * 100) if mo.qty else 0, rate=rate, eta=self.eta())
         from . import runinfo
         use_db = bool(self.settings.get("useDb"))
-        code = self.machine.code if self.machine else ""
+        from .engine import machine_params
+        code = machine_params(self.machine)   # :line_code and each system's :tag_…
         if mo:
             out["tool"] = runinfo.tooling(mo.part, self.station, code, self.t, use_db)
             out["avg"] = runinfo.averages(mo.part, self.station, self.t)
