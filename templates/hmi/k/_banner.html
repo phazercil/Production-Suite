@@ -11,5 +11,6 @@
   {% if B.admin and not S.sup %}<button class="demo bad" hx-post="/kiosk/do/logout" title="Log out">{% if B.sysadmin %}Admin mode{% else %}Shift lead{% endif %} ✕</button>{% endif %}
   {% if B.operator %}<div class="who"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A7AFB8" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><div><small>Operator</small><b>{{ B.operator }}</b></div></div>{% endif %}
   <div class="conn"><span class="when-on"><span class="dot ok"></span>Server connected</span><span class="when-off"><span class="dot bad"></span>Server offline</span></div>
+  {% if B.pulled %}<span class="pullage num" data-ms-since="{{ B.pulled }}" title="Milliseconds since the last machine data pull"></span>{% endif %}
   <div class="clock num" data-clock></div>
 </div>

@@ -18,6 +18,7 @@
   - Every change is kept with who, when, the old and new value and why. It shows on the record's page and the shift's report, and in Admin › Recent changes.
   - A closed shift's downtime and uptime follow its corrected downtime.
   - New **MO runs** tab.
+- **Kiosk banner:** next to the clock, a running count of milliseconds since the last machine data pull (it starts again from 0 each time the server reads the machine).
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 
