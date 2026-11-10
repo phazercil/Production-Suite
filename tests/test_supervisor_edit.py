@@ -115,3 +115,30 @@ class HistoryEditTests(TestCase):
         self.assertTrue(r["ok"], r)
         d2.refresh_from_db()
         self.assertEqual((d2.minutes, d2.notes, d2.end_time), (1, "checked", t0 + timedelta(seconds=40)))
+
+
+class ScheduledBreakRecordTests(TestCase):
+    """A break added with Schedule a break is on the shift's record, and cancelling it keeps the times already past."""
+    def test_on_record_and_kept_when_cancelled(self):
+        from plant.models import ExtraBreak
+        from plant.util import extra_breaks
+        from hmi.kscreen import report_for
+        seed_demo(reset=True)
+        lead = engine.Ctx(user=Person.objects.get(name="S. Lead"))
+        sh = ShiftRun.objects.get(line="Barbara", active=True)
+        t = timezone.localtime(timezone.now())
+        x = ExtraBreak.objects.create(day=t.date() - timedelta(days=1), until=t.date() + timedelta(days=2), start=(t - timedelta(minutes=20)).strftime("%H:%M"),
+                                      minutes=10, label="Heat break", by="S. Lead", t=timezone.now())
+        if (t - timedelta(minutes=20)).date() == t.date() and sh.start <= t - timedelta(minutes=20):
+            self.assertIn(("Heat break", "Scheduled by S. Lead"), [(b["label"], b["src"]) for b in report_for(sh)["breaks"]])
+        r = engine.execute("extraBreakDel", {"id": x.pk}, lead)
+        self.assertTrue(r["ok"], r)
+        x.refresh_from_db()   # started already: kept, cancelled from now
+        self.assertEqual(x.cancelled_by, "S. Lead")
+        past = extra_breaks(timezone.now() - timedelta(days=1, hours=1), timezone.now())
+        future = extra_breaks(timezone.now(), timezone.now() + timedelta(days=3))
+        self.assertTrue(any(w["label"] == "Heat break" for w in past))
+        self.assertFalse(any(w["label"] == "Heat break" for w in future))
+        later = ExtraBreak.objects.create(day=t.date() + timedelta(days=5), start="10:00", minutes=10, label="Later", by="S. Lead")
+        engine.execute("extraBreakDel", {"id": later.pk}, lead)
+        self.assertFalse(ExtraBreak.objects.filter(pk=later.pk).exists())   # never happened: removed

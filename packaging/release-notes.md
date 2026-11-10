@@ -19,6 +19,8 @@
   - A closed shift's downtime and uptime follow its corrected downtime.
   - New **MO runs** tab.
 - **Kiosk banner:** next to the clock, a running count of milliseconds since the last machine data pull (it starts again from 0 each time the server reads the machine).
+- **Scheduled breaks on record:** every shift report (kiosk End of Shift and Supervisor) lists the breaks and planned time in the shift, including breaks added with **Schedule a break** and who added them. Cancelling a break that already started keeps its past times (stops then stay planned, not downtime); only the ones still to come are cancelled.
+- Fixed: the End of Shift and Downtime pages failed when a shift's only stops were 0 minutes long.
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 

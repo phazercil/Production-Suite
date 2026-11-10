@@ -165,6 +165,8 @@ class ExtraBreak(models.Model):
     machines = models.ManyToManyField(Machine, blank=True, related_name="+", help_text="None ticked = every line")
     by = models.CharField(max_length=120, blank=True)
     t = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True, help_text="Cancelled: the times from here on are off; the ones before stay on record")
+    cancelled_by = models.CharField(max_length=120, blank=True)
 
     class Meta:
         ordering = ["day", "start", "id"]
