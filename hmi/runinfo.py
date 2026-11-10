@@ -61,6 +61,7 @@ def norm_tooling(rows):
 
 
 def tooling(part, machine, line_code="", t=None, use_db=True):
+    """line_code: the S2K process code, or a dict of the machine's codes (engine.machine_params)."""
     """Tooling for a part on a machine from the asset database. Uses a saved copy when the database was asked
     in the last 15 minutes or can't be reached. src: db | cache | stale | off | noquery | none."""
     from django.utils import timezone
@@ -86,7 +87,7 @@ def tooling(part, machine, line_code="", t=None, use_db=True):
             return {"src": "stale", "groups": cache.groups, "t": cache.t, "err": failed[1]}
         return {"src": "error", "groups": [], "err": failed[1]}
     try:
-        rows = integrations.run_saved(q.sql, {"part": key, "machine": machine, "line_code": line_code, "from_part": "", "mo": ""})["rows"]
+        rows = integrations.run_saved(q.sql, {"part": key, "machine": machine, "from_part": "", "mo": "", **(line_code if isinstance(line_code, dict) else {"line_code": line_code})})["rows"]
         groups = norm_tooling(rows)
         has = any(g["items"] for g in groups)
         _failed.pop((key, machine), None)

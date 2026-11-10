@@ -795,7 +795,7 @@ def co_params(sh, co):
     m = MO.objects.filter(pk=co.get("newMo")).first() if co and co.get("newMo") else sh.mo
     old = MO.objects.filter(pk=co.get("oldMo")).first() if co and co.get("oldMo") else None
     return {"part": part_key(m.part) if m else "", "machine": sh.line, "from_part": part_key(old.part) if old else "",
-            "mo": m.number if m else "", "line_code": sh.machine.code}
+            "mo": m.number if m else "", **machine_params(sh.machine)}
 
 
 def norm_steps(rows):
@@ -1111,7 +1111,7 @@ def get_drawing(p, ctx):
     msg = None
     if q and integrations.assets_ready():
         try:
-            rows = integrations.run_saved(q.sql, {"part": key, "machine": ctx.line or "", "from_part": "", "mo": "", "line_code": ""})["rows"]
+            rows = integrations.run_saved(q.sql, {"part": key, "machine": ctx.line or "", "from_part": "", "mo": "", **machine_params(line_of(ctx.line) if ctx.line else None)})["rows"]
             if rows:
                 o = {str(k).lower(): v for k, v in rows[0].items()}
                 cur = spec_for(key)
@@ -1661,6 +1661,52 @@ def machine_tables(p, ctx):
         raise Need(str(e))
 
 
+def tag_systems():
+    """The other systems machines have a tag in (besides S2K's process code), e.g. PIM: Admin › Machines."""
+    return [str(x) for x in config().get("tagSystems") or []]
+
+
+def tag_param(name):
+    """The placeholder a saved query uses for a system's tag: PIM → :tag_pim."""
+    return "tag_" + (re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_") or "x")
+
+
+def machine_params(m):
+    """The machine's codes for a saved query: :line_code (S2K process code) and :tag_<system> for each system."""
+    out = {"line_code": (m.code if m else "") or ""}
+    for name in tag_systems():
+        out[tag_param(name)] = ((m.tags or {}).get(name, "") if m else "") or ""
+    return out
+
+
+@cmd("tagSysAdd", "machines.edit")
+def tag_sys_add(p, ctx):
+    name = str(p.get("v") or "").strip()
+    need(name, "Type the system's name, e.g. PIM.")
+    need(len(name) <= 30, "System names can be up to 30 characters.")
+    have = tag_systems()
+    need(name.lower() not in [x.lower() for x in have] and name.upper() != "S2K", f"{name} is already there.")
+    need(tag_param(name) not in [tag_param(x) for x in have], f"{name} would share a query placeholder with another system: pick another name.")
+    st = settings_obj()
+    st.config["tagSystems"] = have + [name]
+    st.save()
+    audit(ctx, f"Added the system {name} to machine tags (queries use :{tag_param(name)})")
+
+
+@cmd("tagSysDel", "machines.edit")
+def tag_sys_del(p, ctx):
+    name = str(p.get("sys") or "")
+    need(name in tag_systems(), "Unknown system.")
+    st = settings_obj()
+    st.config["tagSystems"] = [x for x in tag_systems() if x != name]
+    st.save()
+    for m in Machine.objects.all():
+        if name in (m.tags or {}):
+            m.tags = {k: v for k, v in m.tags.items() if k != name}
+            m.save(update_fields=["tags"])
+    audit(ctx, f"Removed the system {name} from machine tags")
+
+
 @cmd("lineSet", "machines.edit")
 def line_set(p, ctx):
     m = line_of(p.get("id"))
@@ -1684,6 +1730,17 @@ def line_set(p, ctx):
     if f == "code":
         m.code = str(v or "").strip().upper()
         need(len(m.code) <= 12, "Process codes can be up to 12 characters.")
+    elif f == "tag":   # this machine's tag in another system (Admin › Machines, one column per system)
+        sysname = str(p.get("sys") or "")
+        need(sysname in tag_systems(), "Unknown system.")
+        tag = str(v or "").strip()
+        need(len(tag) <= 60, "Tags can be up to 60 characters.")
+        tags = dict(m.tags or {})
+        if tag:
+            tags[sysname] = tag
+        else:
+            tags.pop(sysname, None)
+        m.tags = tags
     elif f == "rated":
         need(float(v or 0) > 0, "Rated speed must be above 0.")
         m.ppm = float(v)

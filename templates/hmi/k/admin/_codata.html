@@ -12,7 +12,7 @@
   {% if C.browse.table %}<p class="note num" style="margin-top:8px">{{ C.browse.cols|join:" · " }}</p>{% if C.browse.prev %}{% include "hmi/k/admin/_rows.html" with rows=C.browse.prev.rows columns=C.browse.prev.columns %}{% endif %}{% endif %}</div>
 {% for q in C.queries %}<form id="cq-{{ q.name }}" class="panel" style="display:flex;flex-direction:column;gap:10px" hx-post="/kiosk/do/codata" hx-vals='{"q": "{{ q.name }}"}' hx-target="#codata" hx-swap="outerHTML" autocomplete="off">
   <div class="row"><h2 class="h2 grow">{{ q.D.title }}</h2>{% if q.saved %}<span class="pill ok">SAVED</span><span class="note">{{ q.saved.saved_by }} {{ q.saved.saved_at|plan:S.t }}</span>{% else %}<span class="pill idle">NOT SAVED</span>{% endif %}</div>
-  <p class="sub">{{ q.D.help }} Use <code>:part</code>, <code>:machine</code>, <code>:from_part</code>, <code>:mo</code> or <code>:line_code</code> where the value should go. Column names are matched by the names below, so alias them with AS.</p>
+  <p class="sub">{{ q.D.help }} Use <code>:part</code>, <code>:machine</code>, <code>:from_part</code>, <code>:mo</code> <code>:line_code</code> (the machine's S2K code) or a system's machine tag such as <code>:tag_pim</code> (Admin › Machines) where the value should go. Column names are matched by the names below, so alias them with AS.</p>
   <details {% if not q.sql or q.bld.table %}open{% endif %}><summary style="cursor:pointer;font:600 16px var(--f-disp)">Build from a table</summary>
     <div class="grid3" style="margin-top:8px">
       <label class="f">Table{% include "hmi/k/admin/_bsel.html" with k="table" act="codata" tgt="codata" qn=q.name val=q.bld.table opts=C.T.tables|names %}</label>
