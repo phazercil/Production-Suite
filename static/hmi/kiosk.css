@@ -567,3 +567,8 @@ body.c-dragging .port.out{cursor:grabbing}
 @media (prefers-reduced-motion:reduce){.stoppop-card{animation:none}}
 table.xl td.nw{white-space:nowrap}
 table.xl tr.grouprow td{text-align:left;background:var(--panel-2,rgba(255,255,255,.04));color:var(--ink-2,#A7AFB8);padding:10px 14px}
+.daypick{display:flex;flex-wrap:wrap;gap:4px}
+.daypick .day{min-width:46px;min-height:36px;padding:4px 8px;border-radius:8px;border:1px solid var(--line,#3a4048);background:transparent;color:var(--ink-2,#A7AFB8);font:600 13px var(--f-body,inherit);cursor:pointer}
+.daypick .day.on{background:var(--accent,#6E9FE8);border-color:var(--accent,#6E9FE8);color:#0b1220}
+.daypick .day:disabled{cursor:default;opacity:.7}
+.panel.variant{border-left:4px solid var(--accent,#6E9FE8);display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.02)}

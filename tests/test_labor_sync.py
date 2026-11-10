@@ -216,6 +216,8 @@ class MachineScheduleTests(TestCase):
         Machine.objects.filter(pk=bar.pk).update(run_lunch=False)
         bar.refresh_from_db()
         bar.shifts.set([s1, s2])
+        from plant.models import ShiftVersion
+        ShiftVersion.objects.all().delete()   # these shifts have always been so (a change today would keep the days before as they were)
         day = timezone.localdate() - timedelta(days=2)
         at = lambda h, m=0: timezone.make_aware(datetime(day.year, day.month, day.day)) + timedelta(hours=h, minutes=m)  # noqa: E731
         ShiftRun.objects.filter(machine=bar).update(active=False)

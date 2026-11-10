@@ -93,28 +93,32 @@ def shift_list():
 
 
 def shift_windows(day_ms, shifts=None, all_days=False):
-    """Shift windows starting on the local day `day_ms`: [{name, s, e, brk:[{name, s, e}]}] in ms."""
-    shifts = shifts if shifts is not None else shift_list()
-    dow = (local(from_ms(day_ms)).weekday() + 1) % 7  # 0 = Sunday
+    """Shift windows starting on the local day `day_ms`: [{name, s, e, brk:[{name, s, e}]}] in ms. Each shift as it
+    was (or will be) worked that day: its seasonal variant, or how it was before a later change (plant/schedule.py)."""
+    from .schedule import book
+    d = local(from_ms(day_ms)).date()
+    dow = (d.weekday() + 1) % 7  # 0 = Sunday
+    ids = None if shifts is None else {x.id for x in shifts}
     out = []
-    for sh in shifts:
-        if not all_days and dow not in (sh.days or []):  # a shift with no days ticked is not worked (same as the Scheduler)
+    for sh in book().all_on(d, ids):
+        if not all_days and dow not in (sh.get("days") or []):  # a shift with no days ticked is not worked (same as the Scheduler)
             continue
-        s0 = hm(sh.start)
-        e = hm(sh.end)
+        s0 = hm(sh["start"])
+        e = hm(sh["end"])
         if e <= s0:
             e += 1440
         brk = []
-        for b in sh.breaks.all():
-            bs = hm(b.start)
+        for b in sh.get("breaks") or []:
+            bs = hm(b["start"])
             if bs < s0:
                 bs += 1440
-            be = hm(b.end)
-            if be < hm(b.start):
+            be = hm(b["end"])
+            if be < hm(b["start"]):
                 be += 1440
-            ln = be - hm(b.start)
-            brk.append({"name": b.label, "s": at_local_minutes(day_ms, bs), "e": at_local_minutes(day_ms, bs + ln)})
-        out.append({"name": sh.name, "s": at_local_minutes(day_ms, s0), "e": at_local_minutes(day_ms, e), "brk": brk})
+            ln = be - hm(b["start"])
+            brk.append({"name": b.get("label") or "Break", "s": at_local_minutes(day_ms, bs), "e": at_local_minutes(day_ms, bs + ln)})
+        out.append({"name": sh["name"], "s": at_local_minutes(day_ms, s0), "e": at_local_minutes(day_ms, e), "brk": brk,
+                    "variant": sh.get("variant")})
     return sorted(out, key=lambda w: w["s"])
 
 

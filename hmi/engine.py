@@ -116,10 +116,18 @@ def unattended(sh):
     return bool(sh and sh.active and sh.person_id is None and not sh.user_name)
 
 
-def _machine_shifts(machine):
-    from plant.util import shift_list
-    ids = set(machine.shifts.values_list("id", flat=True))
-    return [x for x in shift_list() if x.id in ids and x.days] if ids else [x for x in shift_list() if x.days]
+def _machine_shift_ids(machine):
+    """The machine's shifts (the removed ones too: they still count for the days before); none set = every shift."""
+    from plant.schedule import book, machine_shift_ids
+    return machine_shift_ids(machine.pk) or set(book().shifts)
+
+
+def _machine_day_shifts(machine, day, ids=None):
+    """The machine's shifts as worked on `day` (a date), with their seasonal variants: [dict]."""
+    from plant.schedule import book
+    dow = (day.weekday() + 1) % 7   # 0 = Sunday, as the shifts store it
+    ids = ids if ids is not None else _machine_shift_ids(machine)
+    return [x for x in book().all_on(day, ids) if dow in (x.get("days") or [])]
 
 
 def machine_window(machine, t):
@@ -131,13 +139,12 @@ def machine_window(machine, t):
 
     from plant.util import hm, local
     occ = []
-    for x in _machine_shifts(machine):
-        for back in range(-2, 3):
-            day = local(t).date() + timedelta(days=back)
-            if (day.weekday() + 1) % 7 not in x.days:
-                continue
-            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x.start))
-            occ.append((s0, s0 + timedelta(minutes=(hm(x.end) - hm(x.start)) % 1440 or 1440), x.name))
+    ids = _machine_shift_ids(machine)
+    for back in range(-2, 3):
+        day = local(t).date() + timedelta(days=back)
+        for x in _machine_day_shifts(machine, day, ids):
+            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x["start"]))
+            occ.append((s0, s0 + timedelta(minutes=(hm(x["end"]) - hm(x["start"])) % 1440 or 1440), x["name"]))
     occ.sort()
     for s0, e0, name in occ:
         if s0 <= t < e0:
@@ -319,15 +326,12 @@ def planned_windows(sh, kinds=False):
 
     from django.utils import timezone as _tz
 
-    from plant.models import Shift
+    from plant.schedule import book
     from plant.util import extra_breaks, hm, is_lunch, local
     if not sh:
         return []
-    shifts = list(sh.machine.shifts.prefetch_related("breaks")) if sh.machine_id else []
-    if not shifts:
-        shifts = list(Shift.objects.prefetch_related("breaks"))
-    shifts = [x for x in shifts if x.days]
-    if not shifts:
+    ids = _machine_shift_ids(sh.machine) if sh.machine_id else set(book().shifts)
+    if not ids:
         return []
     a = sh.start
     b = max(sh.end or now(), now()) + timedelta(days=1)
@@ -336,25 +340,22 @@ def planned_windows(sh, kinds=False):
     occ, out = [], []
     day = local(a).date() - timedelta(days=1)
     while day <= local(b).date():
-        dow = (day.weekday() + 1) % 7   # 0 = Sunday, as the shifts store it
-        for x in shifts:
-            if dow not in x.days:
-                continue
-            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x.start))
-            length = (hm(x.end) - hm(x.start)) % 1440 or 1440
+        for x in _machine_day_shifts(sh.machine, day, ids):   # each shift as worked that day (variants, earlier versions)
+            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x["start"]))
+            length = (hm(x["end"]) - hm(x["start"])) % 1440 or 1440
             e0 = s0 + timedelta(minutes=length)
             if e0 <= a or s0 >= b:
                 continue
             occ.append((s0, e0))
             if grace:
                 out.append((s0, s0 + timedelta(minutes=grace), "Start-up"))
-            for br in x.breaks.all():
-                if through and is_lunch(br.label):
+            for br in x.get("breaks") or []:
+                if through and is_lunch(br.get("label")):
                     continue   # the line runs through lunch, so a stop then is downtime
-                bo = (hm(br.start) - hm(x.start)) % 1440
-                bl = (hm(br.end) - hm(br.start)) % 1440
+                bo = (hm(br["start"]) - hm(x["start"])) % 1440
+                bl = (hm(br["end"]) - hm(br["start"])) % 1440
                 if bl and bo < length:
-                    out.append((s0 + timedelta(minutes=bo), s0 + timedelta(minutes=min(bo + bl, length)), br.label or "Break"))
+                    out.append((s0 + timedelta(minutes=bo), s0 + timedelta(minutes=min(bo + bl, length)), br.get("label") or "Break"))
         day += timedelta(days=1)
     # outside every shift of the machine: not scheduled to run
     occ.sort()
@@ -1768,7 +1769,9 @@ def _shift(i):
 
 @cmd("shiftAdd", "lists.edit")
 def shift_add(p, ctx):
-    s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count())
+    from django.utils import timezone as _tz
+    s = Shift.objects.create(name=f"Shift {Shift.objects.count() + 1}", start="23:00", end="06:00", days=[1, 2, 3, 4, 5], sort=Shift.objects.count(),
+                             created_on=_tz.localdate())   # not worked on the days before it was added
     for m in Machine.objects.all():
         m.shifts.add(s)
     audit(ctx, "Added a shift")
@@ -1778,7 +1781,17 @@ def shift_add(p, ctx):
 def shift_set(p, ctx):
     s = _shift(p.get("s"))
     f, v = p.get("f"), str(p.get("v") or "").strip()
-    need(f in ("name", "start", "end"), "Unknown field.")
+    need(f in ("name", "start", "end", "day"), "Unknown field.")
+    if f == "day":   # tick or untick one weekday (0 = Sunday)
+        d = int(p.get("d", -1))
+        need(0 <= d <= 6, "Pick a day.")
+        days = set(s.days or [])
+        days = days - {d} if d in days else days | {d}
+        s.days = sorted(days)
+        s.save()
+        audit(ctx, f"{s.name} runs {day_names(s.days) or 'no days'}")
+        refresh_schedule("a shift change")
+        return
     need(v, "Cannot be blank.")
     if f != "name":
         need(TIME_RE.match(v), "Use a time like 07:00.")
@@ -1795,8 +1808,138 @@ def shift_del(p, ctx):
     need(Shift.objects.count() > 1, "Keep at least one shift.")
     s = _shift(p.get("s"))
     name = s.name
-    s.delete()
+    from django.utils import timezone as _tz
+    s.retired_on = _tz.localdate()   # retired, not deleted: the days before still ran it (plant/schedule.py)
+    s.save()
     audit(ctx, f"Removed {name}")
+    refresh_schedule("a shift change")
+
+
+DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def day_names(days):
+    return ", ".join(DAY_NAMES[d] for d in [1, 2, 3, 4, 5, 6, 0] if d in (days or []))
+
+
+def _variant(p):
+    from plant.models import ShiftVariant
+    v = ShiftVariant.objects.filter(pk=p.get("v_id"), shift__retired_on__isnull=True).select_related("shift").first()
+    need(v, "Seasonal variant not found.")
+    return v
+
+
+def _date(v, what):
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat(str(v or "").strip())
+    except ValueError:
+        raise Need(f"Pick the {what} date.")
+
+
+@cmd("varAdd", "lists.edit")
+def var_add(p, ctx):
+    """Add a seasonal variant: a copy of the shift (times, days, breaks) for a date range, changed there without
+    touching the main schedule."""
+    from datetime import date as _date
+
+    from django.utils import timezone as _tz
+
+    from plant.models import ShiftVariant
+    s = _shift(p.get("s"))
+    t = _tz.localdate()
+    nxt = _date(t.year + (t.month == 12), t.month % 12 + 1, 1)   # next month, by default
+    end = _date(nxt.year + (nxt.month == 12), nxt.month % 12 + 1, 1) - timedelta(days=1)
+    v = ShiftVariant.objects.create(shift=s, name=f"{s.name} · {nxt.strftime('%B')}", date_from=nxt, date_to=end, start=s.start, end=s.end,
+                                    days=list(s.days or []), breaks=[{"label": b.label, "start": b.start, "end": b.end} for b in s.breaks.all()])
+    audit(ctx, f"Added seasonal variant {v.name} ({v.date_from:%m/%d/%Y}–{v.date_to:%m/%d/%Y})")
+    refresh_schedule("a shift change")
+
+
+@cmd("varSet", "lists.edit")
+def var_set(p, ctx):
+    from plant.util import hm
+    v = _variant(p)
+    f, val = p.get("f"), str(p.get("v") or "").strip()
+    if f == "name":
+        need(val, "Cannot be blank.")
+        v.name = val[:60]
+    elif f in ("start", "end"):
+        need(TIME_RE.match(val), "Use a time like 07:00.")
+        setattr(v, f, val)
+    elif f in ("from", "to"):
+        d = _date(val, "start" if f == "from" else "end")
+        if f == "from":
+            v.date_from = d
+        else:
+            v.date_to = d
+        need(v.date_from <= v.date_to, "The end date is before the start date.")
+    elif f == "day":
+        d = int(p.get("d", -1))
+        need(0 <= d <= 6, "Pick a day.")
+        days = set(v.days or [])
+        v.days = sorted(days - {d} if d in days else days | {d})
+    elif f in ("bname", "bstart", "bmins"):
+        brs = list(v.breaks or [])
+        i = int(p.get("b", -1))
+        need(0 <= i < len(brs), "Break not found.")
+        b = dict(brs[i])
+        if f == "bname":
+            need(val, "Cannot be blank.")
+            b["label"] = val[:60]
+        elif f == "bstart":
+            need(TIME_RE.match(val), "Use a time like 11:30.")
+            ln = (hm(b["end"]) - hm(b["start"])) % 1440
+            b["start"], b["end"] = val, _mins_to_hm(hm(val) + ln)
+        else:
+            b["end"] = _mins_to_hm(hm(b["start"]) + max(1, int(float(val or 0))))
+        brs[i] = b
+        v.breaks = brs
+    else:
+        raise Need("Unknown field.")
+    v.save()
+    audit(ctx, f"Seasonal variant {v.name}: {f} set to {val or p.get('d')}")
+    refresh_schedule("a shift change")
+
+
+@cmd("varBreak", "lists.edit")
+def var_break(p, ctx):
+    """Add (kind: lunch / startup / shutdown / break) or remove (del: index) a break in a seasonal variant."""
+    from plant.util import hm
+    v = _variant(p)
+    brs = list(v.breaks or [])
+    if p.get("del") not in (None, ""):
+        i = int(p["del"])
+        need(0 <= i < len(brs), "Break not found.")
+        gone = brs.pop(i)
+        msg = f"Removed {gone.get('label')} from {v.name}"
+    else:
+        kind = p.get("kind") or "break"
+        s0, length = hm(v.start), (hm(v.end) - hm(v.start)) % 1440 or 1440
+        if kind == "lunch":
+            need(not any("lunch" in (b.get("label") or "").lower() for b in brs), f"{v.name} already has a lunch: change its time there.")
+            st, mins, label = s0 + max(0, (length - 30) // 2) // 15 * 15, 30, "Lunch"
+        elif kind == "startup":
+            st, mins, label = s0, 15, "Start-up"
+        elif kind == "shutdown":
+            st, mins, label = s0 + length - 15, 15, "Shut-down"
+        else:
+            st, mins, label = s0 + 120, 10, "Break"
+        brs.append({"label": label, "start": _mins_to_hm(st), "end": _mins_to_hm(st + mins)})
+        brs.sort(key=lambda b: (hm(b["start"]) - s0) % 1440)
+        msg = f"Added {label} to {v.name}"
+    v.breaks = brs
+    v.save()
+    audit(ctx, msg)
+    refresh_schedule("a break change")
+
+
+@cmd("varDel", "lists.edit")
+def var_del(p, ctx):
+    v = _variant(p)
+    name = v.name
+    v.delete()
+    audit(ctx, f"Removed seasonal variant {name}")
     refresh_schedule("a shift change")
 
 

@@ -17,6 +17,7 @@ import math
 from django.db import transaction
 
 from plant.models import MO, STAGE_ORDER, Machine, PlantSettings, Shift
+from plant.schedule import book
 from plant.util import DAY, HOUR, MIN, Catalog, add_days_ms, at_local_minutes, from_ms, hm, is_lunch, local, ms, now, sod_ms
 
 from .models import Job
@@ -37,9 +38,11 @@ def fmt_n(n):
 def load_world(jobs_override=None):
     st = PlantSettings.load()
     shifts = []
-    for sh in Shift.objects.prefetch_related("breaks"):
+    for sh in Shift.objects.prefetch_related("breaks", "variants"):
         shifts.append({"id": sh.id, "name": sh.name, "start": sh.start, "end": sh.end, "days": list(sh.days or []),
-                       "breaks": [{"label": b.label, "start": b.start, "end": b.end} for b in sh.breaks.all()]})
+                       "breaks": [{"label": b.label, "start": b.start, "end": b.end} for b in sh.breaks.all()],
+                       "variants": [{"name": v.name, "from": v.date_from.isoformat(), "to": v.date_to.isoformat(), "start": v.start,
+                                     "end": v.end, "days": list(v.days or []), "breaks": list(v.breaks or [])} for v in sh.variants.all()]})
     machines = []
     for m in Machine.objects.prefetch_related("shifts"):
         machines.append({"id": m.id, "name": m.name, "stage": m.stage, "mode": m.speed_mode, "ppm": m.ppm, "rate": m.rate,
@@ -156,7 +159,7 @@ class Calendar:
         status, by_date = self.labor.day_status_ms(day) if self.labor else ("WORK", False)
         out = []
         for sid in ((m.get("shifts") or []) if status == "WORK" else []):
-            sh = self.shifts.get(sid)
+            sh = book().on(sid, local(from_ms(day)).date())   # as worked that day: its seasonal variant, or how it was then
             if not sh or not (by_date or dow in (sh.get("days") or [])):
                 continue
             s0 = hm(sh["start"])
