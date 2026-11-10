@@ -1,5 +1,7 @@
 ## What's new in 1.8.5
 
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
 - **Scheduler board**
   - A dragged MO now starts where its left edge (the blue line) is, not where the mouse pointer is.
   - Days with no shift on any line (weekends, holidays) shrink to a thin strip, so the board is mostly production time. Week and month view stretch to fill the screen.
