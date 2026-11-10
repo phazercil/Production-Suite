@@ -785,7 +785,7 @@ def report_for(sh, need_reason=0):
     for p in TicketPhoto.objects.filter(ticket__in=tickets).values("ticket_id"):
         npics[p["ticket_id"]] = npics.get(p["ticket_id"], 0) + 1
     notes = list(ShiftNote.objects.filter(shift=sh).order_by("t"))
-    mos = [{"mo": r.mo, "item": r.item, "qty": r.qty, "scrap": r.scrap, "start": r.start_time, "end": r.end_time}
+    mos = [{"id": r.pk, "mo": r.mo, "item": r.item, "qty": r.qty, "scrap": r.scrap, "start": r.start_time, "end": r.end_time}
            for r in MoRun.objects.filter(shift=sh).order_by("start_time")]
     if sh.active and sh.mo_id:
         mos.append({"mo": sh.mo.number, "item": sh.mo.part, "qty": sh.mo_count, "scrap": 0, "start": sh.mo_start, "end": None})

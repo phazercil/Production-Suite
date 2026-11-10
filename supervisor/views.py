@@ -3,14 +3,14 @@ changeover piece, filtered by line, dates, person, MO and result, with a CSV of 
 "Open Supervisor" (Admin › Permissions) only."""
 import csv
 from datetime import date, datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from django.db.models import Count, Q, Sum
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
 from hmi.models import ChangeoverPiece, Downtime, QCCheck, ShiftRun
 from hmi.views import current_person, touch
@@ -19,8 +19,9 @@ from plant.models import Machine, PlantSettings
 from plant.util import local
 
 PERM = "section.supervisor"
+EDIT_PERM = "history.edit"   # Correct history: change, split or delete past records (supervisor/edit.py)
 PER_PAGE = 100
-TABS = [("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers")]
+TABS = [("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs")]
 NOBODY = "Nobody logged in"
 
 
@@ -145,7 +146,20 @@ def cos(f):
     return qs.order_by("-start"), {"Pieces": None, "Changeovers": agg["n"], "Minutes": agg["mins"] or 0}
 
 
-LISTS = {"logs": logs, "qc": qcs, "down": downs, "co": cos}
+def moruns(f):
+    from hmi.models import MoRun
+    qs = MoRun.objects.filter(start_time__gte=f["A"], start_time__lt=f["B"]).select_related("shift")
+    if f["line"]:
+        qs = qs.filter(line=f["line"])
+    if f["who"]:
+        qs = qs.filter(shift__user_name__icontains=f["who"])
+    if f["mo"]:
+        qs = qs.filter(Q(mo__icontains=f["mo"]) | Q(item__icontains=f["mo"]))
+    agg = qs.aggregate(q=Sum("qty"), s=Sum("scrap"))
+    return qs.order_by("-start_time"), {"Runs": None, "Pieces": agg["q"] or 0, "Scrap": agg["s"] or 0}
+
+
+LISTS = {"logs": logs, "qc": qcs, "down": downs, "co": cos, "morun": moruns}
 
 
 def _who(name):
@@ -175,6 +189,11 @@ def csv_rows(tab, qs):
         for d in qs:
             yield [d.line, fmt(d.start_time), fmt(d.end_time), d.minutes, d.reason or "Not entered", d.notes, d.mo,
                    _who(d.shift.user_name if d.shift else ""), d.shift.shift_name if d.shift else ""]
+    elif tab == "morun":
+        yield ["Line", "MO", "Item", "Qty", "Scrap", "Start", "End", "Operator", "Shift"]
+        for r in qs:
+            yield [r.line, r.mo, r.item, r.qty, r.scrap, fmt(r.start_time), fmt(r.end_time), _who(r.shift.user_name if r.shift else ""),
+                   r.shift.shift_name if r.shift else ""]
     else:
         yield ["Changeover", "Line", "From MO", "To MO", "Who", "Shift", "Start", "End", "Minutes", "Steps checked off", "Steps in all", "How it ended", "Note"]
         for c in qs:
@@ -218,8 +237,8 @@ def page(request):
         "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
         "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,
         "next": _query(f, page=f["page"] + 1) if first + PER_PAGE < n else None,
-        "csv": _query(f, csv="1"), "here": _query(f), "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS},
-        "nobody": NOBODY})
+        "csv": _query(f, csv="1"), "here": _query(f), "backq": quote("/supervisor/?" + _query(f), safe=""), "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS},
+        "nobody": NOBODY, "canEdit": perms.can(me, EDIT_PERM), "msg": request.GET.get("msg", "")[:200]})
 
 
 @ensure_csrf_cookie
@@ -237,5 +256,117 @@ def log(request, pk):
     for q in P["qcList"]:
         q.vals = qc_values(q, labels)
     back = request.GET.get("back") or ""
-    return render(request, "supervisor/log.html", {"mode": "supervisor", "me": me, "P": P, "back": back if back.startswith("tab=") or not back else "",
-                                                   "nobody": NOBODY})
+    back = back if back.startswith("tab=") or not back else ""
+    from .models import HistoryEdit
+    return render(request, "supervisor/log.html", {"mode": "supervisor", "me": me, "P": P, "back": back, "nobody": NOBODY,
+                                                   "canEdit": perms.can(me, EDIT_PERM), "here": f"/supervisor/log/{sh.pk}/" + (f"?back={quote(back)}" if back else ""),
+                                                   "msg": request.GET.get("msg", "")[:200],
+                                                   "edits": HistoryEdit.objects.filter(kind="log", obj_id=sh.pk)[:50]})
+
+
+# ------------------------------------------------------------------ corrections
+def _local_input(dt):
+    return local(dt).strftime("%Y-%m-%dT%H:%M") if dt else ""
+
+
+def _fields(kind, x):
+    """The form for a record: [{name, label, type, value, options?, help?}]."""
+    from hmi import engine
+    if kind == "downtime":
+        reasons = list(engine.config().get("reasons") or [])
+        if x.reason and x.reason not in reasons:
+            reasons.append(x.reason)
+        return [{"name": "start", "label": "Start", "type": "datetime-local", "value": _local_input(x.start_time)},
+                {"name": "end", "label": "End", "type": "datetime-local", "value": _local_input(x.end_time)},
+                {"name": "reason", "label": "Reason", "type": "select", "value": x.reason or "", "options": [("", "Not entered")] + [(r, r) for r in reasons]},
+                {"name": "notes", "label": "Notes", "type": "textarea", "value": x.notes},
+                {"name": "mo", "label": "MO", "type": "text", "value": x.mo}]
+    if kind == "log":
+        from plant.models import Person
+        names = list(Person.objects.order_by("name").values_list("name", flat=True))
+        if x.user_name and x.user_name not in names:
+            names.append(x.user_name)
+        out = [{"name": "operator", "label": "Operator", "type": "select", "value": x.user_name or "",
+                "options": [("", NOBODY)] + [(n, n) for n in names]},
+               {"name": "shift_name", "label": "Shift", "type": "text", "value": x.shift_name},
+               {"name": "count", "label": "Units made", "type": "number", "value": x.count},
+               {"name": "start", "label": "Start", "type": "datetime-local", "value": _local_input(x.start)}]
+        if not x.active:
+            out.append({"name": "end", "label": "End", "type": "datetime-local", "value": _local_input(x.end)})
+        return out + [{"name": "issues", "label": "Start-of-shift issue", "type": "textarea", "value": x.issues},
+                      {"name": "end_issues", "label": "End-of-shift issue", "type": "textarea", "value": x.end_issues}]
+    if kind == "qc":
+        from hmi import qc
+        items = qc.items_for(x.shift.machine.stage if x.shift and x.shift.machine else "s1")
+        vals = dict(x.values or {}) or {k: getattr(x, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}   # older checks
+        out = []
+        for it in items:
+            if it["type"] == "check":
+                out.append({"name": it["key"], "label": it["label"], "type": "select", "value": vals.get(it["key"], ""),
+                            "options": [("Pass", "Pass"), ("Fail", "Fail")]})
+            else:
+                out.append({"name": it["key"], "label": it["label"] + (" (in)" if it["type"] == "measure" else ""), "type": "number",
+                            "step": "any", "value": "" if vals.get(it["key"]) is None else vals.get(it["key"])})
+        return out + [{"name": "by", "label": "Checked by", "type": "text", "value": x.by},
+                      {"name": "review", "label": "Review", "type": "select", "value": x.review,
+                       "options": [("", "Not needed"), ("pending", "Waiting for review"), ("approved", "Approved"), ("disapproved", "Disapproved")],
+                       "help": "Pass or fail follows the values and the part's specs."},
+                      {"name": "late_reason", "label": "Late reason", "type": "textarea", "value": x.late_reason}]
+    if kind == "co":
+        return [{"name": "by", "label": "Who", "type": "text", "value": x.by, "help": "Blank: nobody logged in"},
+                {"name": "shift_name", "label": "Shift", "type": "text", "value": x.shift_name},
+                {"name": "start", "label": "Start", "type": "datetime-local", "value": _local_input(x.start)},
+                {"name": "end", "label": "End", "type": "datetime-local", "value": _local_input(x.end)},
+                {"name": "ended", "label": "How it ended", "type": "select", "value": x.ended,
+                 "options": [(k, k.capitalize()) for k in ("finished", "passed over", "shift change", "operator change", "picked up", "shift ended")]},
+                {"name": "note", "label": "Note", "type": "textarea", "value": x.note}]
+    return [{"name": "mo", "label": "MO", "type": "text", "value": x.mo}, {"name": "item", "label": "Item", "type": "text", "value": x.item},
+            {"name": "qty", "label": "Qty", "type": "number", "value": x.qty}, {"name": "scrap", "label": "Scrap", "type": "number", "value": x.scrap},
+            {"name": "start", "label": "Start", "type": "datetime-local", "value": _local_input(x.start_time)},
+            {"name": "end", "label": "End", "type": "datetime-local", "value": _local_input(x.end_time)}]
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def edit(request, kind, pk):
+    from hmi import engine
+
+    from . import edit as E
+    from .models import HistoryEdit
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    if kind not in E.KINDS:
+        raise Http404("No such record")
+    x = E.KINDS[kind].objects.filter(pk=pk).first()
+    back = request.GET.get("back") or request.POST.get("back") or ""
+    back = back if back.startswith("/supervisor/") else "/supervisor/"
+    if not x:
+        return HttpResponseRedirect(back)
+    can = perms.can(me, EDIT_PERM)
+    err = ""
+    if request.method == "POST":
+        if not can:
+            err = "You don't have permission to correct history (Admin › Permissions › Correct history)."
+        else:
+            a = request.POST.get("action")
+            p = {k: request.POST.get(k) for k in request.POST if k not in ("csrfmiddlewaretoken", "action", "back")}
+            p.update(kind=kind, id=x.pk)
+            if a == "delete" and request.POST.get("sure") != "1":
+                r = {"ok": False, "error": "Tick “Yes, delete it” to delete."}
+            else:
+                r = engine.execute({"save": "histEdit", "delete": "histDelete", "split": "downSplit"}.get(a, "histEdit"), p, engine.Ctx(user=me))
+            if r.get("ok"):
+                msg = (r.get("msg") or "Saved.")[:200]
+                if a == "delete" or (kind == "log" and a == "delete"):
+                    sep = "&" if "?" in back else "?"
+                    return HttpResponseRedirect(f"{back}{sep}{urlencode({'msg': msg})}")
+                return HttpResponseRedirect(f"/supervisor/edit/{kind}/{x.pk}/?{urlencode({'back': back, 'msg': msg})}")
+            err = r.get("error") or "That didn't save."
+            x = E.KINDS[kind].objects.get(pk=pk)
+    sh = x if kind == "log" else getattr(x, "shift", None)
+    return render(request, "supervisor/edit.html", {
+        "mode": "supervisor", "me": me, "kind": kind, "label": E.LABEL[kind], "x": x, "summary": E.summary(kind, x), "fields": _fields(kind, x),
+        "can": can, "err": err, "msg": request.GET.get("msg", "")[:200], "back": back, "sh": sh,
+        "canDelete": not (kind == "log" and x.active), "split": kind == "downtime",
+        "edits": HistoryEdit.objects.filter(kind=kind, obj_id=x.pk)[:50]})

@@ -18,6 +18,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("floor.override", "Supervisor override", "Take over a screen with the Supervisor button to change finished entries.", SUP),
         ("downtime.reason", "Any downtime reason", "Type a reason that isn't on the list, or change a reason someone else picked.", SUP),
         ("qc.edit", "Edit finished QC checks", "Change a QC check after it was saved.", SUP),
+        ("history.edit", "Correct history", "Change, split or delete past shift logs, downtime, QC checks, changeovers and MO runs in Supervisor › History. Every change is logged.", LEAD),
         ("qc.approve", "Approve out-of-spec QC", "Approve or disapprove a QC check that failed, and scrap filters from the count.", SUP),
         ("runs.override", "Override a running shift", "Change the speed or count settings of a shift that is running.", LEAD),
         ("tickets.work", "Work maintenance requests", "Add repair notes and close maintenance requests.", SUP),

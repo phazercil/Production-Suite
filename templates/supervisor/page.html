@@ -3,7 +3,8 @@
 {% block body_class %}scroll{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
 {% block content %}<div class="sv">
-  <div class="sv-head"><h1>History</h1><span class="muted">Every shift log, QC check, downtime entry and changeover · read only</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  <div class="sv-head"><h1>History</h1><span class="muted">Every shift log, QC check, downtime entry, changeover and MO run{% if canEdit %} · Edit corrects a record, and every change is kept{% else %} · read only{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   <nav class="sv-tabs" aria-label="What to look at">{% for k, label in tabs %}<a href="?{{ tabq|get:k }}" {% if f.tab == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
   <form class="sv-filter" method="get">
     <input type="hidden" name="tab" value="{{ f.tab }}">
@@ -29,7 +30,7 @@
       <td class="nw">{{ x.start|day }} {{ x.start|clock }}</td><td class="nw">{% if x.active %}<span class="pill ok">running</span>{% else %}{{ x.end|clock }}{% endif %}</td>
       <td class="n">{{ x.count|num }}</td><td class="n">{% if x.uptime is not None %}{{ x.uptime }}%{% else %}—{% endif %}</td><td class="n">{% if x.down_mins is not None %}{{ x.down_mins }} min{% else %}—{% endif %}</td>
       <td class="n">{{ x.qc_n }}{% if x.qc_fail %} <span class="bad">· {{ x.qc_fail }} fail</span>{% endif %}</td>
-      <td><a href="/supervisor/log/{{ x.pk }}/?back={{ here|urlencode }}">Open report</a></td></tr>
+      <td><a href="/supervisor/log/{{ x.pk }}/?back={{ here|urlencode }}">Open report</a>{% if canEdit %} · <a class="edit" href="/supervisor/edit/log/{{ x.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="10" class="empty">No shift logs for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "qc" %}
     <table class="st"><thead><tr><th>Time</th><th>Line</th><th>MO · item</th><th>By</th><th>Result</th><th>Values</th><th class="n">Scrap</th><th>Review</th><th></th></tr></thead><tbody>
@@ -39,7 +40,7 @@
       <td class="vals">{% for v in q.vals %}<span class="{% if v.bad %}bad{% endif %}">{{ v.k }} <b>{{ v.v }}</b></span>{% endfor %}</td>
       <td class="n">{{ q.scrap }}{% if q.scrapped %}<div class="note">{{ q.scrapped }} taken off</div>{% endif %}</td>
       <td>{% if q.review %}<span class="pill {% if q.review == 'approved' %}ok{% elif q.review == 'pending' %}warn{% else %}bad{% endif %}">{{ q.review|capfirst }}</span>{% if q.reviewed_by %}<div class="note">{{ q.reviewed_by }}</div>{% endif %}{% endif %}</td>
-      <td>{% if q.shift_id %}<a href="/supervisor/log/{{ q.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}</td></tr>
+      <td>{% if q.shift_id %}<a href="/supervisor/log/{{ q.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/qc/{{ q.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="9" class="empty">No QC checks for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "down" %}
     <table class="st"><thead><tr><th>Line</th><th>Start</th><th>End</th><th class="n">Min</th><th>Reason</th><th>Notes</th><th>MO</th><th>Operator</th><th></th></tr></thead><tbody>
@@ -47,8 +48,15 @@
       <td>{{ d.line }}</td><td class="nw">{{ d.start_time|day }} {{ d.start_time|clock }}</td><td class="nw">{{ d.end_time|clock }}</td><td class="n">{{ d.minutes }}</td>
       <td>{% if d.reason %}{{ d.reason }}{% else %}<span class="warn">Not entered</span>{% endif %}</td><td>{{ d.notes }}</td><td>{{ d.mo }}</td>
       <td>{% if d.shift %}{% if d.shift.user_name %}{{ d.shift.user_name }}{% else %}<span class="muted">{{ nobody }}</span>{% endif %}<div class="note">{{ d.shift.shift_name }}</div>{% endif %}</td>
-      <td>{% if d.shift_id %}<a href="/supervisor/log/{{ d.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}</td></tr>
+      <td>{% if d.shift_id %}<a href="/supervisor/log/{{ d.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/downtime/{{ d.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="9" class="empty">No downtime for these filters.</td></tr>{% endfor %}</tbody></table>
+  {% elif f.tab == "morun" %}
+    <table class="st"><thead><tr><th>Line</th><th>MO · item</th><th class="n">Qty</th><th class="n">Scrap</th><th>Start</th><th>End</th><th>Operator</th><th></th></tr></thead><tbody>
+    {% for r in rows %}<tr><td>{{ r.line }}</td><td class="nw">{{ r.mo }} · {{ r.item }}</td><td class="n">{{ r.qty|num }}</td><td class="n">{{ r.scrap }}</td>
+      <td class="nw">{{ r.start_time|day }} {{ r.start_time|clock }}</td><td class="nw">{{ r.end_time|clock }}</td>
+      <td>{% if r.shift %}{% if r.shift.user_name %}{{ r.shift.user_name }}{% else %}<span class="muted">{{ nobody }}</span>{% endif %}<div class="note">{{ r.shift.shift_name }}</div>{% endif %}</td>
+      <td>{% if r.shift_id %}<a href="/supervisor/log/{{ r.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/morun/{{ r.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">No MO runs for these filters.</td></tr>{% endfor %}</tbody></table>
   {% else %}
     <table class="st"><thead><tr><th>Line</th><th>Changeover</th><th>Who</th><th>Shift</th><th>Time</th><th class="n">Min</th><th>Steps they checked off</th><th>How it ended</th><th></th></tr></thead><tbody>
     {% for c in rows %}<tr>
@@ -57,7 +65,7 @@
       <td class="nw">{{ c.start|day }} {{ c.start|clock }} – {{ c.end|clock }}</td><td class="n">{{ c.minutes }}</td>
       <td>{% if c.steps %}{{ c.steps|length }} of {{ c.steps_total }}<div class="note">{{ c.steps|join:"; " }}</div>{% else %}<span class="muted">none</span>{% endif %}</td>
       <td>{{ c.ended|capfirst }}{% if c.note %}<div class="note">“{{ c.note }}”</div>{% endif %}</td>
-      <td>{% if c.shift_id %}<a href="/supervisor/log/{{ c.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}</td></tr>
+      <td>{% if c.shift_id %}<a href="/supervisor/log/{{ c.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/co/{{ c.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="9" class="empty">No changeovers for these filters.</td></tr>{% endfor %}</tbody></table>
   {% endif %}
   </div>
