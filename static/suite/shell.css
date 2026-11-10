@@ -45,6 +45,12 @@ body.offline .conn .dot{background:var(--bad,#E06C5B)}
 .chartbox .c-rated{stroke:#8A939C;stroke-width:1;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
 .chartbox .c-area{fill:rgba(91,155,213,.16)}
 .chartbox .c-line{fill:none;stroke:#5B9BD5;stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.chartbox .c-shade{fill:rgba(255,255,255,.035)}
+.chartbox .c-mark{stroke:#6E7781;stroke-width:1;vector-effect:non-scaling-stroke}
+.chartbox .c-now{stroke:#E3B341;stroke-width:1.5;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.chartbox .c-mlab{position:absolute;top:4px;margin-left:5px;color:#A7AFB8;font:600 10px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap;pointer-events:none}
+.chartbox .c-mlab.r{margin-left:-5px;transform:translateX(-100%)}
+.chartbox .c-empty{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);color:#A7AFB8;font-size:13px}
 .chartbox .c-dot{position:absolute;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#5B9BD5}
 .chartbox .c-y,.chartbox .c-x{position:absolute;color:#A7AFB8;font:500 10px 'IBM Plex Mono',ui-monospace,monospace;line-height:1;white-space:nowrap}
 .chartbox .c-y{right:calc(100% + 6px);transform:translateY(-50%)}

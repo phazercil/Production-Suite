@@ -565,3 +565,5 @@ body.c-dragging .port.out{cursor:grabbing}
 .stoppop-card .btn{min-width:96px;min-height:52px;font-size:17px}
 @keyframes stoppulse{0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.45),0 0 0 0 rgba(224,108,91,.55)}50%{box-shadow:0 12px 32px rgba(0,0,0,.45),0 0 0 10px rgba(224,108,91,0)}}
 @media (prefers-reduced-motion:reduce){.stoppop-card{animation:none}}
+table.xl td.nw{white-space:nowrap}
+table.xl tr.grouprow td{text-align:left;background:var(--panel-2,rgba(255,255,255,.04));color:var(--ink-2,#A7AFB8);padding:10px 14px}

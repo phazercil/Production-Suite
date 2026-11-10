@@ -5,11 +5,13 @@ downtime reason or a QC check is due, the alarm list and menu badges, the banner
 what is up next and whether it needs a changeover, part specs, and the changeover step list. Templates only
 display what this returns; every button posts to hmi/kviews.py, which runs the plant rules in hmi/engine.py.
 """
+import math
 from datetime import timedelta
 from urllib.parse import quote, urlencode
 
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from plant.models import MO, Machine, PartSpec, Person, PlantSettings, part_key
 from plant.util import Catalog, from_ms, ms, now, part_spec, shift_at
@@ -140,7 +142,14 @@ class Screen:
 
     # ------------------------------------------------------------ the rules that drive prompts and badges
     def need_reason(self):
-        return list(Downtime.objects.filter(reason__isnull=True, line=self.station).order_by("start_time"))
+        """Stops still waiting for a reason: an operator's are their own shift's; a shift lead or admin sees every
+        shift's on this line."""
+        qs = Downtime.objects.filter(reason__isnull=True, line=self.station)
+        if not self.is_lead:
+            if not self.shift:
+                return []
+            qs = qs.filter(shift=self.shift)
+        return list(qs.order_by("start_time"))
 
     def unexplained_mins(self):
         return sum(d.minutes or 0 for d in self.need_reason())
@@ -325,10 +334,65 @@ class Screen:
             q["var-" + g["lineVar"]] = self.shift.line
         return f"{g['url'].rstrip('/')}/d-solo/{quote(g['uid'], safe='')}/{quote(g.get('slug') or '_', safe='')}?{urlencode(q)}"
 
-    def history(self):
-        if not self.shift:
+    def history(self, start=None, end=None):
+        """Speed readings: this shift's, or (start, end) the machine's over that stretch, whatever log they were in,
+        averaged into at most ~1,000 points."""
+        if start and self.machine:
+            rows = list(PpmReading.objects.filter(machine=self.machine, t__gte=start, t__lte=min(end, self.t)).order_by("t").values_list("t", "ppm"))
+        elif self.shift:
+            rows = list(PpmReading.objects.filter(shift=self.shift).order_by("t").values_list("t", "ppm")[:1500])
+        else:
             return []
-        return list(PpmReading.objects.filter(shift=self.shift).order_by("t").values_list("t", "ppm")[:1500])
+        if len(rows) <= 1000:
+            return rows
+        k = math.ceil(len(rows) / 1000)
+        return [(rows[i][0], round(sum(v for _, v in rows[i:i + k]) / len(rows[i:i + k]))) for i in range(0, len(rows), k)]
+
+    def chart_window(self):
+        """The run screen's speed chart: an operator sees their whole shift plus the last half of the shift before it
+        (half its length); a shift lead or admin sees the whole day. Returns start, end, marks, shade."""
+        from datetime import datetime as _dt
+
+        from . import engine
+        if not self.machine:
+            return None
+        t = self.t
+        if self.is_lead:
+            day = timezone.make_aware(_dt.combine(timezone.localdate(t), _dt.min.time()))
+            end, marks, x = day + timedelta(days=1), [], day
+            for _ in range(12):   # each shift (and stretch with no shift) that starts in the day
+                w = engine.machine_window(self.machine, x + timedelta(seconds=30))
+                if w["s"] > day:
+                    marks.append((w["s"], "No shift" if w.get("noShift") else w["name"]))
+                if w["e"] >= end or w["e"] <= x:
+                    break
+                x = w["e"]
+            return day, end, marks, None
+        w = engine.log_window(self.shift, t) if self.shift else None
+        if not w or not (w["s"] <= t <= w["e"]):
+            w = engine.machine_window(self.machine, t)   # the shift going on now
+        prev, x = None, w["s"]
+        for _ in range(4):   # the shift before (skipping stretches with no shift)
+            p = engine.machine_window(self.machine, x - timedelta(seconds=30))
+            if not p.get("noShift") or p["s"] >= x:
+                prev = p
+                break
+            x = p["s"]
+        lead = (prev["e"] - prev["s"]) / 2 if prev and not prev.get("noShift") else timedelta(hours=4)
+        start = w["s"] - lead
+        marks = [(w["s"], w["name"])]
+        if prev and not prev.get("noShift") and prev["e"] < w["s"]:
+            marks.append((prev["e"], "No shift"))
+        return start, w["e"], marks, (start, w["s"])
+
+    def speed_chart(self, empty="No readings yet"):
+        win = self.chart_window()
+        rated = self.machine.ppm if self.machine else 0
+        if not win:
+            return speed_chart(self.history(), rated, empty=empty, label=f"Pleater speed for {self.station}")
+        start, end, marks, shade = win
+        return speed_chart(self.history(start, end), rated, empty=empty, start=start, end=end, now=self.t, marks=marks, shade=shade,
+                           label=f"Pleater speed for {self.station}, {'today' if self.is_lead else 'this shift'}")
 
     def up_next(self, line=None):
         """Open MOs planned for the line in order, and whether each one needs a changeover first."""
@@ -374,9 +438,8 @@ class Screen:
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,
                "grafana": self.grafana_src((self.settings.get("grafana") or {}).get("ppm")),
-               "chart": speed_chart(hist, self.machine.ppm if self.machine else 0,
-                                    empty="Waiting for the first reading…" if sh else "No shift running",
-                                    label=f"Pleater speed for {self.station}, this shift"),
+               "chart": self.speed_chart(empty="Waiting for the first reading…" if sh else "No readings yet"),
+               "chartDay": self.is_lead,
                "alert": self.reason_due() or bool(sh and sh.stop_start), "qcDue": self.qc_due(), "reasonDue": self.reason_due()}
         if sh:
             out["pill"] = STATE_PILL.get(sh.state, ("idle", sh.state.title()))
@@ -620,7 +683,8 @@ def downtime_page(s):
     from .kviews import downtime_rows
     sh = s.shift
     mine = list(Downtime.objects.filter(shift=sh).order_by("start_time")) if sh else []
-    older = list(Downtime.objects.filter(reason__isnull=True, line=s.station).exclude(shift=sh).order_by("start_time")) if sh else s.need_reason()
+    # earlier shifts' stops still without a reason: shift leads and admins only (operators see their own shift's)
+    older = [d for d in s.need_reason() if not sh or d.shift_id != sh.pk] if s.is_lead else []
     by = Counter()
     for d in mine:
         by[d.reason or "Not entered"] += d.minutes or 0
@@ -692,7 +756,7 @@ def status_page(s):
     panels = [(t, s.grafana_src(p)) for t, p in (("Pleater speed", g.get("ppm")), ("Uptime", g.get("uptime")), ("Count", g.get("count"))) if p] if gon else []
     from .snapshot import server_info
     return {"cards": cards, "grafana": g if gon else None, "panels": panels, "dash": f"{g.get('url', '').rstrip('/')}/d/{g.get('uid', '')}" if gon else "",
-            "chart": speed_chart(s.history(), s.machine.ppm if s.machine else 0, label=f"Pleater speed for {s.station}"), "srv": server_info()}
+            "chart": s.speed_chart(), "srv": server_info()}
 
 
 FEED_LABELS = [("demo", "Demo replay"), ("http", "Read from URL"), ("push", "Pushed to the server"), ("influx", "InfluxDB query"),
