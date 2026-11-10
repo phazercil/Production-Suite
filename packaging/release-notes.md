@@ -4,6 +4,7 @@
   - Operators see their whole shift, start to end, plus the last half of the shift before it (shaded), with the shift's start marked and a line at the current time.
   - Shift leads and admins (Shift lead / Admin mode) see the whole day, midnight to midnight, with every shift's start marked.
   - The chart shows the machine's readings whatever log they were in, and leaves gaps empty instead of drawing a line across them.
+- **Scheduler board:** hours with no shift on any line are left out of each day (e.g. midnight to 7 am), even when a shift ends at midnight or runs past it. A day can show two stretches (00:00–02:00 · 07:00–24:00 around an overnight shift); a dotted line marks where hours were left out. Crewed overtime and scheduled runs outside the shifts still show.
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 

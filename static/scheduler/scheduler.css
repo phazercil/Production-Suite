@@ -256,3 +256,4 @@ td input[type=text]{width:140px}
 .g-row.idle .g-lab .nm{color:var(--muted);font-weight:500}
 .g-row.idle .g-track{opacity:.75}
 .legend .offkey{display:inline-block;width:14px;height:10px;border-radius:2px;background:#15181c;border:1px solid var(--line);vertical-align:-1px}
+.segcut{position:absolute;top:0;bottom:0;width:0;border-left:2px dotted rgba(255,255,255,.18);pointer-events:none;z-index:1}
