@@ -27,3 +27,5 @@ class PlantConfig(AppConfig):
         for label in ("plant", "hmi", "scheduler"):
             for model in apps.get_app_config(label).get_models():
                 pre_save.connect(_fit_text, sender=model, dispatch_uid=f"fit-text-{model.__name__}")
+        from . import schedule
+        schedule.connect()

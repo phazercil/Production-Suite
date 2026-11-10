@@ -26,19 +26,62 @@ FEED_TYPES = [("demo", "Demo replay"), ("http", "Read from URL"), ("push", "Push
 PALETTE = ["#c46c3c", "#5e9951", "#3f7fb5", "#8c5bb0", "#b5933a", "#3a9a98", "#b54a6a", "#6b7a8a"]
 
 
+class CurrentShifts(models.Manager):
+    """Shifts in the schedule now. A removed shift is retired, not deleted, so the days before it was removed are
+    still judged by it (plant/schedule.py); Shift.all_objects includes those."""
+    def get_queryset(self):
+        return super().get_queryset().filter(retired_on__isnull=True)
+
+
 class Shift(models.Model):
     name = models.CharField(max_length=60)
     start = models.CharField(max_length=5, help_text="HH:MM")
     end = models.CharField(max_length=5, help_text="HH:MM; earlier than start runs past midnight")
     days = models.JSONField(default=list, help_text="Weekdays worked, 0=Sun … 6=Sat")
     sort = models.IntegerField(default=0)
+    created_on = models.DateField(null=True, blank=True, help_text="Added on this day: not worked on the days before. Blank = always")
+    retired_on = models.DateField(null=True, blank=True, db_index=True, help_text="Removed on this day: still worked on the days before")
+
+    objects = CurrentShifts()
+    all_objects = models.Manager()
 
     class Meta:
+        base_manager_name = "all_objects"
         ordering = ["sort", "id"]
         db_table = "plant_shift"
 
     def __str__(self):
         return f"{self.name} {self.start}–{self.end}"
+
+
+class ShiftVersion(models.Model):
+    """How a shift was on the days before `until`: kept the first time the shift (its times, days, breaks or
+    seasonal variants) is changed on a day, so a change never re-judges the days before it."""
+    shift = models.ForeignKey(Shift, related_name="versions", on_delete=models.CASCADE)
+    until = models.DateField()
+    data = models.JSONField(default=dict, help_text="name, start, end, days, breaks [{label, start, end}], variants")
+
+    class Meta:
+        ordering = ["until"]
+        db_table = "plant_shift_version"
+        unique_together = [("shift", "until")]
+
+
+class ShiftVariant(models.Model):
+    """A seasonal variant of a shift: between date_from and date_to (inclusive) it runs these times, days and
+    breaks instead of the shift's own, without changing the main schedule (e.g. 2nd shift an hour longer in July)."""
+    shift = models.ForeignKey(Shift, related_name="variants", on_delete=models.CASCADE)
+    name = models.CharField(max_length=60, blank=True)
+    date_from = models.DateField()
+    date_to = models.DateField()
+    start = models.CharField(max_length=5)
+    end = models.CharField(max_length=5)
+    days = models.JSONField(default=list)
+    breaks = models.JSONField(default=list, help_text="[{label, start, end}]")
+
+    class Meta:
+        ordering = ["date_from", "id"]
+        db_table = "plant_shift_variant"
 
 
 class ShiftBreak(models.Model):

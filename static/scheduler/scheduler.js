@@ -136,12 +136,14 @@ function viewWindow(){const sc=SCALES[S.view.scale];const a=sc.start(S.view.anch
 /* Hours no shift covers (e.g. midnight to 6 am) are left off the board: every day shows only the hours from the
    earliest shift start to the latest shift end of all the plant's shifts (also a shift no line is crewed for yet,
    so a planner sees the whole working day). A shift past midnight shows whole days. */
+/* A shift as worked on the day starting at d: its seasonal variant (Admin › Machine schedule) when one covers the day. */
+function shiftOn(sh,d){const iso=isoDay(d);for(const v of sh.variants||[])if(v.from<=iso&&iso<=v.to)return {...sh,start:v.start,end:v.end,days:v.days,breaks:v.breaks,variant:v.name||"Seasonal variant"};return sh}
 /* Each shift's stretch of every day in view, shaded on the board: 1st shift lightest, 2nd darker, 3rd darker still. */
 function shiftBands(a,b){
   const sh=S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start));
   const out=[];
   for(let d=addDays(a,-1);d<b;d=addDays(d,1)){const dow=new Date(d).getDay();
-    sh.forEach((s,i)=>{if(!(s.days||[]).includes(dow))return;const s0=hm(s.start),L=(hm(s.end)-s0+1440)%1440||1440;
+    sh.forEach((s0_,i)=>{const s=shiftOn(s0_,d);if(!(s.days||[]).includes(dow))return;const s0=hm(s.start),L=(hm(s.end)-s0+1440)%1440||1440;
       const st=d+s0*MIN,en=st+L*MIN;if(en>a&&st<b)out.push({s:Math.max(st,a),e:Math.min(en,b),n:i+1,name:s.name})})}
   return out;
 }
@@ -154,8 +156,8 @@ const CLOSED_W={week:30,month:8};
    outside them: the board shows only these, so a night with no shift doesn't take up room. */
 function daySegs(d){
   const out=[],e0=addDays(d,1),clip=(x,y)=>{x=Math.max(x,d);y=Math.min(y,e0);if(y>x)out.push([x,y])};
-  for(const sh of S.cfg.shifts||[]){const days=sh.days||[];if(!days.length)continue;const s0=hm(sh.start),L=(hm(sh.end)-s0+1440)%1440||1440;
-    for(const k of [-1,0]){const day=addDays(d,k);if(days.includes(new Date(day).getDay()))clip(day+s0*MIN,day+(s0+L)*MIN)}}
+  for(const sh0 of S.cfg.shifts||[])for(const k of [-1,0]){const day=addDays(d,k),sh=shiftOn(sh0,day),days=sh.days||[];if(!days.includes(new Date(day).getDay()))continue;
+    const s0=hm(sh.start),L=(hm(sh.end)-s0+1440)%1440||1440;clip(day+s0*MIN,day+(s0+L)*MIN)}
   for(const segs of Object.values(S.work||{}))for(const [x,y] of segs)clip(x,y);
   for(const r of Object.values(S.res||{}))if(r&&r.end>d&&r.start<e0)for(const [x,y] of (r.runSegs&&r.runSegs.length?r.runSegs:[[r.start,r.end]]))clip(x,y);
   out.sort((x,y)=>x[0]-y[0]);const m=[];

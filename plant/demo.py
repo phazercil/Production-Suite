@@ -36,7 +36,7 @@ def wipe():
                   H.ChangeoverCache, H.ToolingCache, H.LineState, H.ShiftRun, Job, MO, Person, PartSpec, ShiftBreak):
         model.objects.all().delete()
     Machine.objects.all().delete()
-    Shift.objects.all().delete()
+    Shift.all_objects.all().delete()
 
 
 @transaction.atomic

@@ -7,6 +7,7 @@ from django.conf import settings
 from django.db import transaction
 from django.http import JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
@@ -367,7 +368,7 @@ def save_config(request):
         except (TypeError, ValueError):
             raise BadRequest(f"{name}: pick the days again.")
         obj = Shift.objects.filter(pk=sh.get("id")).first() if isinstance(sh.get("id"), int) else None
-        obj = obj or Shift()
+        obj = obj or Shift(created_on=timezone.localdate())   # a new shift isn't worked on the days before it
         obj.name, obj.start, obj.end, obj.days, obj.sort = name, start, end, days, i
         obj.save()
         sid_map[sh.get("id")] = obj.id
@@ -380,7 +381,9 @@ def save_config(request):
                                       start=hhmm(b.get("start"), f"{name} break start"), end=hhmm(b.get("end"), f"{name} break end"))
     # Delete only what this planner removed. Lines or shifts added meanwhile from another screen are kept.
     removed_s = [x for x in p.get("removedShifts") or [] if isinstance(x, int) and x not in keep_s]
-    Shift.objects.filter(id__in=removed_s).delete()
+    Shift.objects.filter(id__in=removed_s).update(retired_on=timezone.localdate())   # kept for the days before (plant/schedule.py)
+    from plant.schedule import forget
+    forget()
     if not Shift.objects.exists():
         raise BadRequest("Keep at least one shift.")
     orig_names = dict(Machine.objects.values_list("id", "name"))

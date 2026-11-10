@@ -40,7 +40,7 @@ S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("
              ("process", "Process code", False), ("mfg", "MFG location", False), ("hot", "Hot flag", False)]
 # Commands a field or button can run as they are (the engine checks the person and every value)
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
-               "breakSet", "breakDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
+               "breakSet", "breakDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
                "s2kPull", "peoplePull", "paycomImport", "networkFirewallSync", "srcDelete", "alertContactDelete", "updCancel", "updGoBack",
                "updFolder", "updWhen", "permRole", "permPerson", "permReset", "qcItemAdd", "qcItemDel", "qcItemMove"}
 _tables_cache = {}
@@ -93,14 +93,23 @@ def tab_data(s, tab, request):
         out = []
         from plant.util import hm
         from plant.models import Shift
-        shifts = [{"name": x.name, "start": x.start, "end": x.end, "days": x.days,
-                   "breaks": [{"name": b.label, "start": b.start, "mins": (hm(b.end) - hm(b.start)) % 1440} for b in x.breaks.all()]}
-                  for x in Shift.objects.prefetch_related("breaks")]   # same order the shift commands number them in
-        for i, sh in enumerate(shifts):
-            ln = hm(sh["end"]) - hm(sh["start"])
-            ln = ln if ln > 0 else ln + 1440
-            paid = ln - sum(int(b.get("mins") or 0) for b in sh.get("breaks") or [])
-            out.append({"i": i, "sh": sh, "len": ln, "paid": paid, "lunch": any("lunch" in (b["name"] or "").lower() for b in sh["breaks"])})
+        from django.utils import timezone as _tz
+        week = [(1, "Mon"), (2, "Tue"), (3, "Wed"), (4, "Thu"), (5, "Fri"), (6, "Sat"), (0, "Sun")]
+        today = _tz.localdate()
+
+        def card(start, end, days, breaks):
+            ln = (hm(end) - hm(start)) % 1440 or 1440
+            brs = [{"name": b["label"], "start": b["start"], "mins": (hm(b["end"]) - hm(b["start"])) % 1440} for b in breaks]
+            return {"start": start, "end": end, "len": ln, "paid": ln - sum(b["mins"] for b in brs), "breaks": brs,
+                    "week": [{"d": d, "n": n, "on": d in (days or [])} for d, n in week],
+                    "lunch": any("lunch" in (b["name"] or "").lower() for b in brs)}
+        for i, x in enumerate(Shift.objects.prefetch_related("breaks", "variants")):   # same order the shift commands number them in
+            c = card(x.start, x.end, x.days, [{"label": b.label, "start": b.start, "end": b.end} for b in x.breaks.all()])
+            vs = []
+            for v in x.variants.all():
+                vs.append({"v": v, **card(v.start, v.end, v.days, v.breaks or []),
+                           "state": "in effect now" if v.date_from <= today <= v.date_to else "over" if v.date_to < today else "coming up"})
+            out.append({"i": i, "sh": {"name": x.name}, **c, "variants": vs})
         return {"shifts": out}
     if tab == "parts":
         from plant.models import PartSpec
