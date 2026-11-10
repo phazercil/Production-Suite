@@ -10,6 +10,12 @@
   - **Add seasonal variant** puts a copy of the shift for a range of dates (e.g. 2nd shift an hour longer in July): its own times, days, lunch, breaks and authorized downtime, without changing the main schedule. The kiosk, downtime and planned time, and the Scheduler use it on those dates.
   - **Past days keep their schedule:** a change counts from today on. The first change to a shift on a day keeps how it was, so the days before are still judged by the schedule they ran. A removed shift is kept for the days before it was removed; a new shift doesn't count for the days before it was added.
 - **Machine tags in other systems:** Admin › Machines › **Add system** (e.g. PIM, asset or maintenance) adds a column to fill in each machine's tag in that system, next to its S2K process code. Saved queries (Changeover data, tooling) use `:tag_pim`, the way they use `:line_code` for the S2K code.
+- **Supervisor › History: corrections.** People with the new **Correct history** permission (shift leads and admins by default; Admin › Permissions) get an **Edit** link on every shift log, downtime entry, QC check, changeover and MO run, in the lists and in a shift's report.
+  - Change the fields: times, reason, notes, operator, units, QC values (pass or fail follows the specs), review, and so on.
+  - **Split** a downtime entry in two at a time (e.g. a stop left open overnight), or **delete** a record.
+  - Every change is kept with who, when, the old and new value and why. It shows on the record's page and the shift's report, and in Admin › Recent changes.
+  - A closed shift's downtime and uptime follow its corrected downtime.
+  - New **MO runs** tab.
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 

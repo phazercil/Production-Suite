@@ -70,6 +70,7 @@ urlpatterns = [
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
+    path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
     path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),
