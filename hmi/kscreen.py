@@ -701,12 +701,17 @@ FEED_LABELS = [("demo", "Demo replay"), ("http", "Read from URL"), ("push", "Pus
 
 def shift_report(s):
     """The End of Shift report for this screen's current (or last) shift run."""
-    from collections import Counter
-
-    from .models import MoRun, QCCheck, RollTag, ShiftNote, TicketPhoto
     sh = s.shift or ShiftRun.objects.filter(machine=s.machine).order_by("-start").first() if s.machine else None
     if not sh:
         return None
+    return report_for(sh, need_reason=len(s.need_reason()))
+
+
+def report_for(sh, need_reason=0):
+    """The End of Shift report of any log (the kiosk's, or a past one opened from Supervisor › History)."""
+    from collections import Counter
+
+    from .models import MoRun, QCCheck, RollTag, ShiftNote, TicketPhoto
     downs = list(Downtime.objects.filter(shift=sh).order_by("start_time"))
     qc = list(QCCheck.objects.filter(shift=sh))
     rolls = list(RollTag.objects.filter(shift=sh).order_by("t"))
@@ -735,7 +740,7 @@ def shift_report(s):
     r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
          "scrap": sum(q.scrap for q in qc) + sum(m["scrap"] or 0 for m in mos), "rolls": rolls, "mos": mos,
          "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
-         "tickets": [{"t": t, "pics": npics.get(t.id, 0)} for t in tickets], "notes": notes, "needReason": len(s.need_reason())}
+         "tickets": [{"t": t, "pics": npics.get(t.id, 0)} for t in tickets], "notes": notes, "needReason": need_reason, "downs": downs, "qcList": sorted(qc, key=lambda q: q.t)}
     from suite.templatetags.suite import clock, day
     L = [f"END OF SHIFT — {sh.line} — {day(sh.start)}", f"Operator: {r['who']}",
          f"Time: {clock(sh.start)} – {'running' if sh.active else clock(sh.end)}",
