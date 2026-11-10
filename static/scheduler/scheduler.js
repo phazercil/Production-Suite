@@ -136,13 +136,6 @@ function viewWindow(){const sc=SCALES[S.view.scale];const a=sc.start(S.view.anch
 /* Hours no shift covers (e.g. midnight to 6 am) are left off the board: every day shows only the hours from the
    earliest shift start to the latest shift end of all the plant's shifts (also a shift no line is crewed for yet,
    so a planner sees the whole working day). A shift past midnight shows whole days. */
-function shownHours(){
-  const sh=S.cfg.shifts.filter(s=>(s.days||[]).length);
-  if(!sh.length)return [0,24];
-  let lo=24*60,hi=0;
-  for(const s of sh){const a=hm(s.start),e=hm(s.end);if(e<=a)return [0,24];lo=Math.min(lo,a);hi=Math.max(hi,e)}
-  return [Math.floor(lo/60),Math.min(24,Math.ceil(hi/60))];
-}
 /* Each shift's stretch of every day in view, shaded on the board: 1st shift lightest, 2nd darker, 3rd darker still. */
 function shiftBands(a,b){
   const sh=S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start));
@@ -157,25 +150,39 @@ let TMAP=null;   // time <-> board position for the view on screen
 /* A day no line works (a weekend or holiday with no shift crewed, and nothing scheduled) shrinks to a thin strip,
    so the board is mostly production time. Its hours still map onto the strip, so nothing on it is lost. */
 const CLOSED_W={week:30,month:8};
-function workingDays(a,b){
-  const on=new Set(),mark=(s,e)=>{for(let d=sod(Math.max(s,a));d<Math.min(e,b);d=addDays(d,1))on.add(d)};
-  for(const segs of Object.values(S.work||{}))for(const [s,e] of segs)if(e>s)mark(s,e);
-  for(const r of Object.values(S.res||{}))if(r&&r.end>a&&r.start<b)for(const [s,e] of (r.runSegs&&r.runSegs.length?r.runSegs:[[r.start,r.end]]))mark(s,e);
-  return on;
+/* The stretches of a day some shift covers (an overnight shift's end included), plus any crewed or scheduled time
+   outside them: the board shows only these, so a night with no shift doesn't take up room. */
+function daySegs(d){
+  const out=[],e0=addDays(d,1),clip=(x,y)=>{x=Math.max(x,d);y=Math.min(y,e0);if(y>x)out.push([x,y])};
+  for(const sh of S.cfg.shifts||[]){const days=sh.days||[];if(!days.length)continue;const s0=hm(sh.start),L=(hm(sh.end)-s0+1440)%1440||1440;
+    for(const k of [-1,0]){const day=addDays(d,k);if(days.includes(new Date(day).getDay()))clip(day+s0*MIN,day+(s0+L)*MIN)}}
+  for(const segs of Object.values(S.work||{}))for(const [x,y] of segs)clip(x,y);
+  for(const r of Object.values(S.res||{}))if(r&&r.end>d&&r.start<e0)for(const [x,y] of (r.runSegs&&r.runSegs.length?r.runSegs:[[r.start,r.end]]))clip(x,y);
+  out.sort((x,y)=>x[0]-y[0]);const m=[];
+  for(const g of out){const l=m[m.length-1];if(l&&g[0]<=l[1]+MIN)l[1]=Math.max(l[1],g[1]);else m.push([g[0],g[1]])}
+  return m;
 }
 function makeMap(a,b,px){
-  const [h0,h1]=shownHours(),days=[];let off=0;
-  const cw=CLOSED_W[S.view.scale],on=cw?workingDays(a,b):null,any=on&&on.size>0;
-  for(let d=a;d<b;d=addDays(d,1)){const s=d+h0*HOUR,e=Math.min(addDays(d,1),d+h1*HOUR);
-    const closed=!!(any&&!on.has(d)),w=closed?cw:(e-s)/HOUR*px;
-    days.push({d,s:closed?d:s,e:closed?addDays(d,1):e,off,w,closed});off+=w}
-  return {a,b,px,h0,h1,days,W:off,
-    x(t){if(t<=a)return 0;if(t>=b)return off;let k=days.length-1;while(k>0&&t<days[k].d)k--;const D=days[k];return D.off+(Math.min(Math.max(t,D.s),D.e)-D.s)/(D.e-D.s)*D.w},
-    t(x){let k=days.length-1;while(k>0&&x<days[k].off)k--;const D=days[k];return Math.min(D.e,D.s+Math.max(0,x-D.off)/D.w*(D.e-D.s))}};
+  const days=[];let off=0;
+  const cw=CLOSED_W[S.view.scale];const all=[];for(let d=a;d<b;d=addDays(d,1))all.push([d,daySegs(d)]);
+  const any=all.some(([,g])=>g.length);
+  for(const [d,g] of all){
+    const closed=!!(cw&&any&&!g.length),segs=[];let w=0;
+    if(closed){segs.push({s:d,e:addDays(d,1),off,w:cw});w=cw}
+    else for(const [x,y] of (g.length?g:[[d,addDays(d,1)]])){const sw=(y-x)/HOUR*px;segs.push({s:x,e:y,off:off+w,w:sw});w+=sw}
+    days.push({d,s:segs[0].s,e:segs[segs.length-1].e,off,w,closed,segs});off+=w}
+  return {a,b,px,days,W:off,
+    x(t){if(t<=a)return 0;if(t>=b)return off;let k=days.length-1;while(k>0&&t<days[k].d)k--;const D=days[k];
+      for(const g of D.segs){if(t<=g.e)return g.off+(Math.max(t,g.s)-g.s)/(g.e-g.s)*g.w}return D.off+D.w},
+    t(x){let k=days.length-1;while(k>0&&x<days[k].off)k--;const D=days[k];let g=D.segs[0];
+      for(const q of D.segs)if(x>=q.off)g=q;return Math.min(g.e,g.s+Math.max(0,x-g.off)/g.w*(g.e-g.s))}};
 }
+/* the hours shown on a day, as text ("07:00 – 24:00", two stretches joined by ·) */
+const segLabel=D=>D.segs.map(g=>{const f=t=>{const x=new Date(t),h=t===addDays(D.d,1)?24:x.getHours();return String(h).padStart(2,"0")+":"+String(x.getMinutes()).padStart(2,"0")};return f(g.s)+"–"+f(g.e)}).join(" · ");
 const dayClosed=t=>!!(TMAP&&TMAP.days.find(D=>D.d===t)?.closed);
 const X=(t,a,px)=>TMAP&&TMAP.a===a&&TMAP.px===px?TMAP.x(t):(t-a)/HOUR*px;
-function buckets(a,b){const out=[];if(S.view.scale==="day"){const [h0,h1]=TMAP?[TMAP.h0,TMAP.h1]:[0,24];for(let t=a+h0*HOUR;t<a+h1*HOUR;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
+function dayHours(D){const out=[];for(const g of D.segs)for(let t=Math.floor(g.s/HOUR)*HOUR;t<g.e;t+=HOUR)out.push([Math.max(t,g.s),Math.min(t+HOUR,g.e)]);return out}
+function buckets(a,b){const out=[];if(S.view.scale==="day"){if(TMAP)out.push(...dayHours(TMAP.days[0]));else for(let t=a;t<b;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
 function rangeLabel(a,b){
   const d=new Date(a),mon=d.toLocaleString("en-US",{month:"long"});
   if(S.view.scale==="day")return d.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",year:"numeric"});
@@ -201,15 +208,15 @@ function renderSchedule(){
     if(rs.length===ops.length&&ops.length)scheduled++;if(rs.some(r=>r.late))late.add(mo.id);if(rs.some(r=>r.waiting))waiting.add(mo.id)}
   const unsched=mos.length-scheduled;
   let axis="";const now=Date.now();
-  const hrsLbl=TMAP.h0===0&&TMAP.h1===24?"06 · 12 · 18":`${String(TMAP.h0).padStart(2,"0")}:00 – ${String(TMAP.h1%24).padStart(2,"0")}:00`;
-  if(S.view.scale==="day"){for(let t=a+TMAP.h0*HOUR;t<a+TMAP.h1*HOUR;t+=HOUR){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${px}px"><span class="big">${String(h).padStart(2,"0")}:00</span></div>`}}
+  if(S.view.scale==="day"){for(const [t,e] of dayHours(TMAP.days[0])){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${X(e,a,px)-X(t,a,px)}px"><span class="big">${String(h).padStart(2,"0")}:${String(new Date(t).getMinutes()).padStart(2,"0")}</span></div>`}}
   else{for(let t=a;t<b;t=addDays(t,1)){const d=new Date(t),w=X(addDays(t,1),a,px)-X(t,a,px),we=d.getDay()===0||d.getDay()===6,td=sod(now)===t;
     if(dayClosed(t)){axis+=`<div class="tick closed ${td?"today":""}" style="left:${X(t,a,px)}px;width:${w}px" title="${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}: no shift on any line"><span class="big">${S.view.scale==="week"?DOW[d.getDay()].slice(0,2):""}</span>${S.view.scale==="week"?d.getDate():""}</div>`;continue}
     const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Holiday":"Day off"} in the Labor Budget plan"`:"",spL=sp==="HOLIDAY"?"Holiday":sp==="OFF"?"Off":sp==="WORK"?"Work day":"";
-    axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||hrsLbl}</div>`
+    axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||segLabel(TMAP.days.find(D=>D.d===t))}</div>`
       :`<div class="tick ${d.getDay()===1?"major":""} ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${d.getDate()}</span>${sp==="HOLIDAY"?"H":DOW[d.getDay()][0]}</div>`}}
   const bk=buckets(a,b);
-  const closedHtml=TMAP.days.filter(D=>D.closed).map(D=>`<div class="closedday" style="left:${D.off}px;width:${D.w}px"></div>`).join("");
+  const closedHtml=TMAP.days.filter(D=>D.closed).map(D=>`<div class="closedday" style="left:${D.off}px;width:${D.w}px"></div>`).join("")
+    +TMAP.days.filter(D=>!D.closed).flatMap(D=>D.segs.slice(1).map(g=>`<div class="segcut" style="left:${g.off}px" title="Hours with no shift left out"></div>`)).join("");
   const bands=bandHtml(shiftBands(a,b),a,px)+closedHtml;
   const nowX=(now>=a&&now<b)?`<div class="nowline" style="left:${X(now,a,px)}px"></div>`:"";
   let rows="";
