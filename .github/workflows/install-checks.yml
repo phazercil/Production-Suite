@@ -8,6 +8,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "packaging/**"
+      - "!packaging/release-notes.md"   # (almost every pull request adds to the release notes)
       - "requirements*.txt"
       - "suite/settings.py"
       - "suite/version.py"
