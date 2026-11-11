@@ -116,7 +116,8 @@ class Machine(models.Model):
     scrap_pct = models.FloatField(default=5)
     downtime_pct = models.FloatField(default=10)
     changeover_min = models.FloatField(default=30)
-    run_lunch = models.BooleanField(default=False, help_text="Keeps running through lunch (relief cover): the schedule doesn't pause it for breaks named lunch")
+    lunch_shifts = models.JSONField(default=list, blank=True, help_text="Ids of the shifts on which this line keeps running through lunch "
+                                    "(relief cover): the schedule doesn't pause it for breaks named lunch on those shifts")
     color = models.CharField(max_length=7, default=PALETTE[0])
     active = models.BooleanField(default=True, help_text="Out of service machines are hidden from Start Shift")
     shifts = models.ManyToManyField(Shift, blank=True, related_name="machines")

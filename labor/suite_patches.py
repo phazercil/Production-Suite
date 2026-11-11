@@ -1,13 +1,14 @@
 """Labor Budget page changes that keep it in step with the rest of the suite (used by labor/build.py).
 
-labor/sync.py does the work on the server. Budget A is the master of the lines and the shifts: lines (added,
-renamed, removed, their stage and shifts) and shifts (how many, times, days, lunch) are changed on this page and
-the suite follows when it's saved. A line's color and speed are machine settings, so they still come from the
-suite (Admin / Scheduler) and are locked here. Crew names are offered from the Team list. New styles are inline, since labor.css is built from the calculator's own classes.
+labor/sync.py does the work on the server. The suite's lines are its own: a production line added here starts a
+machine in the suite (with this plan's shifts and lunch) when budget A is saved; after that the plan's shifts and
+lunch per line are only the plan's, and the Scheduler's Lines & Shifts shows where they differ. A machine's name,
+stage, color and speed come from the suite (Admin / Scheduler) and are locked here. Crew names are offered from the Team list. New styles are inline, since labor.css is built from the calculator's own classes.
 """
 import json
 
 FROM_SUITE = "A machine setting: set in Admin › Machines or the Scheduler (Lines & Shifts)."
+FROM_SUITE_NAME = "This line is a machine in the suite: rename it or change its stage in Admin › Machines or the Scheduler (Lines & Shifts)."
 BADGE = "font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;"
 
 PATCHES = [
@@ -17,7 +18,8 @@ PATCHES = [
      "const STAGES = ['Stage 1', 'Stage 2', 'Packaging Only', 'Non Production', 'Backup'];",
      "const STAGES = ['Stage 1', 'Stage 2', 'Stage 3', 'Glue Bead', 'Packaging Only', 'Non Production', 'Backup'];\n"
      "    const FROM_SUITE_TEXT = " + json.dumps(FROM_SUITE) + ";\n"
-     "    const LOCK_ATTR = 'style=\"opacity:.6;cursor:not-allowed\" title=\"' + FROM_SUITE_TEXT.replace(/&/g, '&amp;') + '\"';"),
+     "    const LOCK_ATTR = 'style=\"opacity:.6;cursor:not-allowed\" title=\"' + FROM_SUITE_TEXT.replace(/&/g, '&amp;') + '\"';\n"
+     "    const LOCK_NAME = 'style=\"opacity:.6;cursor:not-allowed\" title=\"' + " + json.dumps(FROM_SUITE_NAME) + ".replace(/&/g, '&amp;') + '\"';"),
     ("isLaborOnly()",
      "const isLaborOnly = (stage) => stage === 'Packaging Only' || stage === 'Non Production' || stage === 'Backup';",
      "const isLaborOnly = (stage) => stage === 'Packaging Only' || stage === 'Non Production' || stage === 'Backup' || stage === 'Stage 3' || stage === 'Glue Bead';"),
@@ -36,19 +38,19 @@ PATCHES = [
      """<input type="color" value="${line.color || '#2563eb'}" ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'color', this.value)\""""),
     ("the line name",
      """<input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)\"""",
-     """<input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)\""""),
+     """<input type="text" value="${esc(line.name)}" ${line.machineId ? 'readonly ' + LOCK_NAME : ''} onchange="updateLine(${lIdx}, 'name', this.value)\""""),
     ("the line stage",
      """<select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">""",
-     """<select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">"""),
+     """<select ${line.machineId ? 'disabled ' + LOCK_NAME : ''} onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">"""),
     ("the line badges",
      "                ${thresholdLineBadge(line.id)}\n                ${collapsed ? ",
      "                ${thresholdLineBadge(line.id)}\n"
-     "                ${line.machineId ? `<span style=\"" + BADGE + "background:#e0f2fe;color:#075985\" title=\"A machine in the Scheduler and the Operator Kiosk. Its name, stage and shifts are set here; its color and speed in Admin.\">Machine${line.inService === false ? ' · out of service' : ''}</span>`\n"
-     "                  : line.suiteMissing ? `<span style=\"" + BADGE + "background:#fee2e2;color:#991b1b\" title=\"Save the plan to add this line to the Scheduler and Admin.\">New machine</span>` : ''}\n"
+     "                ${line.machineId ? `<span style=\"" + BADGE + "background:#e0f2fe;color:#075985\" title=\"A machine in the Scheduler and the Operator Kiosk. Its name, stage, color and speed are the suite's; the shifts and lunch here are this plan's (the Scheduler's Lines & Shifts shows where they differ).\">Machine${line.inService === false ? ' · out of service' : ''}</span>`\n"
+     "                  : line.suiteMissing ? `<span style=\"" + BADGE + "background:#fee2e2;color:#991b1b\" title=\"Save the plan to add this line to the Scheduler and Admin, with this plan's shifts and lunch to start.\">New machine</span>` : ''}\n"
      "                ${collapsed ? "),
     ("Delete Line",
      """<button onclick="removeLine(${lIdx})" class="text-xs text-red-600""",
-     """<button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Deleting it takes the machine out of service when the plan is saved (its records are kept)"' : ''} class="text-xs text-red-600"""),
+     """<button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Removes it from this plan only: the machine stays in the suite (take it out of service in Admin › Machines)"' : ''} class="text-xs text-red-600"""),
     ("the line speed",
      """<input type="number" min="0" step="1" value="${line.hourlyRate}" onchange="updateLine(${lIdx}, 'hourlyRate', Number(this.value))" class="w-full bg-white">""",
      """<input type="number" min="0" step="1" value="${line.hourlyRate}" ${line.machineId ? 'readonly ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'hourlyRate', Number(this.value))" class="w-full bg-white">

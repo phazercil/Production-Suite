@@ -116,8 +116,8 @@ def shift_windows(day_ms, shifts=None, all_days=False):
             if be < hm(b["start"]):
                 be += 1440
             ln = be - hm(b["start"])
-            brk.append({"name": b.get("label") or "Break", "s": at_local_minutes(day_ms, bs), "e": at_local_minutes(day_ms, bs + ln)})
-        out.append({"name": sh["name"], "s": at_local_minutes(day_ms, s0), "e": at_local_minutes(day_ms, e), "brk": brk,
+            brk.append({"name": b.get("label") or "Break", "s": at_local_minutes(day_ms, bs), "e": at_local_minutes(day_ms, bs + ln), "sid": sh.get("id")})
+        out.append({"sid": sh.get("id"), "name": sh["name"], "s": at_local_minutes(day_ms, s0), "e": at_local_minutes(day_ms, e), "brk": brk,
                     "variant": sh.get("variant")})
     return sorted(out, key=lambda w: w["s"])
 

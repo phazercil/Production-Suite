@@ -146,7 +146,9 @@ class ScheduleTimelineTests(TestCase):
             stops = Calendar(world["cfg"]).day_iv(m, d)
             if stops:
                 break
-        Machine.objects.filter(name="Salvatore").update(run_lunch=True)
+        sal = Machine.objects.get(name="Salvatore")
+        sal.lunch_shifts = list(sal.shifts.values_list("id", flat=True))
+        sal.save(update_fields=["lunch_shifts"])
         world = load_world()
         m = next(x for x in world["cfg"]["machines"] if x["name"] == "Salvatore")
         runs = Calendar(world["cfg"]).day_iv(m, d)

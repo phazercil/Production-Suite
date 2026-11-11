@@ -84,44 +84,51 @@ class LaborSyncTests(TestCase):
         self.assertIn("J. Ortiz", data["suite"]["people"])
         self.assertEqual(data["suite"]["notOnTeam"], ["Somebody Else"])
 
-    def test_the_labor_budget_is_the_master_of_lines_not_shift_times(self):
+    def test_the_budget_starts_new_lines_but_never_changes_the_suite_s(self):
+        """A line new in the Labor Budget starts a machine with the budget's shifts and lunch; after that the suite's
+        lines are their own, and Lines & Shifts says where the budget differs."""
+        from labor.sync import budget_diff
         c = lead()
         data, _ = self.merged()
         bar_id = data["lines"][0]["machineId"]
         data["lines"][0]["hourlyRate"] = 1                                          # a machine setting: stays the suite's
-        data["lines"][0]["name"] = "Barbara II"                                     # renamed here: the machine follows
+        data["lines"][0]["name"] = "Barbara II"                                     # renamed in the budget: the machine doesn't follow
         sal = next(ln for ln in data["lines"] if ln["name"] == "Salvatore")
-        sal["activeShifts"]["2"] = False                                            # which shifts it runs
+        sal["activeShifts"]["2"] = False                                            # the budget runs it on 1st shift only
         s1 = Shift.objects.get(name="1st shift")
         before = (s1.start, s1.end, list(s1.breaks.values_list("label", "start", "end")))
         a = next(x for x in data["schedules"] if x["id"] == "S1A")
         a.update(startTime="07:00", endTime="15:30", lunchMins=45)                  # shift times and lunch: the machine schedule's
-        data["lines"].append({"id": "LNEW", "name": "Hilda", "stage": "Stage 1", "activeShifts": {"1": True, "2": False}})
+        data["lines"].append({"id": "LNEW", "name": "Hilda", "stage": "Stage 1", "activeShifts": {"1": True, "2": True},
+                              "shiftSettings": {"1": {"runLunch": True}, "2": {"runLunch": False}}})
         r = post(c, "/api/labor/save", {"version": 0, "data": data})
         self.assertTrue(r["ok"], r)
-        bar = Machine.objects.get(pk=bar_id)
-        self.assertEqual(bar.name, "Barbara II")
+        self.assertEqual(Machine.objects.get(pk=bar_id).name, "Barbara")
         stored = LaborPlan.objects.get(pk=1).data
-        self.assertGreater(next(ln for ln in stored["lines"] if ln["name"] == "Barbara II")["hourlyRate"], 1)
-        self.assertEqual([s.name for s in Machine.objects.get(name="Salvatore").shifts.all()], ["1st shift"])
+        self.assertGreater(next(ln for ln in stored["lines"] if ln["machineId"] == bar_id)["hourlyRate"], 1)
+        salv = Machine.objects.get(name="Salvatore")
+        self.assertEqual(sorted(s.name for s in salv.shifts.all()), ["1st shift", "2nd shift"])   # unchanged
+        self.assertEqual(budget_diff()[salv.id], ["Labor Budget: 1st shift only"])
         s1.refresh_from_db()
         self.assertEqual((s1.start, s1.end, list(s1.breaks.values_list("label", "start", "end"))), before)
-        hilda = Machine.objects.get(name="Hilda")                                   # added here: a new machine
-        self.assertEqual((hilda.stage, [s.name for s in hilda.shifts.all()]), ("s1", ["1st shift"]))
+        hilda = Machine.objects.get(name="Hilda")                                   # new in the budget: a new machine, as planned
+        self.assertEqual((hilda.stage, sorted(s.name for s in hilda.shifts.all())), ("s1", ["1st shift", "2nd shift"]))
+        self.assertEqual(hilda.lunch_shifts, [s1.id])
         self.assertEqual(next(ln for ln in stored["lines"] if ln["name"] == "Hilda")["machineId"], hilda.id)
-        # Admin can't rename it any more; the Labor Budget can
+        self.assertNotIn(hilda.id, budget_diff())
+        # Admin can rename it (the suite's lines are its own)
         a2 = Client()
         assert post(a2, "/api/hmi/login", {"pin": "9999"})["ok"]
-        r = post(a2, "/api/hmi/cmd", {"name": "lineSet", "p": {"id": "Hilda", "f": "id", "v": "X"}, "line": "Hilda"})
-        self.assertFalse(r["ok"])
-        self.assertIn("Labor Budget", r["error"])
-        # deleting it in the Labor Budget takes the machine out of service, and it isn't brought back
+        r = post(a2, "/api/hmi/cmd", {"name": "lineSet", "p": {"id": "Hilda", "f": "id", "v": "Hilda 2"}, "line": "Hilda"})
+        self.assertTrue(r["ok"], r)
+        # deleting it in the Labor Budget leaves the machine in service, not brought back into the plan, flagged
         st = c.get("/api/labor/state").json()
         d2 = st["data"]
-        d2["lines"] = [ln for ln in d2["lines"] if ln["name"] != "Hilda"]
+        d2["lines"] = [ln for ln in d2["lines"] if ln.get("machineId") != hilda.id]
         self.assertTrue(post(c, "/api/labor/save", {"version": st["version"], "data": d2})["ok"])
-        self.assertFalse(Machine.objects.get(pk=hilda.pk).active)
-        self.assertNotIn("Hilda", [ln["name"] for ln in c.get("/api/labor/state").json()["data"]["lines"]])
+        self.assertTrue(Machine.objects.get(pk=hilda.pk).active)
+        self.assertNotIn(hilda.id, [ln.get("machineId") for ln in c.get("/api/labor/state").json()["data"]["lines"]])
+        self.assertEqual(budget_diff()[hilda.id], ["Not in the Labor Budget (deleted there)"])
 
     def test_a_plan_without_days_or_lunch_leaves_them_alone(self):
         from labor.sync import apply_to_suite
@@ -213,7 +220,7 @@ class MachineScheduleTests(TestCase):
         ShiftBreak.objects.create(shift=s2, label="Lunch", start="20:00", end="20:30")
         ShiftBreak.objects.create(shift=s2, label="Shut-down", start="23:45", end="00:00")
         bar = Machine.objects.get(name="Barbara")
-        Machine.objects.filter(pk=bar.pk).update(run_lunch=False)
+        Machine.objects.filter(pk=bar.pk).update(lunch_shifts=[])
         bar.refresh_from_db()
         bar.shifts.set([s1, s2])
         from plant.models import ShiftVersion

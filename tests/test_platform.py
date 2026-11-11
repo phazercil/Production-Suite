@@ -121,7 +121,13 @@ class SchedulerLaborTests(Base):
         self.assertEqual(crews[s1.id]["crew"], 3)
         self.assertEqual(crews[s1.id]["costPerHour"], 22 + 15 + 15)  # Ann's own wage, then the default wage
         self.assertFalse(s2.id in crews and crews[s2.id]["staffed"])  # 2nd shift turned off in the plan...
-        self.assertEqual(list(Machine.objects.get(name="Barbara").shifts.all()), [s1])  # ...is the machine's shifts too
+        bar = Machine.objects.get(name="Barbara")                    # ...but the suite's line keeps its shifts,
+        self.assertEqual(list(bar.shifts.all()), [s1, s2])
+        from labor.sync import budget_diff
+        self.assertEqual(budget_diff()[bar.id], ["Labor Budget: 1st shift only"])   # and Lines & Shifts says it differs
+        bar.shifts.set([s1])                                         # set to match in the suite
+        w = load_world()
+        m = next(x for x in w["cfg"]["machines"] if x["name"] == "Barbara")
         cal = Calendar(w["cfg"], w["labor"], w["laborLines"])
         from plant.util import ms
         holiday = cal.day_iv(m, ms(at(2030, 1, 1)))
@@ -336,8 +342,8 @@ class DowntimeTests(Base):
         self.c = Client()
         login(self.c, "1111")
         ShiftRun.objects.filter(machine=self.bar, active=True).update(active=False)  # the demo's running shift
-        self.bar.run_lunch = False   # the demo's Barbara runs through lunch; these tests need it to stop
-        self.bar.save(update_fields=["run_lunch"])
+        self.bar.lunch_shifts = []   # the demo's Barbara runs through lunch; these tests need it to stop
+        self.bar.save(update_fields=["lunch_shifts"])
         self.assertTrue(cmd(self.c, "startShift", {"line": "Barbara", "mo": "309215", "safety": [True] * 5})["ok"])
         self.sh = ShiftRun.objects.get(machine=self.bar, active=True)
 
@@ -364,8 +370,8 @@ class DowntimeTests(Base):
     def test_a_line_that_runs_through_lunch_logs_a_lunch_stop_as_downtime(self):
         d = timezone.localdate()
         self.put_in_first_shift(d)
-        self.bar.run_lunch = True
-        self.bar.save(update_fields=["run_lunch"])
+        self.bar.lunch_shifts = list(self.bar.shifts.values_list("id", flat=True))
+        self.bar.save(update_fields=["lunch_shifts"])
         self.sh.refresh_from_db()
         kinds = [k for _, _, k in engine.planned_windows(self.sh, kinds=True)]
         self.assertNotIn("Lunch", kinds)

@@ -1,14 +1,17 @@
 """Keeps the Labor Budget plan and the rest of the suite in step.
 
-Budget A of the Labor Budget is the master of the lines (`apply_to_suite`, run when it's saved). The shifts (their
-times, days, lunch and authorized downtimes such as start-up and shut-down) belong to Admin › Machine schedule.
-- Lines: a production line (Stage 1, Stage 2, Stage 3, Glue Bead) is a machine. Adding one adds the machine,
-  renaming it renames the machine (its records follow), deleting it takes the machine out of service (records
-  kept), and which shifts it runs and whether it runs through lunch are set there. Labor-only lines (Packaging
-  Only, Non Production, Backup) aren't machines.
-Admin › Machines and the Scheduler's Lines & Shifts show the lines and can't change them (`master_on`). Machine settings stay the suite's and are put into the plan by `merge()` whenever it is read or
-saved: each line's color and speed, and machines added in Admin before or outside the plan. Crew names are
-offered from the Team list; wages stay in the plan (shift leads only).
+The suite's lines (Admin › Machines, the Scheduler's Lines & Shifts) are their own: the Labor Budget is a plan,
+not the master.
+- A production line (Stage 1, Stage 2, Stage 3, Glue Bead) added in budget A starts the suite's machine with the
+  budget's shifts and running-through-lunch (per shift) when the budget is saved (`apply_to_suite`). After that
+  the budget never changes a machine: a line's name, stage, shifts, lunch and being in service are set in the
+  suite, and `budget_diff()` says where the budget differs (shown on Lines & Shifts). A line deleted in the budget
+  stays in service; it shows as not in the Labor Budget. Labor-only lines (Packaging Only, Non Production,
+  Backup) aren't machines.
+- The shifts (times, days, lunch and authorized downtimes) belong to Admin › Machine schedule.
+- `merge()` puts the suite into the plan whenever it is read or saved: each line's name, stage, color and speed,
+  and machines added in the suite (with their shifts and lunch to start with). The plan's own shifts and lunch
+  per line stay the plan's. Crew names are offered from the Team list; wages stay in the plan (shift leads only).
 """
 from statistics import median
 
@@ -59,7 +62,8 @@ def suite_view():
     for m in Machine.objects.prefetch_related("shifts"):
         rate, basis = line_rate(m, cat)
         machines.append({"id": m.id, "name": m.name, "stage": STAGE_LABEL.get(m.stage, "Stage 1"), "color": m.color, "active": m.active,
-                         "rate": rate, "rateBasis": basis, "downtime": m.downtime_pct, "scrap": m.scrap_pct, "shifts": sorted(num[s.id] for s in m.shifts.all() if s.id in num)})
+                         "rate": rate, "rateBasis": basis, "downtime": m.downtime_pct, "scrap": m.scrap_pct, "shifts": sorted(num[s.id] for s in m.shifts.all() if s.id in num),
+                         "lunch": sorted(num[i] for i in (m.lunch_shifts or []) if i in num)})
     out_shifts = []
     for s in shifts[:MAX_SHIFTS]:
         lunch = sum((_hm(b.end) - _hm(b.start)) % 1440 for b in s.breaks.all() if "lunch" in (b.label or "").lower())
@@ -83,22 +87,30 @@ def merge(data, view=None):
     by_name = {str(ln.get("name") or "").strip().lower(): ln for ln in lines if ln.get("machineId") not in known}
     shift_nums = [s["n"] for s in view["shifts"]] or [1]
     linked, used = [], set()
+    removed = set(data.get("suiteRemoved") or [])   # machines deleted from the budget: they stay in the suite, not in the plan
     for i, m in enumerate(view["machines"]):
         ln = by_id.get(m["id"]) or by_name.get(m["name"].strip().lower())
-        if ln is None and not m["active"]:
-            continue   # out of service and not in the plan (e.g. deleted in the Labor Budget): don't bring it back
-        if ln is None or id(ln) in used:
+        if ln is None and (not m["active"] or m["id"] in removed):
+            continue   # out of service, or deleted in the Labor Budget: don't bring it back into the plan
+        fresh = ln is None or id(ln) in used
+        if fresh:
             ln = {"id": f"LM{m['id']}", "shiftSettings": {}, "shiftPositions": {}, "shiftSchedules": {}}
             notes.append(f"Added line {m['name']} from the suite.")
         used.add(id(ln))
         ln.update({"machineId": m["id"], "name": m["name"], "stage": m["stage"], "color": m["color"] if m["color"].startswith("#") else PALETTE[i % 6],
                    "hourlyRate": m["rate"], "rateBasis": m["rateBasis"], "inService": m["active"]})
         ln.pop("suiteMissing", None)
-        runs = set(m["shifts"])
-        ln["activeShifts"] = {str(n): (n in runs and m["active"]) for n in shift_nums}
+        # which shifts it runs and running through lunch are the plan's own; a line new to the plan starts from the suite
+        act = ln.get("activeShifts") if isinstance(ln.get("activeShifts"), dict) else {}
+        for n in shift_nums:
+            if fresh or str(n) not in act:
+                act[str(n)] = n in m["shifts"] and m["active"]
+        ln["activeShifts"] = act
         for n in shift_nums:
             k = str(n)
             ln.setdefault("shiftSettings", {}).setdefault(k, {"downtimePct": m["downtime"], "scrapPct": m["scrap"]})   # the Scheduler's to start
+            if fresh or "runLunch" not in ln["shiftSettings"][k]:
+                ln["shiftSettings"][k]["runLunch"] = n in m["lunch"]
             ln.setdefault("shiftPositions", {}).setdefault(k, [{"id": f"P{n}_{ln['id']}", "title": _first_title(data), "reqCount": 1}])
             ln.setdefault("shiftSchedules", {}).setdefault(k, f"S{n}A")
         linked.append(ln)
@@ -169,25 +181,21 @@ def _hhmm(v, default):
 
 
 def apply_to_suite(data, old=None):
-    """The Labor Budget (budget A) is the master of the production lines: put its lines (added, renamed, removed,
-    which shifts each runs, running through lunch) into the suite. The shifts themselves (times, days, lunch and
-    authorized downtimes) are Admin › Machine schedule's; machine settings the plan doesn't have (speeds, feeds,
-    colors, training) stay the suite's. Returns (data with new lines linked by machineId, changes).
-    A line is only taken out of service when it was in the plan saved before (`old`) and has been deleted since."""
-    from hmi.models import ShiftRun
+    """A production line new in the Labor Budget (budget A) starts a machine in the suite, with the budget's shifts
+    and running through lunch per shift. Lines already in the suite are only linked (by machineId): the budget never
+    changes them (`budget_diff()` says where it differs). A line deleted from the budget since it was last saved
+    (`old`) is remembered in data["suiteRemoved"], so the plan doesn't bring it back; the machine stays in service.
+    Returns (data, changes)."""
     if not isinstance(data, dict):
         return data, []
     changes = []
-    # ---- shifts: Admin › Machine schedule owns the shifts (times, days, lunch, start-up and shut-down). The plan's
-    # shift k is the suite's k-th shift, only to know which shifts each of its lines runs.
     suite = list(Shift.objects.order_by("sort", "id"))
     by_num = {k + 1: sh for k, sh in enumerate(suite[:MAX_SHIFTS])}
-    # ---- lines
     old_ids = {ln.get("machineId") for ln in ((old or {}).get("lines") or []) if isinstance(ln, dict) and ln.get("machineId")}
-    machines = {m.id: m for m in Machine.objects.prefetch_related("shifts")}
+    machines = {m.id: m for m in Machine.objects.all()}
     by_name = {m.name.strip().lower(): m for m in machines.values()}
+    removed = set(data.get("suiteRemoved") or (old or {}).get("suiteRemoved") or [])
     seen = set()
-    sort = 0
     for ln in data.get("lines") or []:
         if not isinstance(ln, dict):
             continue
@@ -199,69 +207,72 @@ def apply_to_suite(data, old=None):
             m = None
         if ln.get("stage") in STAGE_CODE:
             stage = STAGE_CODE[ln["stage"]]
-        elif not ln.get("stage") and m is not None:
-            stage = m.stage   # a plan saved before lines had stages: the machine keeps its own
+        elif m is not None:
+            stage = m.stage
         else:
             continue   # labor-only lines (packaging, non-production, backup) aren't machines
         if m is None:
-            if name.lower() in by_name and by_name[name.lower()].id in seen:
+            if name.lower() in by_name:
                 changes.append(f"two lines are called {name}; the second was left out")
                 continue
-            m = Machine.objects.create(name=name, stage=stage, color=str(ln.get("color") or PALETTE[sort % len(PALETTE)])[:20],
-                                       ppm=180, rate=float(_num(ln.get("hourlyRate")) or 300), speed_mode="fixed", sort=sort)
+            act = ln.get("activeShifts") if isinstance(ln.get("activeShifts"), dict) else {}
+            sset = ln.get("shiftSettings") if isinstance(ln.get("shiftSettings"), dict) else {}
+            runs = [n for n in by_num if act.get(str(n), act.get(n)) is True]
+            m = Machine.objects.create(name=name, stage=stage, color=str(ln.get("color") or PALETTE[len(machines) % len(PALETTE)])[:20],
+                                       ppm=180, rate=float(_num(ln.get("hourlyRate")) or 300), speed_mode="fixed", sort=len(machines),
+                                       lunch_shifts=[by_num[n].id for n in runs if (sset.get(str(n)) or {}).get("runLunch")])
+            m.shifts.set([by_num[n].id for n in runs])
             machines[m.id] = m
-            changes.append(f"added line {name}")
-        else:
-            upd = []
-            if m.name != name and not Machine.objects.filter(name__iexact=name).exclude(pk=m.pk).exists():
-                from hmi.engine import rename_machine_records
-                rename_machine_records(m.name, name)
-                changes.append(f"renamed {m.name} to {name}")
-                m.name = name
-                upd.append("name")
-            if m.stage != stage:
-                if ShiftRun.objects.filter(machine=m, active=True).exists():
-                    changes.append(f"{m.name} has a shift running, so its stage wasn't changed")
-                else:
-                    m.stage = stage
-                    upd.append("stage")
-            if not m.active and m.id not in old_ids:   # put back in the Labor Budget after being deleted there
-                m.active = True
-                upd.append("active")
-                changes.append(f"{m.name} back in service")
-            if m.sort != sort:
-                m.sort = sort
-                upd.append("sort")
-            if upd:
-                m.save(update_fields=upd)
+            by_name[name.lower()] = m
+            changes.append(f"added line {name} from the Labor Budget (" + (", ".join(by_num[n].name for n in runs) or "no shifts") + ")")
+        removed.discard(m.id)
         ln["machineId"] = m.id
         seen.add(m.id)
-        sort += 1
-        # which shifts it runs, and running through lunch where the plan says so
-        act = ln.get("activeShifts") if isinstance(ln.get("activeShifts"), dict) else {}
-        want = {by_num[n].id for n in by_num if act.get(str(n), act.get(n)) is True}
-        have = {s.id for s in m.shifts.all()}
-        if want != have:
-            m.shifts.set(want)
-            on = [by_num[n].name for n in sorted(by_num) if by_num[n].id in want]
-            changes.append(f"{m.name} runs {', '.join(on) if on else 'no shifts'}")
-        sset = ln.get("shiftSettings") if isinstance(ln.get("shiftSettings"), dict) else {}
-        flags = [(sset.get(str(n)) or {}).get("runLunch") for n in by_num if act.get(str(n), act.get(n)) is True]
-        flags = [f for f in flags if f is not None]
-        if flags and bool(any(flags)) != m.run_lunch:
-            m.run_lunch = bool(any(flags))
-            m.save(update_fields=["run_lunch"])
-            changes.append(f"{m.name} {'runs through' if m.run_lunch else 'stops for'} lunch")
-    for mid in old_ids - seen:   # deleted in the Labor Budget since it was last saved
-        m = machines.get(mid)
-        if m and m.active:
-            if ShiftRun.objects.filter(machine=m, active=True).exists():
-                changes.append(f"{m.name} has a shift running, so it stays in service")
-                continue
-            m.active = False
-            m.save(update_fields=["active"])
-            changes.append(f"{m.name} taken out of service (deleted in the Labor Budget)")
+    for mid in old_ids - seen:   # deleted in the Labor Budget since it was last saved: the suite keeps it
+        if mid in machines:
+            removed.add(mid)
+            changes.append(f"{machines[mid].name} was deleted in the Labor Budget; it stays in the suite")
+    data["suiteRemoved"] = sorted(removed)
     return data, changes
+
+
+def budget_diff():
+    """Where the Labor Budget (budget A) differs from the suite's lines: {machine id: [what differs, ...]}.
+    Empty when there's no saved budget."""
+    from .models import BUDGETS, LaborPlan
+    plan = LaborPlan.objects.filter(pk=BUDGETS["A"]).first()
+    if not (plan and plan.version and isinstance(plan.data, dict)):
+        return {}
+    data = plan.data
+    suite = list(Shift.objects.order_by("sort", "id"))
+    by_num = {k + 1: sh for k, sh in enumerate(suite[:MAX_SHIFTS])}
+    lines = {ln.get("machineId"): ln for ln in data.get("lines") or [] if isinstance(ln, dict) and ln.get("machineId")}
+    removed = set(data.get("suiteRemoved") or [])
+    out = {}
+    for m in Machine.objects.filter(active=True).prefetch_related("shifts"):
+        ln = lines.get(m.id)
+        if ln is None:
+            if m.id in removed:
+                out[m.id] = ["Not in the Labor Budget (deleted there)"]
+            continue
+        notes = []
+        act = ln.get("activeShifts") if isinstance(ln.get("activeShifts"), dict) else {}
+        sset = ln.get("shiftSettings") if isinstance(ln.get("shiftSettings"), dict) else {}
+        have = {s.id for s in m.shifts.all()}
+        want = [n for n in by_num if act.get(str(n), act.get(n)) is True]
+        if {by_num[n].id for n in want} != have & {s.id for s in by_num.values()}:
+            names = [by_num[n].name for n in want]
+            notes.append("Labor Budget: " + (f"{names[0]} only" if len(names) == 1 else " and ".join(names) if names else "no shifts"))
+        for n in want:
+            sh = by_num[n]
+            if sh.id not in have:
+                continue
+            b = bool((sset.get(str(n)) or {}).get("runLunch"))
+            if b != (sh.id in (m.lunch_shifts or [])):
+                notes.append(f"Labor Budget {'runs through' if b else 'stops for'} lunch on {sh.name}")
+        if notes:
+            out[m.id] = notes
+    return out
 
 
 def save_line_shifts(data, by=""):

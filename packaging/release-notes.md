@@ -21,6 +21,11 @@
 - **Kiosk banner:** next to the clock, a running count of milliseconds since the last machine data pull (it starts again from 0 each time the server reads the machine).
 - **Scheduled breaks on record:** every shift report (kiosk End of Shift and Supervisor) lists the breaks and planned time in the shift, including breaks added with **Schedule a break** and who added them. Cancelling a break that already started keeps its past times (stops then stay planned, not downtime); only the ones still to come are cancelled.
 - Fixed: the End of Shift and Downtime pages failed when a shift's only stops were 0 minutes long.
+- **Lines are the suite's own, not the Labor Budget's**
+  - Saving the Labor Budget no longer changes the suite's lines. A line added in the budget starts in the suite with the budget's shifts and lunch; after that its name, stage, shifts, lunch and being in service are set in the suite (Admin › Machines, the Scheduler's Lines & Shifts), which are no longer locked.
+  - Lines & Shifts marks where the budget plans a line differently (e.g. "⚠ Labor Budget: 1st shift only"). A line deleted from the budget stays in service and shows as not in the Labor Budget.
+  - On the Labor Budget page, a machine's name and stage are locked like its color and speed.
+- **Running through lunch is set per shift:** each shift a line runs has its own **through lunch** box on Lines & Shifts (e.g. relief cover on 1st shift only). Lines that ran through lunch keep doing so on every shift they run.
 - **Downtime list:** each stop shows its date as well as its time.
 - **Downtime for operators** covers only their own shift: the Downtime page, the "stops need a reason" alert, the badge and the pop-up leave out earlier shifts' stops. Shift leads and admins still see every stop on the line without a reason, under **Earlier shifts**.
 

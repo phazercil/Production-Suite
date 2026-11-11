@@ -80,14 +80,6 @@ class Screen:
         """Who this screen acts as: the supervisor during an override, otherwise the person logged in."""
         return self.sup or self.me
 
-    @property
-    def labor_master(self):
-        """The Labor Budget is the master of lines and shifts once it has been saved."""
-        if not hasattr(self, "_labor_master"):
-            from labor.sync import master_on
-            self._labor_master = master_on()
-        return self._labor_master
-
     def can(self, key):
         return bool(self.perms[key.replace(".", "_")])
 
@@ -581,7 +573,7 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
             lane_breaks = []
             for b in brks:
                 lunch = is_lunch(b["name"])
-                thru = lunch and m.run_lunch
+                thru = lunch and b.get("sid") in (m.lunch_shifts or [])   # runs through lunch on this shift
                 busy = any(r["start"] < b["e"] and r["end"] > b["s"] for r in runs)
                 lane_breaks.append({"left": round(X(b["s"]) + 2), "width": round(max(24, X(b["e"]) - X(b["s"]) - 4)), "name": b["name"],
                                     "from": clock(_local_ms(b["s"])), "to": clock(_local_ms(b["e"])), "lunch": lunch, "thru": thru,

@@ -336,7 +336,7 @@ def planned_windows(sh, kinds=False):
     a = sh.start
     b = max(sh.end or now(), now()) + timedelta(days=1)
     grace = rules().get("startGrace", 0) or 0
-    through = bool(sh.machine and sh.machine.run_lunch)
+    through = set(sh.machine.lunch_shifts or []) if sh.machine else set()   # shifts on which the line runs through lunch
     occ, out = [], []
     day = local(a).date() - timedelta(days=1)
     while day <= local(b).date():
@@ -350,7 +350,7 @@ def planned_windows(sh, kinds=False):
             if grace:
                 out.append((s0, s0 + timedelta(minutes=grace), "Start-up"))
             for br in x.get("breaks") or []:
-                if through and is_lunch(br.get("label")):
+                if x.get("id") in through and is_lunch(br.get("label")):
                     continue   # the line runs through lunch, so a stop then is downtime
                 bo = (hm(br["start"]) - hm(x["start"])) % 1440
                 bl = (hm(br["end"]) - hm(br["start"])) % 1440
@@ -1564,16 +1564,8 @@ def list_set(p, ctx):
         audit(ctx, f'Renamed "{old}" to "{v}" in {p["k"]}')
 
 
-def labor_lock(what):
-    """Once the Labor Budget has been saved it is the master of lines and shifts: change them there."""
-    from labor.sync import master_on
-    need(not master_on(), f"{what} come from the Labor Budget now. Change them there (Labor Budget in the top bar); "
-                          "Admin and the Scheduler follow it when it's saved.")
-
-
 @cmd("lineAdd", "machines.edit")
 def line_add(p, ctx):
-    labor_lock("Lines")
     n = Machine.objects.filter(stage="s1").count() + 1
     while Machine.objects.filter(name=f"Machine {n}").exists():
         n += 1
@@ -1722,7 +1714,6 @@ def line_set(p, ctx):
     busy = bool(active_run(m))
     f, v = p.get("f"), p.get("v")
     if f == "id":
-        labor_lock("Line names")
         v = str(v or "").strip()
         need(v, "A machine needs a name.")
         need(len(v) <= 60, "Machine names can be up to 60 characters.")
@@ -1816,7 +1807,6 @@ def line_set(p, ctx):
 
 @cmd("lineDel", "machines.edit")
 def line_del(p, ctx):
-    labor_lock("Lines")
     m = line_of(p.get("id"))
     need(m, "Machine not found.")
     need(not active_run(m), f"A shift is running on {m.name}. End it first.")
