@@ -134,3 +134,28 @@ class OutsideConnectionTests(TestCase):
         with mock.patch.object(socket, "create_connection", side_effect=ConnectionRefusedError(111, "refused")):
             with self.assertRaises(OSError):
                 dbkinds.detect("db1.example", 3399, timeout=1)
+
+
+class OldReadOnlyServerTests(TestCase):
+    """An outside read-only database on an older MariaDB (e.g. 10.3) is fine: only the suite's own database needs
+    Django's minimum (10.5), since only that one is written and migrated."""
+    def test_version_check_only_for_the_suite_s_own_database(self):
+        from django.db import NotSupportedError
+        from django.db.backends.mysql.base import DatabaseWrapper as Stock
+
+        from plant.dbconf import read_only_mysql
+        from plant.readonly_mysql.base import DatabaseWrapper as ReadOnly
+        cfg = read_only_mysql(lambda k, d=None: {"ASSET_DB_HOST": "10.0.0.25", "ASSET_DB_NAME": "pim"}.get(k, d), "ASSET_DB")
+        self.assertEqual(cfg["ENGINE"], "plant.readonly_mysql")
+        settings = {"NAME": "pim", "USER": "", "PASSWORD": "", "HOST": "", "PORT": "", "OPTIONS": {}, "TIME_ZONE": None,
+                    "CONN_MAX_AGE": 0, "CONN_HEALTH_CHECKS": False, "AUTOCOMMIT": True, "ATOMIC_REQUESTS": False, "TEST": {}}
+        for cls, ok in ((ReadOnly, True), (Stock, False)):
+            w = cls(dict(settings), alias="x")
+            w.__dict__["mysql_is_mariadb"] = True
+            w.__dict__["mysql_server_info"] = "10.3.22-MariaDB"
+            w.get_database_version = lambda: (10, 3, 22)
+            if ok:
+                w.check_database_version_supported()
+            else:
+                with self.assertRaises(NotSupportedError):
+                    w.check_database_version_supported()

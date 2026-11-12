@@ -16,7 +16,7 @@ def read_only_mysql(env, prefix):
     if not env(f"{prefix}_HOST"):
         return None
     return {
-        "ENGINE": "django.db.backends.mysql",
+        "ENGINE": "plant.readonly_mysql",   # the stock backend without its minimum-version check (read-only SELECTs only)
         "HOST": env(f"{prefix}_HOST"),
         "PORT": env(f"{prefix}_PORT", "") or {"mssql": "1433", "postgres": "5432"}.get(str(env(f"{prefix}_KIND", "") or "").lower(), "3306"),
         "NAME": env(f"{prefix}_NAME", ""),
