@@ -143,6 +143,33 @@
     const d = e.detail || {}, el = d.id && document.getElementById(d.id);
     if (el) { el.classList.remove("in", "out"); if (d.cls) el.classList.add(d.cls); }
   });
+  // a part of the page sent again (e.g. a Test connection result) keeps the page where it was and the focus on the
+  // button that was pressed: the browser otherwise loses its place when a block above or around it is swapped
+  let keep = null;
+  const scroller = el => { for (let x = el; x && x !== document.body; x = x.parentElement) { const st = getComputedStyle(x).overflowY; if ((st === "auto" || st === "scroll") && x.scrollHeight > x.clientHeight) return x; } return document.scrollingElement; };
+  const sameIn = (root, el) => {   // the same control in the new copy: by id, else by name/action within the same form group
+    if (!el || el === document.body) return null;
+    if (el.id) return document.getElementById(el.id);
+    const f = el.closest("form"), g = f && f.querySelector("input[name=group]");
+    const scope = g ? [...root.querySelectorAll("form")].find(x => { const y = x.querySelector("input[name=group]"); return y && y.value === g.value; }) : root;
+    if (!scope) return null;
+    const sel = el.name ? `${el.tagName}[name="${CSS.escape(el.name)}"]` : el.getAttribute("hx-post") ? `${el.tagName}[hx-post="${CSS.escape(el.getAttribute("hx-post"))}"]` : null;
+    const all = sel ? [...scope.querySelectorAll(sel)] : [];
+    return all.find(x => (x.textContent || "").trim() === (el.textContent || "").trim()) || all[0] || null;
+  };
+  body.addEventListener("htmx:beforeSwap", e => {
+    const t = e.detail.target;
+    if (!t || t.id === "modal" || t.id === "main" || t === document.body) { keep = null; return; }
+    const sc = scroller(t);
+    keep = { sc, top: sc.scrollTop, el: document.activeElement && t.contains(document.activeElement) ? document.activeElement : e.detail.requestConfig && e.detail.requestConfig.elt };
+  });
+  body.addEventListener("htmx:afterSettle", () => {
+    if (!keep) return;
+    const k = keep; keep = null;
+    k.sc.scrollTop = k.top;
+    const again = sameIn(document, k.el);
+    if (again && again.focus) again.focus({ preventScroll: true });
+  });
   // keep a scrolled strip (e.g. the schedule timeline) where it was when the server sends it again
   const scrolls = {};
   body.addEventListener("htmx:beforeSwap", () => document.querySelectorAll("[data-keep-scroll]").forEach(el => { scrolls[el.dataset.keepScroll] = el.scrollLeft; }));

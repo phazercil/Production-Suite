@@ -10,7 +10,13 @@ ERRORS = {
           "and that the firewall on the database server allows port {port}.",
     2005: "That server name couldn't be found on the network. Check the spelling, or use its IP address.",
     2013: "The connection to MariaDB dropped. Check the address and port.",
+    1129: "That database server has blocked this server's address after too many failed connections. On the database "
+          "server, run: mariadb-admin flush-hosts (or the SQL FLUSH HOSTS), then test again.",
+    1040: "That database server has too many connections open right now. Try again in a minute.",
 }
+# MariaDB sends "host is blocked" (1129) with the wrong packet sequence number (MDEV-21252), so PyMySQL reports
+# only this instead of the real message
+BLOCKED_SEQ = "Packet sequence number wrong - got 1 expected 0"
 HOST_RE = re.compile(r"^[A-Za-z0-9._:-]{1,253}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_$-]{1,64}$")
 
@@ -29,6 +35,8 @@ def driver():
 
 def explain(e, port):
     code = e.args[0] if getattr(e, "args", None) and isinstance(e.args[0], int) else None
+    if code is None and BLOCKED_SEQ in str(e):
+        code = 1129
     msg = ERRORS.get(code)
     detail = e.args[1] if getattr(e, "args", None) and len(e.args) > 1 else str(e)
     return (msg.format(port=port) if msg else "MariaDB answered with an error.") + f"  ({detail})", code
@@ -63,7 +71,11 @@ def test_read_only(host, port, name, user, password, what, nets=None, records=No
         return {"ok": False, "msg": f"That is the suite's own records database. {what} must be a different database; "
                                     "the suite creates its tables only in its own database."}
     from plant import dbkinds
-    if kind not in dbkinds.KINDS:   # "auto": tell from the server's first answer which kind of database it is
+    if kind not in dbkinds.KINDS:   # "auto": a standard port says which kind of database it is
+        kind = next((k for k, v in dbkinds.KINDS.items() if v["port"] == int(port)), kind)
+    if kind not in dbkinds.KINDS:   # an unusual port: tell from the server's first answer which kind of database it is.
+        # (Each look is a connection closed without signing in, which MariaDB counts toward blocking this server's
+        # address, so it's only done when the port doesn't say.)
         try:
             kind = dbkinds.detect(host, port)
         except OSError:

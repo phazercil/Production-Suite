@@ -64,12 +64,17 @@ def detect(host, port, timeout=5):
             order.remove(k)
             order.insert(0, k)
     probe = {"mysql": _mysql, "postgres": _postgres, "mssql": _mssql}
-    socket.create_connection((host, port), timeout=timeout).close()   # unreachable: say so now, not after every probe
+    failed = None
     for k in order:
         try:
             if probe[k](host, port, timeout):
                 return k
-        except (OSError, ValueError):
+            failed = False
+        except ValueError:
+            failed = False
+        except OSError as e:
+            if failed is None and k == order[0]:
+                raise   # can't reach it at all: say so now (the caller explains), not after every probe
             continue
     return None
 
