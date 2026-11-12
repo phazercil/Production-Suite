@@ -838,6 +838,42 @@ def co_pick(p, ctx):
     sh.save(update_fields=["co"])
 
 
+@cmd("coPickPart", "runs.nomo")
+def co_pick_part(p, ctx):
+    """No MO to run: a supervisor enters the filter number the line runs by (and how many, if known). It runs as an
+    MO of its own (source "floor", numbered NOMO-<line>-<date>-<time>) so counts, QC and reports work as usual;
+    it shows in the Scheduler on this line and is closed like any MO."""
+    sh = shift_of(p, ctx)
+    co = sh.co
+    need(co and co.get("step", 0) >= 2, "End the current MO first.")
+    part = re.sub(r"\s+", "", str(p.get("part") or "")).upper()[:40]
+    need(part, "Enter the filter number to run.")
+    need(re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]*", part), "A filter number is letters and numbers (and - . / _), e.g. MG4062HP.")
+    qty = str(p.get("qty") or "").strip()
+    need(not qty or (qty.isdigit() and 0 < int(qty) <= 10_000_000), "Enter how many as a whole number, or leave it blank.")
+    why = re.sub(r"\s+", " ", str(p.get("why") or "")).strip()[:200]
+    need(why, "Say why there's no MO (e.g. S2K down, order not entered yet).")
+    from plant.util import local
+    stamp = local(ctx.now).strftime("%y%m%d-%H%M")
+    base = re.sub(r"[^A-Za-z0-9]+", "", sh.line).upper()[:16] or "LINE"
+    number, i = f"NOMO-{base}-{stamp}", 1
+    while MO.objects.filter(number=number).exists():
+        i += 1
+        number = f"NOMO-{base}-{stamp}-{i}"
+    cat = Catalog()
+    item = (cat.matches(part) or [None])[0]
+    m = MO.objects.create(number=number, part=part, qty=int(qty) if qty else 0, status="OPEN", source="floor", line=sh.machine,
+                          ops=default_ops(item), process=((sh.machine.code if sh.machine else "") or "")[:12])
+    co.update({"newMo": m.id, "step": 3, "done": [], "noMo": {"by": ctx.by, "why": why}})
+    load_changeover_steps(sh, co)
+    sh.co = co
+    sh.save(update_fields=["co"])
+    audit(ctx, f"No MO on {sh.line}: {ctx.by} set it to run {part}" + (f" × {qty}" if qty else "") + f" as {number} ({why})")
+    notify(f"{sh.line} is running {part} without an MO ({number}), set by {ctx.by}: {why}", "planner")
+    known = bool(item) or PartSpec.objects.filter(key=part_key(part)).exists()
+    return {"msg": f"Running {part} as {number}." + ("" if known else " That filter number isn't in the cost sheet or Parts & specs, so its specs are estimated.")}
+
+
 @cmd("coReload")
 def co_reload(p, ctx):
     sh = shift_of(p, ctx)
@@ -890,9 +926,12 @@ def co_finish(p, ctx):
 
 
 def _qc_values(sh, p):
-    """The stage's QC items (Admin › QC checks), the values submitted for them, and the part's spec."""
+    """The stage's QC items (Quality › QC checks), the values submitted for them, and the part's spec."""
     from . import qc
     item = sh.mo.part if sh.mo else (MO.objects.get(pk=sh.co["newMo"]).part if sh.co and sh.co.get("newMo") else "")
+    need(item, "No MO is running on this line, so there's no part to check against. Start an MO in Change over "
+               "(or a supervisor runs it by filter number) first.")
+    refresh_part(item, force=True)   # judged against the drawing as it is now
     P = spec_for(item)
     items = qc.items_for(sh.machine.stage if sh.machine else "s1")
     try:
@@ -936,6 +975,8 @@ def qc_edit(p, ctx):
         vals = qc.parse(items, p)
     except ValueError as e:
         raise Need(str(e))
+    need(q.item, "This check has no part, so it can't be judged. Correct its part in Supervisor › History › Edit.")
+    refresh_part(q.item, force=True)
     P = spec_for(q.item)
     ok, fails = qc.judge(items, vals, P)
     old_scrap = q.scrap
@@ -978,11 +1019,35 @@ def qc_review(p, ctx):
         MO.objects.filter(number=q.mo).update(produced=Greatest(F("produced") - n, 0), scrap=F("scrap") + n)
     q.review, q.reviewed_by, q.reviewed_at = d, ctx.by, ctx.now
     q.scrapped = q.scrapped + n
-    q.save(update_fields=["review", "reviewed_by", "reviewed_at", "scrapped"])
-    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else ""))
+    fields = ["review", "reviewed_by", "reviewed_at", "scrapped"]
+    if p.get("issue") is not None:   # Process Out: what the quality issue was
+        q.issue, q.issue_note = p["issue"], p.get("issueNote") or ""
+        fields += ["issue", "issue_note"]
+    q.save(update_fields=fields)
+    audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else "")
+          + (f" (processed out: {q.issue}" + (f" — {q.issue_note}" if q.issue_note else "") + ")" if q.issue else ""))
     notify(f"QC check at {fmt_t(q.t)} {d} by {ctx.by}" + (f": {q.scrapped} filters scrapped from the count" if q.scrapped else ""),
            "qc", lines=[q.line], go="qc-log")
     return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"}
+
+
+@cmd("qcProcessOut", "qc.approve")
+def qc_process_out(p, ctx):
+    """Process Out a failed QC check (Supervisor, Quality): how many filters failed, taken off the count like a
+    disapproval, and what the quality issue was. Again later: the count is set to the new number."""
+    q = QCCheck.objects.filter(pk=p.get("id")).first()
+    need(q, "That QC check is no longer on file.")
+    need(not q.passed, "That check passed; there's nothing to process out.")
+    n = to_number(p.get("qty"))
+    need(n is not None and n == int(n) and 1 <= n <= 1_000_000, "How many filters failed the QC? (a whole number, at least 1)")
+    issues = config().get("qualityIssues") or []
+    issue = re.sub(r"\s+", " ", str(p.get("issue") or "")).strip()[:80]
+    need(issue, "Pick what the quality issue was.")
+    need(issue in issues, "Pick the quality issue from the list.")
+    note = str(p.get("note") or "").strip()[:500]
+    need(note or issue != "Other", "Describe the issue (you picked Other).")
+    qc_review({"id": q.pk, "decision": "disapproved", "scrap": int(n), "issue": issue, "issueNote": note}, ctx)
+    return {"msg": f"Processed out {int(n)} filter{'s' if n != 1 else ''} ({issue}); taken off the count."}
 
 
 @cmd("rollAdd")
@@ -1126,33 +1191,77 @@ def _first_row(name, key, ctx):
     return {str(k).lower(): v for k, v in rows[0].items()} if rows else {}
 
 
+def pull_drawing(key, ctx=None):
+    """The part's drawing from the asset database into Parts & specs: Part specs (dimensions, rev) and Drawing file
+    (rev, link). The drawing file's rev wins: it comes with the file operators open. Returns what happened in a
+    sentence, or None when no drawing queries are set up. Raises when the database can't be read."""
+    if not (integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists()):
+        return None
+    ctx = ctx or Ctx()
+    o, d = _first_row("part_spec", key, ctx), _first_row("part_drawing", key, ctx)
+    if not (o or d):
+        return f"The asset database has nothing for {key}."
+    o, d = o or {}, d or {}
+    cur = spec_for(key)
+    vals = {f: n for f in ("pleats", "len", "wid", "ph", "sb", "tol") if (n := _spec_number(o.get(f))) is not None}
+    vals = {f: to_inches(v, o.get(f + "_uom") or o.get("uom"), f) for f, v in vals.items()}
+    rev = str(d.get("rev") or o.get("rev") or cur["rev"]).strip()[:20]
+    url = _drawing_link(d.get("url")) or cur.get("url") or ""
+    if not (vals or PartSpec.objects.filter(key=key).exists()):   # a drawing file but no dimensions: estimates aren't saved as the drawing's
+        return (f"Drawing rev {rev} found, but the asset database has no dimensions for {key}. Add them in Quality › Parts & specs "
+                f"(or wire Part specs in the Connector builder) to keep the drawing.")
+    PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
+                                                         "rev": rev, "media": str(o.get("media") or cur["media"])[:80], "drawing_url": url})
+    return f"Drawing rev {rev} loaded from the asset database ({fmt_t(ctx.now)})."
+
+
+UNIT_IN = {"mm": 1 / 25.4, "millimeter": 1 / 25.4, "millimeters": 1 / 25.4, "millimetre": 1 / 25.4, "millimetres": 1 / 25.4,
+           "cm": 1 / 2.54, "centimeter": 1 / 2.54, "centimeters": 1 / 2.54, "m": 1 / 0.0254,
+           "in": 1, "inch": 1, "inches": 1, '"': 1, "''": 1, "ft": 12, "feet": 12, "foot": 12}
+
+
+def to_inches(v, unit, spec=""):
+    """A dimension from the asset database in inches: by its unit of measure column when wired (mm, cm, in…),
+    else by Quality › Parts & specs › units (which values the asset database keeps in mm). Pleats aren't lengths."""
+    if spec == "pleats":
+        return v
+    u = str(unit or "").strip().lower().rstrip(".")
+    f = UNIT_IN.get(u)
+    if f is None:
+        f = 1 / 25.4 if (config().get("assetUnits") or {}).get(spec) == "mm" else 1
+    return round(v * f, 4) if f != 1 else v
+
+
+FRESH_SECS = 60   # a part's dimensions are read from the asset database again after this long
+
+
+def refresh_part(item, force=False):
+    """Make sure Parts & specs has the asset database's latest for this part before it's used (a QC check judged, a
+    drawing or Part Info shown). At most once a minute per part (also when the database can't be reached), unless
+    force. Never raises: the dimensions on file are used when the database can't be read."""
+    from django.core.cache import cache
+    key = part_key(item)
+    if not key:
+        return
+    ck = "spec-fresh:" + key
+    if not force and cache.get(ck):
+        return
+    cache.set(ck, 1, FRESH_SECS)
+    try:
+        pull_drawing(key)
+    except Exception as e:  # noqa: BLE001 - the dimensions on file still work
+        log.warning("Couldn't read the drawing for %s from the asset database: %s", key, e)
+
+
 @cmd("getDrawing")
 def get_drawing(p, ctx):
-    """The part's drawing from the asset database: Part specs (dimensions, rev) and Drawing file (rev, link). The
-    drawing file's rev wins: it comes with the file operators open."""
     m = line_of(ctx.line)
     sh = active_run(m) if m else None
     key = part_key(p.get("part"))
-    msg = None
-    if integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists():
-        try:
-            o, d = _first_row("part_spec", key, ctx), _first_row("part_drawing", key, ctx)
-            if o or d:
-                o, d = o or {}, d or {}
-                cur = spec_for(key)
-                vals = {f: n for f in ("pleats", "len", "wid", "ph", "sb", "tol") if (n := _spec_number(o.get(f))) is not None}
-                rev = str(d.get("rev") or o.get("rev") or cur["rev"]).strip()[:20]
-                url = _drawing_link(d.get("url")) or cur.get("url") or ""
-                if vals or PartSpec.objects.filter(key=key).exists():
-                    PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
-                                                                         "rev": rev, "media": str(o.get("media") or cur["media"])[:80],
-                                                                         "drawing_url": url})
-                    msg = f"Drawing rev {rev} loaded from the asset database ({fmt_t(ctx.now)})."
-                else:   # a drawing file but no dimensions: estimated specs aren't saved as if they were the drawing's
-                    msg = (f"Drawing rev {rev} found, but the asset database has no dimensions for {key}. Add them in Admin › Parts & specs "
-                           f"(or wire Part specs in the Connector builder) to keep the drawing.")
-        except Exception as e:
-            msg = f"Asset database not reachable ({e}). Showing the drawing on file."
+    try:
+        msg = pull_drawing(key, ctx)
+    except Exception as e:  # noqa: BLE001
+        msg = f"Asset database not reachable ({e}). Showing the drawing on file."
     if sh:
         sh.draw_checked = ctx.now
         sh.save(update_fields=["draw_checked"])
@@ -1241,6 +1350,8 @@ def s2k_rows():
         if truncated:
             log.warning("S2K query returned more than 5000 rows; only the first 5000 were read")
         return rows
+    if s.get("s2kSource") == "api":
+        return integrations.s2k_api_rows()
     if not s.get("s2kUrl"):
         raise integrations.ConnError("Set the S2K export URL in Admin › Connections first.")
     rows = integrations.get_json(s["s2kUrl"])
@@ -1250,7 +1361,8 @@ def s2k_rows():
 
 
 def s2k_on(s):
-    return bool(s.get("s2kUrl")) if s.get("s2kSource") != "db" else integrations.s2k_db_ready()
+    src = s.get("s2kSource")
+    return integrations.s2k_db_ready() if src == "db" else integrations.s2k_api_ready() if src == "api" else bool(s.get("s2kUrl"))
 
 
 @cmd("s2kPull", "lead")
@@ -2094,7 +2206,7 @@ def break_del(p, ctx):
     refresh_schedule("a break change")
 
 
-@cmd("partAdd", "lists.edit")
+@cmd("partAdd", "quality.tolerances")
 def part_add(p, ctx):
     k = part_key(p.get("k"))
     need(k, "Type a part number.")
@@ -2102,9 +2214,11 @@ def part_add(p, ctx):
     g = spec_for(k)
     PartSpec.objects.create(key=k, **{f: g[f] for f in ("pleats", "len", "wid", "ph", "sb", "tol", "rev", "media")})
     audit(ctx, f"Added part {k}")
+    refresh_part(k, force=True)   # the asset database's drawing, when it has one
+    return {"msg": f"{k} added. Specs come from the asset database when it has the part; otherwise they're estimates to check."}
 
 
-@cmd("partSet", "lists.edit")
+@cmd("partSet", "quality.tolerances")
 def part_set(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -2123,7 +2237,78 @@ def part_set(p, ctx):
     audit(ctx, f"{ps.key} {f} set to {v}")
 
 
-@cmd("partDel", "lists.edit")
+SPEC_NUMS = ("pleats", "len", "wid", "ph", "sb", "tol")
+
+
+@cmd("partsSave", "quality.tolerances")
+def parts_save(p, ctx):
+    """Quality › Parts & specs: the whole table at once. rows: [{k, pleats, len, wid, ph, sb, tol, rev, media}]; only
+    the parts that changed are saved."""
+    rows = p.get("rows") if isinstance(p.get("rows"), list) else []
+    changed = []
+    for r in rows[:2000]:
+        ps = PartSpec.objects.filter(key=str(r.get("k") or "")).first()
+        if not ps:
+            continue
+        new = {}
+        for f in SPEC_NUMS:
+            v = to_number(r.get(f))
+            need(v is not None and v > 0, f"{ps.key}: enter a number above 0 for {dict(zip(SPEC_NUMS, ('pleats', 'length', 'width', 'pleat height', 'side band', 'tolerance')))[f]}.")
+            new[f] = v
+        new["rev"] = str(r.get("rev") or "").strip()[:20] or ps.rev
+        new["media"] = str(r.get("media") or "").strip()[:80]
+        diff = [f for f, v in new.items() if getattr(ps, f) != v]
+        if diff:
+            for f, v in new.items():
+                setattr(ps, f, v)
+            ps.save()
+            changed.append(f"{ps.key} ({', '.join(diff)})")
+    if changed:
+        audit(ctx, "Parts & specs changed: " + "; ".join(changed)[:900])
+    return {"msg": f"Saved {len(changed)} part{'s' if len(changed) != 1 else ''}." if changed else "Nothing changed."}
+
+
+@cmd("partsImport", "quality.tolerances")
+def parts_import(p, ctx):
+    """Quality › Parts & specs: part numbers pasted in (one per line, or separated by commas, spaces or tabs), each
+    read from the asset database (Part specs and Drawing file in the Connector builder) into Parts & specs."""
+    raw = p.get("parts")
+    words = re.split(r"[\s,;]+", " ".join(raw) if isinstance(raw, list) else str(raw or ""))
+    keys = list(dict.fromkeys(k for k in (part_key(w) for w in words) if k))
+    need(keys, "Paste the part numbers to import.")
+    need(len(keys) <= 500, f"That's {len(keys)} parts: import 500 or fewer at a time.")
+    need(integrations.assets_ready(), "The asset database isn't set up yet (Admin › Connections).")
+    need(SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
+         "Wire Part specs (and Drawing file) to the asset database first (Admin › Connector builder).")
+    done, missing, failed = [], [], []
+    for k in keys:
+        try:
+            msg = pull_drawing(k, ctx) or ""
+        except Exception as e:  # noqa: BLE001 - one part's trouble doesn't stop the rest
+            failed.append(f"{k} ({str(e)[:80]})")
+            continue
+        (done if msg.startswith("Drawing rev") and "loaded" in msg else missing).append(k)
+    audit(ctx, f"Parts imported from the asset database: {len(done)} of {len(keys)}" + (f"; not found: {', '.join(missing)[:400]}" if missing else ""))
+    out = f"Imported {len(done)} of {len(keys)} part{'s' if len(keys) != 1 else ''}."
+    if missing:
+        out += f" No dimensions in the asset database for: {', '.join(missing[:30])}{'…' if len(missing) > 30 else ''}."
+    if failed:
+        out += f" Couldn't read: {', '.join(failed[:5])}."
+    return {"msg": out, "data": {"done": done, "missing": missing, "failed": failed}}
+
+
+@cmd("assetUnitsSet", "quality.tolerances")
+def asset_units_set(p, ctx):
+    """Which dimensions the asset database keeps in millimetres: converted to inches as they're read."""
+    units = {f: "mm" for f in ("len", "wid", "ph", "sb", "tol") if p.get(f) == "mm"}
+    st = settings_obj()
+    st.config = {**st.config, "assetUnits": units}
+    st.save(update_fields=["config"])
+    audit(ctx, "Asset database units: " + (", ".join(f"{f} in mm" for f in units) or "all inches"))
+    return {"msg": "Units saved. Parts read from the asset database from now on are converted; use Import again to re-read parts already on file."}
+
+
+@cmd("partDel", "quality.tolerances")
 def part_del(p, ctx):
     ps = PartSpec.objects.filter(key=p.get("k")).first()
     need(ps, "Part not found.")
@@ -2189,7 +2374,7 @@ def setting_set(p, ctx):
         except netsafety.NotPrivate as e:
             raise Need(str(e))
     if k == "s2kSource":
-        need(v in ("url", "db"), "Unknown S2K source.")
+        need(v in ("url", "db", "api"), "Unknown S2K source.")
     if k == "paycom.pinFrom":
         need(v in ("code", "badge", "none"), "Unknown PIN source.")
     if k == "kiosk.layout":
@@ -2302,6 +2487,23 @@ def conn_save(p, ctx):
                    + (" (outside the plant network, allowed by this login)" if v["internet"] else ""))
         return {"msg": f"{what} saved. {r['msg']}" + (" Note: this login is allowed to change data; a read-only login is safer." if r.get("writable") else ""),
                 "data": liveconfig.info()}
+    if group == "s2kapi":
+        from urllib.parse import urlsplit
+        url = str(f.get("url") or "").strip()
+        u = urlsplit(url)
+        need(u.scheme == "https" and u.hostname and not (u.username or u.password) and len(url) <= 500,
+             "Type the S2K API address, starting with https:// (e.g. https://api.aps.dev/datalake/api/open-mos/).")
+        comp, loc = str(f.get("company") or "").strip(), str(f.get("location") or "").strip()
+        need(re.fullmatch(r"[A-Za-z0-9_-]{1,20}", comp), "Type the company (e.g. 1).")
+        need(re.fullmatch(r"[A-Za-z0-9_-]{1,20}", loc), "Type the location (e.g. 07).")
+        token = str(f.get("token") or "").strip()
+        saved = liveconfig.info()["s2kapi"]
+        need(token or saved["hasToken"], "Paste the S2K API token.")
+        need(not token or TEXT_RE.match(token), "That token has a character the settings file can't hold.")
+        base = url.split("?")[0]
+        liveconfig.save({"S2K_API_URL": base, "S2K_API_COMPANY": comp, "S2K_API_LOCATION": loc, **({"S2K_API_TOKEN": token} if token else {})})
+        audit(ctx, f"S2K API set to {base} (company {comp}, location {loc})" + (", new token" if token else ""))
+        return {"msg": "S2K API saved. Test it to see the open MOs it sends.", "data": liveconfig.info()}
     if group == "paycom":
         sid = str(f.get("sid") or "").strip()
         token = str(f.get("token") or "")
@@ -2367,7 +2569,7 @@ def conn_remove(p, ctx):
     keys = {"assets": ["ASSET_DB_HOST", "ASSET_DB_PORT", "ASSET_DB_NAME", "ASSET_DB_USER", "ASSET_DB_PASSWORD", "ASSET_DB_INTERNET", "ASSET_DB_KIND"],
             "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD", "S2K_DB_INTERNET", "S2K_DB_KIND"],
             "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD", "MACHINE_DB_INTERNET", "MACHINE_DB_KIND"],
-            "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
+            "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "s2kapi": ["S2K_API_URL", "S2K_API_COMPANY", "S2K_API_LOCATION", "S2K_API_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
             "github": ["GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK"],
             "influx": ["INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET"]}.get(group)
     need(keys, "Unknown connection.")
@@ -2382,7 +2584,7 @@ def conn_remove(p, ctx):
     return {"msg": "Connection removed.", "data": liveconfig.info()}
 
 
-# ------------------------------------------------------------------ QC items per stage (Admin > QC checks)
+# ------------------------------------------------------------------ QC items per stage (Quality › QC checks)
 def _qc_list(st, stage):
     from plant.models import STAGES
 
@@ -2403,7 +2605,7 @@ def _qc_store(st, stage, items, ctx, what):
         notify(f"QC check items changed by {ctx.by}: {what}", "qc", lines=names, go="qc-log")
 
 
-@cmd("qcItemAdd", "lists.edit")
+@cmd("qcItemAdd", "quality.tolerances")
 def qc_item_add(p, ctx):
     from . import qc
     st = settings_obj()
@@ -2427,7 +2629,7 @@ def qc_item_add(p, ctx):
     _qc_store(st, stage, items, ctx, f"added {what}")
 
 
-@cmd("qcItemDel", "lists.edit")
+@cmd("qcItemDel", "quality.tolerances")
 def qc_item_del(p, ctx):
     st = settings_obj()
     stage = p.get("stage")
@@ -2438,7 +2640,7 @@ def qc_item_del(p, ctx):
     _qc_store(st, stage, items, ctx, f"removed {gone.get('label') or gone['key']}")
 
 
-@cmd("qcItemMove", "lists.edit")
+@cmd("qcItemMove", "quality.tolerances")
 def qc_item_move(p, ctx):
     st = settings_obj()
     stage = p.get("stage")
@@ -2716,6 +2918,18 @@ def alert_contact_delete(p, ctx):
     c.delete()
     audit(ctx, f"Downtime alerts: removed {c.name}")
     return {"msg": f"{c.name} removed."}
+
+
+@cmd("alertToggle", "alerts.edit")
+def alert_toggle(p, ctx):
+    """Turn one person's downtime alerts on or off without changing anything else (Admin › Alerts)."""
+    from .models import AlertContact
+    c = AlertContact.objects.filter(pk=p.get("id")).first()
+    need(c, "That person is no longer on the list.")
+    c.active = bool(p.get("on"))
+    c.save(update_fields=["active"])
+    audit(ctx, f"Downtime alerts for {c.name} turned {'on' if c.active else 'off'}")
+    return {"msg": f"Alerts for {c.name} {'on' if c.active else 'off'}."}
 
 
 @cmd("alertTest", "alerts.edit")

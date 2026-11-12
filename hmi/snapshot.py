@@ -25,7 +25,8 @@ QDEF = {
     "part_spec": {"title": "Part specs (drawing)", "help": "One row for the part. \"Get updated drawing\" copies these into Parts & specs, so QC checks use them.",
                   "perPart": True,
                   "roles": [["rev", "Drawing rev"], ["pleats", "Pleats per unit"], ["len", "Length"], ["wid", "Width"], ["ph", "Pleat height"],
-                            ["sb", "Side band height"], ["tol", "Tolerance ±"], ["media", "Media"]]},
+                            ["sb", "Side band height"], ["tol", "Tolerance ±"], ["media", "Media"],
+                            ["uom", "Unit of measure (mm, in…): each dimension's own"]]},
     "part_drawing": {"title": "Drawing file", "help": "The part's drawing: its rev and a link to the file (PDF or image, e.g. on AWS). \"Get updated drawing\" "
                                                   "keeps them, and operators get an Open drawing button. Its rev wins over Part specs' rev.",
                      "perPart": True,

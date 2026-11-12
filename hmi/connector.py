@@ -61,6 +61,8 @@ def parse_sql(sql):
     sql = sql or ""
     out = {"table": "", "map": {}, "fval": "", "where": [], "slotWhere": {}}
     for tag, val, col, role in re.findall(rf"MAX\(\s*CASE\s+WHEN\s+({_ID})\s*=\s*{_LIT}\s+THEN\s+({_ID})\s+END\s*\)\s+AS\s+(\w+)", sql, re.I):
+        if role.lower().endswith("_uom"):   # a dimension's unit, read from the same rows as the dimension
+            continue
         out["map"][role.lower()] = _unq(col)
         out["slotWhere"][role.lower()] = [{"col": _unq(tag), "val": _unlit(val)}]
     sql = re.sub(rf"MAX\(\s*CASE\s+WHEN\s+{_ID}\s*=\s*{_LIT}\s+THEN\s+{_ID}\s+END\s*\)", "", sql, flags=re.I)
@@ -147,7 +149,7 @@ def query_filterable(name):
     """The inputs of a database query that can each read their own rows. Part specs and the drawing file: a table that
     keeps one value per row with a code saying which it is (e.g. part_attribute: value, with PAID 30 = length)."""
     from .snapshot import QDEF
-    return {r[0] for r in QDEF[name]["roles"] if r[0] != "newest"} if QDEF[name].get("perPart") else set()
+    return {r[0] for r in QDEF[name]["roles"] if r[0] not in ("newest", "uom")} if QDEF[name].get("perPart") else set()
 
 
 def clean_slot_where(raw, cols=None, keys=None):

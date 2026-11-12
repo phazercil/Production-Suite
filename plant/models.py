@@ -313,6 +313,8 @@ DEFAULT_CONFIG = {
     "issueTypes": ["Pleater jam", "Blade / cutter", "Glue system", "Side band applicator", "Electrical / sensor", "Air / pneumatics",
                    "Guarding / safety", "Other"],
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
+    "qualityIssues": ["Out of dimension", "Glue skip / poor bond", "Torn or damaged media", "Bad cut", "Side band defect", "Wrong pleat count",
+                      "Pleats uneven or collapsed", "Contamination / dirt", "Wrong media or material", "Other"],
     "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
               "photoDays": 365, "qcLate": 10},
 }

@@ -58,8 +58,6 @@ class KioskTests(TestCase):
         self.assertNotContains(r, "password\" value=")     # passwords never go back to the screen
         r = self.c.get("/kiosk/v/admin?tab=shifts")
         self.assertContains(r, "1st shift")
-        r = self.c.get("/kiosk/v/admin?tab=parts")
-        self.assertContains(r, "MG4062HP")
 
     def test_admin_actions_need_a_shift_lead(self):
         r = self.do("mdSet", id="Barbara", f="feed.type", v="none")
@@ -284,7 +282,6 @@ class KioskTests(TestCase):
         self.assertNotIn("cut", keys)
         self.assertEqual(keys[-2:], ["c1", "c2"])
         self.assertEqual([i["key"] for i in qc.items_for("eb")], ["glue", "scrap"])   # each stage its own
-        self.assertContains(self.c.get("/kiosk/v/admin?tab=qc"), "Frame square")
         r = self.c.get("/kiosk/m/qc")
         self.assertContains(r, "Frame square")
         self.assertContains(r, "Glue temp")

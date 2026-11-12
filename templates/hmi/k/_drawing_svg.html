@@ -1,7 +1,7 @@
 <svg viewBox="0 0 620 330" role="img" aria-label="Drawing of {{ p.key }}"><g font-family="IBM Plex Mono,monospace" font-size="12" fill="#1c2b3a">
 <rect x="60" y="50" width="240" height="190" fill="#fff" stroke="#1c2b3a" stroke-width="2"/>{% for x in pleat_xs %}<line x1="{{ x }}" y1="60" x2="{{ x }}" y2="230" stroke="#7a8895" stroke-width="1"/>{% endfor %}
-<line x1="60" y1="262" x2="300" y2="262" stroke="#1c2b3a"/><path d="M60 258v8M300 258v8" stroke="#1c2b3a"/><text x="180" y="280" text-anchor="middle">L {{ p.len|floatformat:2 }} ±{{ p.tol }}</text>
-<line x1="36" y1="50" x2="36" y2="240" stroke="#1c2b3a"/><path d="M32 50h8M32 240h8" stroke="#1c2b3a"/><text x="28" y="150" text-anchor="middle" transform="rotate(-90 28 150)">W {{ p.wid|floatformat:2 }} ±{{ p.tol }}</text>
+<line x1="60" y1="262" x2="300" y2="262" stroke="#1c2b3a"/><path d="M60 258v8M300 258v8" stroke="#1c2b3a"/><text x="180" y="280" text-anchor="middle">L {{ p.len|floatformat:2 }} {{ tolTxt.len }}</text>
+<line x1="36" y1="50" x2="36" y2="240" stroke="#1c2b3a"/><path d="M32 50h8M32 240h8" stroke="#1c2b3a"/><text x="28" y="150" text-anchor="middle" transform="rotate(-90 28 150)">W {{ p.wid|floatformat:2 }} {{ tolTxt.wid }}</text>
 <text x="60" y="36" font-size="13" font-weight="600">TOP VIEW</text><text x="360" y="36" font-size="13" font-weight="600">SECTION A–A</text>
 <polyline points="360,170 375,110 390,170 405,110 420,170 435,110 450,170 465,110 480,170" fill="none" stroke="#1c2b3a" stroke-width="2"/>
 <rect x="352" y="104" width="8" height="70" fill="#c9d5e1" stroke="#1c2b3a"/><rect x="480" y="104" width="8" height="70" fill="#c9d5e1" stroke="#1c2b3a"/>
@@ -9,5 +9,5 @@
 <line x1="340" y1="104" x2="340" y2="174" stroke="#1c2b3a"/><path d="M336 104h8M336 174h8" stroke="#1c2b3a"/><text x="332" y="198" text-anchor="end">SB {{ p.sb|floatformat:2 }}</text>
 <rect x="340" y="230" width="270" height="90" fill="#fff" stroke="#1c2b3a"/><line x1="340" y1="255" x2="610" y2="255" stroke="#1c2b3a"/>
 <text x="350" y="248" font-weight="600">{{ p.key }}</text><text x="560" y="248">REV {{ p.rev }}</text>
-<text x="350" y="274">{{ p.pleats }} PLEATS · {{ p.media }}</text><text x="350" y="294">INCHES · TOL ±{{ p.tol }} UNLESS NOTED</text><text x="350" y="312">CHECK GLUE BEAD CONTINUOUS ALL SIDES</text>
+<text x="350" y="274">{{ p.pleats }} PLEATS · {{ p.media }}</text><text x="350" y="294">INCHES · TOL {{ tolTxt.other }} UNLESS NOTED</text><text x="350" y="312">CHECK GLUE BEAD CONTINUOUS ALL SIDES</text>
 </g></svg>

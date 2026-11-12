@@ -1,0 +1,18 @@
+{% load suite %}<div class="row"><h1 class="h1 grow">Part Info{% if P.item %} · {{ P.item }}{% endif %}</h1>
+  {% if P.item %}{% include "hmi/k/_open_drawing.html" with cls="" %}<button type="button" class="btn" hx-post="/kiosk/do/getDrawing" hx-vals='{"part": "{{ P.item|escapejs }}", "from": "info"}' hx-params="part,from">Get updated drawing</button>{% endif %}</div>
+<div class="row" style="flex-wrap:wrap;gap:6px">
+  {% for x in P.choices %}<button type="button" class="btn sm {% if x == P.item %}primary{% else %}ghost{% endif %}" hx-get="/kiosk/v/part-info?part={% if x == P.cur %}{% else %}{{ x|urlencode }}{% endif %}" hx-target="#view" hx-swap="innerHTML">{{ x }}{% if x == P.cur %} · running now{% endif %}</button>{% endfor %}
+  <form class="row" style="gap:6px" hx-get="/kiosk/v/part-info" hx-target="#view" hx-swap="innerHTML"><input type="text" name="part" placeholder="Another filter number" autocomplete="off" autocapitalize="characters" maxlength="40" style="width:200px" aria-label="Filter number"><button class="btn sm" type="submit">Show</button></form>
+</div>
+{% if not P.item %}<div class="panel empty">No MO is running or scheduled on {{ station|default:"this line" }}. Type a filter number to see its drawing.</div>
+{% else %}
+<div class="grid2" style="align-items:start;grid-template-columns:repeat(auto-fit,minmax(380px,1fr))">
+  <div class="panel"><div class="drawing">{% include "hmi/k/_drawing_svg.html" %}</div>
+    <p class="note">Drawing rev {{ p.rev }}{% if p.estimated %} · <span style="color:var(--warn)">estimated specs: this part isn't in Parts &amp; specs yet</span>{% endif %}{% if P.mos %} · {% for m in P.mos %}MO {{ m.number }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p></div>
+  <div class="panel"><h2 class="h2">Dimensions</h2>
+    <div class="tblwrap"><table class="xl"><thead><tr><th>Measurement</th><th class="num">Drawing</th><th>Tolerance</th><th class="num">Min</th><th class="num">Max</th></tr></thead><tbody>
+      {% for d in P.dims %}<tr><td>{{ d.label }}</td><td class="num"><b>{{ d.v|floatformat:3 }}</b></td><td class="num">{{ d.tol }}{% if not d.plant %} <span class="note">part's own</span>{% endif %}</td><td class="num">{{ d.lo|floatformat:3 }}</td><td class="num">{{ d.hi|floatformat:3 }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <dl class="kv" style="margin-top:10px"><dt>Pleats per unit</dt><dd class="num">{{ p.pleats }}</dd><dt>Media</dt><dd>{{ p.media|default:"—" }}</dd><dt>Drawing rev</dt><dd>{{ p.rev }}</dd><dt>Units</dt><dd>inches</dd></dl>
+    <p class="note">QC checks pass between Min and Max. Tolerances are set in Quality › Tolerances; "part's own" means it uses this part's tolerance from Parts &amp; specs.</p></div>
+</div>{% endif %}

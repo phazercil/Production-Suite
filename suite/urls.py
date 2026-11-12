@@ -8,6 +8,7 @@ from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
 from scheduler import views as sch
+from quality import views as quality
 from supervisor import views as supervisor
 from suite import sections, thin
 
@@ -69,8 +70,10 @@ urlpatterns = [
     path("labor/", labor.page, name="labor"),
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
+    path("quality/", quality.page, name="quality"),
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
+    path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),
     path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),

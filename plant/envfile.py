@@ -13,6 +13,8 @@ ENV_KEYS_ORDER = [
     ("S2K_DB_HOST", None), ("S2K_DB_PORT", None), ("S2K_DB_NAME", None), ("S2K_DB_USER", None), ("S2K_DB_PASSWORD", None), ("S2K_DB_INTERNET", None), ("S2K_DB_KIND", None),
     ("# --- Machine data database: tables the machines (PLCs, loggers) write readings to (read-only, optional)", None),
     ("MACHINE_DB_HOST", None), ("MACHINE_DB_PORT", None), ("MACHINE_DB_NAME", None), ("MACHINE_DB_USER", None), ("MACHINE_DB_PASSWORD", None), ("MACHINE_DB_INTERNET", None), ("MACHINE_DB_KIND", None),
+    ("# --- S2K open MOs from an HTTPS API (optional; an internet connection to this one address)", None),
+    ("S2K_API_URL", None), ("S2K_API_COMPANY", None), ("S2K_API_LOCATION", None), ("S2K_API_TOKEN", None),
     ("# --- Paycom employee directory (optional)", None),
     ("PAYCOM_SID", None), ("PAYCOM_TOKEN", None),
     ("# --- Machines that push readings send this in the X-Feed-Key header (optional)", None),

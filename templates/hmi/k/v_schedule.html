@@ -28,7 +28,7 @@
 {% endif %}
 <div class="row"><h2 class="h2 grow">MO list</h2><div class="seg">{% for f, label in "OPEN:Open,CLOSE:Closed,ALL:All"|pairs %}<button class="{% if P.status == f %}on{% endif %}" hx-get="/kiosk/v/schedule?status={{ f }}" hx-target="#view">{{ label }}</button>{% endfor %}</div></div>
 <div class="tblwrap"><table class="xl"><thead><tr>{% for k, l in P.cols %}<th><a class="thsort" hx-get="/kiosk/v/schedule?sort={% if P.sort == k %}-{% endif %}{{ k }}" hx-target="#view">{{ l }}{% if P.sort == k %} ▲{% elif P.sort|slice:"1:" == k %} ▼{% endif %}</a></th>{% endfor %}</tr></thead><tbody>
-{% for r in P.rows %}<tr><td>{{ r.m.added|date:"n/j/Y" }}</td><td>{{ r.m.number }}</td><td>{{ r.m.due|date:"n/j/Y" }}</td><td>{{ r.m.qty }}</td><td class="{% if r.late %}late{% endif %} {% if r.m.hot %}hot{% endif %}">{{ r.m.part }}</td><td>{{ r.process }}</td><td>{{ r.m.mfg }}</td><td>{{ r.m.produced }}</td><td>{{ r.m.scrap }}</td><td class="final">{{ r.final }}</td><td>{{ r.m.status }}</td><td>{% if r.m.line %}{{ r.m.line.name }}{% else %}—{% endif %}</td></tr>
+{% for r in P.rows %}<tr><td>{{ r.m.added|date:"n/j/Y" }}</td><td>{{ r.m.number }}</td><td>{{ r.m.due|date:"n/j/Y" }}</td><td>{{ r.m.qty }}</td><td class="{% if r.late %}late{% endif %}">{{ r.m.part }}</td><td>{{ r.m.produced }}</td><td>{{ r.m.scrap }}</td><td class="final">{{ r.final }}</td><td>{{ r.m.status }}</td><td>{% if r.m.line %}{{ r.m.line.name }}{% else %}—{% endif %}</td></tr>
 {% empty %}<tr><td colspan="12">No MOs match.</td></tr>{% endfor %}
 </tbody></table></div>
 <p class="note">Red item = past due. Yellow item = hot order. Final qty = produced − scrap.</p>

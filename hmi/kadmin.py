@@ -21,7 +21,7 @@ from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
-        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("qc", "QC checks"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
+        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
@@ -36,8 +36,8 @@ LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick fr
 FEED_LABEL = [("db", "Database table"), ("http", "Read from URL"), ("push", "Pushed to server"), ("influx", "InfluxDB query"),
               ("demo", "Demo replay"), ("none", "Not connected")]
 TABLE_DBS = [("machines", "Machine data database"), ("assets", "Asset database")]
-S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("qty", "Quantity open", True), ("due", "Due date", False),
-             ("process", "Process code", False), ("mfg", "MFG location", False), ("hot", "Hot flag", False)]
+S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("qty", "Quantity open", True), ("due", "Due date", False)]
+# (which line runs an MO is set in the Scheduler, not taken from S2K)
 # Commands a field or button can run as they are (the engine checks the person and every value)
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
                "breakSet", "breakDel", "tagSysAdd", "tagSysDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
@@ -115,13 +115,6 @@ def tab_data(s, tab, request):
                            "state": "in effect now" if v.date_from <= today <= v.date_to else "over" if v.date_to < today else "coming up"})
             out.append({"i": i, "sh": {"name": x.name}, **c, "variants": vs})
         return {"shifts": out}
-    if tab == "parts":
-        from plant.models import PartSpec
-        P = {x.key: x.as_dict() for x in PartSpec.objects.all()}
-        fields = [("pleats", "Pleats/unit", "1"), ("len", "Length", ".01"), ("wid", "Width", ".01"), ("ph", "Pleat ht", ".01"),
-                  ("sb", "Side band", ".01"), ("tol", "Tol ±", ".01")]
-        return {"parts": [{"k": k, "p": P[k], "vals": [(f, lbl, st, P[k].get(f)) for f, lbl, st in fields]} for k in sorted(P)],
-                "fields": fields}
     if tab == "rules":
         r = s.rules
         nums = [("stopPpm", "Line counts as stopped at or below (P/m)", "Speed readings at or below this count as downtime, unless the machine has a run signal (Admin › Connections › Machine data).", 0),
@@ -160,13 +153,6 @@ def tab_data(s, tab, request):
         return connector_data(s, focus=request.GET.get("focus", ""))
     if tab == "permissions":
         return permissions_data(s, request)
-    if tab == "qc":
-        from plant.models import STAGES
-
-        from . import qc
-        return {"stages": [{"k": k, "label": lbl, "items": qc.items_for(k, cfg),
-                            "free": [(b, d["label"]) for b, d in qc.BUILTIN.items() if b not in {i["key"] for i in qc.items_for(k, cfg)}]}
-                           for k, lbl in STAGES], "types": qc.TYPES}
     if tab == "codata":
         return codata_data(s, request)
     return {}
@@ -224,7 +210,8 @@ def connections_data(s, request):
     pc = st.get("paycom") or {}
     rows += [("grafana", "Grafana", g.get("url") if g.get("on") and g.get("url") else ""), ("assets", "Asset database (MariaDB)", "Set up in .env" if srv["assets"] else ""),
              ("paycom", "Paycom", (f"automatic every {pc.get('every')} min" if pc.get("auto") else "manual") if srv["paycom"] else ""),
-             ("s2k", "S2K schedule", ("S2K database (read-only)" if srv["s2kdb"] else "") if st.get("s2kSource") == "db" else st.get("s2kUrl", "")),
+             ("s2k", "S2K schedule", ("S2K database (read-only)" if srv["s2kdb"] else "") if st.get("s2kSource") == "db" else
+              (integrations.s2k_api_url() if integrations.s2k_api_ready() else "") if st.get("s2kSource") == "api" else st.get("s2kUrl", "")),
              ("people", "People & training list", st.get("peopleUrl", "")), ("webhook", "Copy records to another system", st.get("webhook", ""))]
     conn = s.st.conn or {}
     status = [{"k": k, "label": lbl, "addr": addr, "c": conn.get(k)} for k, lbl, addr in rows]
@@ -310,7 +297,10 @@ def s2k_data(s, request, sql=None, msg=None, err=False, res=None, show=False, bl
     from .models import SavedQuery
     saved = SavedQuery.objects.filter(name="s2k_mos").first()
     out = {"saved": saved, "msg": msg, "err": err, "res": res, "show": show, "bld": bld or {}, "roles": S2K_ROLES,
-           "sql": sql if sql is not None else (saved.sql if saved else "SELECT mo_number AS mo, item_number AS item, qty_open AS qty, due_date AS due, process_code AS process\nFROM open_orders\nWHERE status = 'OPEN'")}
+           "sql": sql if sql is not None else (saved.sql if saved else "SELECT mo_number AS mo, item_number AS item, qty_open AS qty, due_date AS due\nFROM open_orders\nWHERE status = 'OPEN'")}
+    from plant import liveconfig
+    out["api"] = liveconfig.info()["s2kapi"]
+    out["apiUrl"] = integrations.s2k_api_url() if out["api"]["url"] else ""
     if show or bld:
         T = tables("s2k")
         out["T"] = T
@@ -355,6 +345,7 @@ GUESS = {"step": ["step", "instruction", "step_text", "description", "text"], "s
          "sideband": ["sideband", "sidebands", "side_band", "side_band_material"],
          "unit": ["unit", "units", "uom"], "asset": ["asset", "asset_id", "tool", "tool_id"], "image": ["image", "image_url", "photo", "photo_url"],
          "url": ["url", "link", "drawing_url", "drawing_link", "file_url", "pdf", "s3_url", "aws_url"], "newest": ["updated", "updated_at", "modified", "created", "date"],
+         "uom": ["uom", "unit", "units", "unit_of_measure"],
          "name": ["name", "setting", "setting_name", "parameter"], "rev": ["rev", "revision", "drawing_rev"], "pleats": ["pleats", "pleat_count", "pleats_per_unit"],
          "len": ["length", "len", "length_in"], "wid": ["width", "wid", "width_in"], "ph": ["pleat_height", "ph"], "sb": ["side_band", "side_band_height", "sb"],
          "tol": ["tol", "tolerance"], "media": ["media", "media_type", "material"], "f_part": ["part", "part_no", "part_number", "item", "sku"],
@@ -377,6 +368,9 @@ def guess_columns(qname, cols):
         if hit:
             out[k] = cols[low.index(hit)]
     return out
+
+
+UOM_SPECS = ("len", "wid", "ph", "sb", "tol")   # dimensions a unit of measure applies to
 
 
 def build_codata_sql(qname, b, kind=None):
@@ -405,6 +399,9 @@ def build_codata_sql(qname, b, kind=None):
         # rows with its own code, folded into one row for the part
         sel = ",\n       ".join((f"MAX(CASE WHEN {q(sw[r[0]]['col'])} = {dbkinds.literal(kind, sw[r[0]]['val'])} THEN {q(b[r[0]])} END)"
                                  if r[0] in sw else f"MAX({q(b[r[0]])})") + f" AS {r[0]}" for r in D["roles"] if b.get(r[0]))
+        if b.get("uom"):   # each dimension's unit, from its own rows (e.g. PAID 30's uom for the length)
+            sel += "".join(f",\n       MAX(CASE WHEN {q(sw[k]['col'])} = {dbkinds.literal(kind, sw[k]['val'])} THEN {q(b['uom'])} END) AS {k}_uom"
+                           for k in UOM_SPECS if k in sw)
     else:
         sel = ",\n       ".join(f"{q(b[r[0]])} AS {r[0]}" for r in D["roles"] if b.get(r[0]))
     w = [f"{q(b['f_part'])} = :part"]
@@ -819,6 +816,12 @@ def a_alert_test(request, s, p):
     return alerts_panel(request, s, msgs={"people": {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}})
 
 
+@action("alertToggle")
+def a_alert_toggle(request, s, p):
+    r = run(request, s, "alertToggle", {"id": int(p.get("id") or 0), "on": p.get("on") == "1"})
+    return alerts_panel(request, s, msgs={} if r["ok"] else {"people": {"ok": False, "text": r["error"]}})
+
+
 @action("alertDelete")
 def a_alert_delete(request, s, p):
     r = run(request, s, "alertContactDelete", {"id": int(p.get("id") or 0)})
@@ -976,6 +979,21 @@ def a_s2k(request, s, p):
         s.st = PlantSettings.load()
         s.settings, s.cfg = s.st.settings, s.st.config
         return thin.trigger(s2k_panel(request, s), changed=True)
+    if op == "apiSave":
+        r = run(request, s, "connSave", {"group": "s2kapi", "fields": {k: p.get(k, "") for k in ("url", "company", "location", "token")}})
+        if r["ok"]:
+            integrations.set_conn("s2k", True, "S2K API saved")
+        return s2k_panel(request, s, msg=r.get("msg") if r["ok"] else r["error"], err=not r["ok"])
+    if op == "apiTest":   # what the API sends now, nothing added
+        try:
+            rows = integrations.s2k_api_rows()
+        except integrations.ConnError as e:
+            integrations.set_conn("s2k", False, str(e)[:200])
+            return s2k_panel(request, s, msg=str(e), err=True)
+        integrations.set_conn("s2k", True, f"{len(rows)} open MOs from the S2K API")
+        cols = list(dict.fromkeys(k for r in rows[:50] if isinstance(r, dict) for k in r))[:10]
+        return s2k_panel(request, s, msg=f"{len(rows)} open MO{'s' if len(rows) != 1 else ''} from the S2K API. Showing the first 20.",
+                         res={"columns": cols, "rows": [r for r in rows[:20] if isinstance(r, dict)]})
     if op == "tables":
         return s2k_panel(request, s, sql=sql, show=not p.get("shown"), bld=bld if p.get("shown") is None else bld)
     if op == "pick":   # a table or column was picked in the builder

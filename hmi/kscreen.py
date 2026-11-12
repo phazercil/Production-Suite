@@ -21,7 +21,7 @@ from . import integrations
 from .engine import shift_stats
 from .models import Downtime, LineState, MachineError, Notice, PpmReading, ShiftRun, Ticket
 
-PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
+PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("part-info", "Part Info"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
          ("status", "Status"), ("end-of-shift", "End of Shift"), None, ("team", "Team")]
 LOCKED_OUT = {"team", "admin"}           # not on a machine's own screen (/station/<machine>/)
 ADMIN_PAGES = {"admin"}
@@ -113,6 +113,14 @@ class Screen:
             self._specs = {p.key: p.as_dict() for p in PartSpec.objects.all()}
             self._cat = Catalog()
         return part_spec(item or "", self._specs, self._cat)
+
+    def fresh_part(self, item):
+        """part(), after reading the asset database's latest for it (at most once a minute per part)."""
+        from .engine import refresh_part
+        if item:
+            refresh_part(item)
+            self._specs = None
+        return self.part(item)
 
     def mo(self, pk):
         return MO.objects.filter(pk=pk).first() if pk else None
@@ -599,15 +607,13 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
                       for d in days]
     rows = list(MO.objects.select_related("line").all() if status == "ALL" else MO.objects.select_related("line").filter(status=status))
     keys = {"added": lambda m: m.added or date.min, "mo": lambda m: m.number, "due": lambda m: m.due or date.max, "qty": lambda m: m.qty,
-            "item": lambda m: m.part, "process": lambda m: m.process or "", "mfg": lambda m: m.mfg or "", "produced": lambda m: m.produced,
+            "item": lambda m: m.part, "produced": lambda m: m.produced,
             "scrap": lambda m: m.scrap, "final": lambda m: m.produced - m.scrap, "status": lambda m: m.status, "line": lambda m: m.line.name if m.line else ""}
     if sort and sort.lstrip("-") in keys:
         rows.sort(key=keys[sort.lstrip("-")], reverse=sort.startswith("-"))
     today = _local_ms(t_ms).date()
-    out["rows"] = [{"m": m, "late": m.status == "OPEN" and m.due and m.due < today, "final": m.produced - m.scrap,
-                    "process": m.process or (m.line.code if m.line else "")} for m in rows]
-    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("process", "Process"),
-                   ("mfg", "MFG/OUT"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Line")]
+    out["rows"] = [{"m": m, "late": m.status == "OPEN" and m.due and m.due < today, "final": m.produced - m.scrap} for m in rows]
+    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Line")]
     return out
 
 
@@ -846,3 +852,33 @@ def team_page(s, show_inactive=False):
     return {"rows": rows, "lines": lines, "inactive": sum(1 for u in people if not u.active), "showInactive": show_inactive,
             "needPin": sum(1 for u in act if not u.pin), "untrained": sum(1 for u in act if not u.trained.exists()),
             "paycom": s.settings.get("paycom") or {}, "paycomReady": integrations.paycom_ready()}
+
+
+def part_info(s, want=""):
+    """Part Info: a part's drawing and its dimensions, each with the tolerance QC checks use and the smallest and
+    largest it may measure. The running MO's part (or the one being set up), else the one asked for, with the next
+    parts on this line's schedule to switch to."""
+    from . import qc
+    cur = s.current_item()
+    queue = list(MO.objects.filter(line__name=s.station, status="OPEN").exclude(part="").order_by("seq", "due")[:6]) if s.station else []
+    item = (want or "").strip().upper()[:40] or cur or (queue[0].part if queue else "")
+    if not item:
+        return {"item": "", "cur": cur, "queue": queue}
+    p = s.fresh_part(item)
+    tols = qc.plant_tols(s.cfg)
+    dims = []
+    for k, label in qc.TOL_SPECS:
+        t = p.get(k)
+        if t is None:
+            continue
+        under, over = qc.tol_for(k, p, tols)
+        dims.append({"label": label, "v": t, "tol": qc.fmt_tol(k, p, tols), "lo": round(t - under, 4), "hi": round(t + over, 4),
+                     "plant": k in tols})
+    tol_txt = {k: qc.fmt_tol(k, p, tols) for k in ("len", "wid")}
+    tol_txt["other"] = qc.fmt_tol("ph", p, tols)
+    choices = []
+    for x in ([cur] if cur else []) + [m.part for m in queue]:
+        if x and x not in choices:
+            choices.append(x)
+    return {"item": item, "cur": cur, "p": p, "dims": dims, "tolTxt": tol_txt, "choices": choices,
+            "mos": [m for m in queue if m.part == item][:3], "pleat_xs": [70 + i * 14 for i in range(16)]}

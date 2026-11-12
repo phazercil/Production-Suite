@@ -1,13 +1,24 @@
 {% load suite %}<div id="s2k" class="panel" {% if K.msg or K.res or K.show %}data-hold{% endif %}><h2 class="h2">S2K schedule</h2>
   <div class="grid2" style="margin-top:10px">
-    <label class="f">Read open MOs from<select name="v" hx-post="/kiosk/do/s2k" hx-trigger="change" hx-vals='{"op": "source"}' hx-params="op,v" hx-target="#s2k" hx-swap="outerHTML"><option value="url" {% if st.s2kSource != "db" %}selected{% endif %}>An export URL (JSON)</option><option value="db" {% if st.s2kSource == "db" %}selected{% endif %}>The S2K database (read-only)</option></select></label>
+    <label class="f">Read open MOs from<select name="v" hx-post="/kiosk/do/s2k" hx-trigger="change" hx-vals='{"op": "source"}' hx-params="op,v" hx-target="#s2k" hx-swap="outerHTML"><option value="url" {% if st.s2kSource != "db" %}selected{% endif %}>An export URL (JSON)</option><option value="db" {% if st.s2kSource == "db" %}selected{% endif %}>The S2K database (read-only)</option><option value="api" {% if st.s2kSource == "api" %}selected{% endif %}>The S2K API (JSON over HTTPS, with a token)</option></select></label>
     <label class="f">Pull automatically every (min, 0 = off)<input type="number" min="0" name="v:n" value="{{ st.s2kEvery }}" hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "s2kEvery"}' hx-params="c,k,v:n"></label>
-    {% if st.s2kSource != "db" %}<label class="f">Open MO export URL (JSON)<input type="url" name="v" value="{{ st.s2kUrl }}" placeholder="http://s2k-bridge.plant.local/open-mos" hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "s2kUrl"}' hx-params="c,k,v"></label>{% endif %}
+    {% if st.s2kSource == "url" or not st.s2kSource %}<label class="f">Open MO export URL (JSON)<input type="url" name="v" value="{{ st.s2kUrl }}" placeholder="http://s2k-bridge.plant.local/open-mos" hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "s2kUrl"}' hx-params="c,k,v"></label>{% endif %}
   </div>
-  {% if st.s2kSource != "db" %}<p class="note" style="margin-top:8px">Expects a list like <code>[{"mo":309300,"item":"MG4062HP","qty":2400,"due":"2026-04-08","process":"BARB","mfg":"MFGOUT"}]</code>. New MOs land in Unscheduled; existing ones are left alone.</p>
+  {% if st.s2kSource == "api" %}
+  <form class="grid2" style="margin-top:10px" hx-post="/kiosk/do/s2k" hx-target="#s2k" hx-swap="outerHTML" autocomplete="off"><input type="hidden" name="op" value="apiSave">
+    <label class="f" style="grid-column:1/-1">API address (https)<input type="url" name="url" value="{{ K.api.url }}" placeholder="https://api.aps.dev/datalake/api/open-mos/" spellcheck="false"></label>
+    <label class="f">Company<input type="text" name="company" value="{{ K.api.company }}" placeholder="1" maxlength="20"></label>
+    <label class="f">Location<input type="text" name="location" value="{{ K.api.location }}" placeholder="07" maxlength="20"></label>
+    <label class="f" style="grid-column:1/-1">API token (sent as X-Api-Token; kept in the server's .env){% if K.api.hasToken %} <span class="pill ok">SAVED</span>{% endif %}<input type="password" name="token" autocomplete="new-password" placeholder="{% if K.api.hasToken %}Leave blank to keep the saved token{% else %}Paste the token{% endif %}"></label>
+    <div class="row" style="grid-column:1/-1"><button class="btn primary" type="submit">Save</button>{% if K.api.on %}<button type="button" class="btn" hx-post="/kiosk/do/s2k" hx-vals='{"op": "apiTest"}' hx-target="#s2k" hx-swap="outerHTML">Test</button>{% endif %}</div>
+  </form>
+  <p class="note" style="margin-top:8px">{% if K.apiUrl %}Reads <code>{{ K.apiUrl }}</code>. {% endif %}This is an internet connection, made only to this address and only to read open MOs. One row per open MO and sequence: <code>mo</code>, <code>item</code>, <code>qty</code> (still due), <code>due</code>. New MOs land in Unscheduled; existing ones are left alone.</p>
+  {% if K.msg %}<p class="note" style="margin-top:6px;{% if K.err %}color:var(--bad){% endif %}">{{ K.msg }}</p>{% endif %}
+  {% if K.res %}{% include "hmi/k/admin/_rows.html" with rows=K.res.rows columns=K.res.columns %}{% endif %}
+  {% elif st.s2kSource != "db" %}<p class="note" style="margin-top:8px">Expects a list like <code>[{"mo":309300,"item":"MG4062HP","qty":2400,"due":"2026-04-08"}]</code>. New MOs land in Unscheduled; existing ones are left alone.</p>
   {% elif not srv_s2kdb %}<p class="sub" style="margin-top:8px;color:var(--warn-ink)">The S2K database isn't set up on the server yet. Set it up under Databases and accounts above. Only the login is tested; nothing is created in S2K.</p>
   {% else %}
-  <p class="sub" style="margin-top:8px">The server runs one SELECT against the S2K database and adds MOs it hasn't seen. The connection is read-only: the suite can't change, lock or add anything in S2K. Name the columns <code>mo</code>, <code>item</code>, <code>qty</code>, and optionally <code>due</code>, <code>process</code>, <code>mfg</code>, <code>hot</code> (use AS).</p>
+  <p class="sub" style="margin-top:8px">The server runs one SELECT against the S2K database and adds MOs it hasn't seen. The connection is read-only: the suite can't change, lock or add anything in S2K. Name the columns <code>mo</code>, <code>item</code>, <code>qty</code>, and optionally <code>due</code> (use AS). Which line runs each MO is set in the Scheduler.</p>
   <form hx-post="/kiosk/do/s2k" hx-target="#s2k" hx-swap="outerHTML" autocomplete="off">
     {% if K.show %}<input type="hidden" name="shown" value="1">{% endif %}
     <label class="f" style="margin-top:10px">SQL<textarea name="sql" spellcheck="false" style="font-family:var(--f-mono);font-size:13px;min-height:110px">{{ K.sql }}</textarea></label>

@@ -122,13 +122,20 @@ def edit_log(x, p, ch):
 
 
 def edit_qc(x, p, ch):
+    import re
+
     from hmi import qc
+    from plant.models import part_key
     items = qc.items_for(x.shift.machine.stage if x.shift and x.shift.machine else "s1")
     try:
         vals = qc.parse(items, p)
     except ValueError as e:
         raise Need(str(e))
-    ok, fails = qc.judge(items, vals, engine.spec_for(x.item))
+    item = re.sub(r"\s+", "", str(p.get("item") if p.get("item") is not None else x.item)).upper()[:40]
+    need(item, "Enter the part (filter number) the check was for: it's judged against that part's drawing.")
+    setf(x, ch, "item", "Part", item)
+    engine.refresh_part(item, force=True)   # the drawing as it is now
+    ok, fails = qc.judge(items, vals, engine.spec_for(part_key(item)))
     old_vals = dict(x.values or {}) or {k: getattr(x, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
     for it in items:
         k = it["key"]

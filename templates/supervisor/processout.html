@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Process out · QC check{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv sv-narrow">
+  <div class="sv-head"><a class="btn ghost" href="{{ back }}">‹ Back</a>{% if q.shift_id %}<a class="btn ghost" href="/supervisor/log/{{ q.shift_id }}/">Its shift report</a>{% endif %}<span class="grow"></span><span class="who">{{ me.name }}</span></div>
+  <h1>Process out · {{ q.line }}</h1>
+  <p class="muted">QC check {{ q.t|day }} {{ q.t|clock }} by {{ q.by }}{% if q.mo %} · MO {{ q.mo }}{% endif %} · {{ q.item }}</p>
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  <div class="card"><h2>What failed</h2><div class="vals">{% for v in vals %}<span class="{% if v.bad %}bad{% endif %}">{{ v.k }} <b>{{ v.v }}</b></span> {% endfor %}</div>
+    {% if q.issue %}<p class="note">Processed out {{ q.scrapped }} by {{ q.reviewed_by }} · {{ q.issue }}{% if q.issue_note %}: {{ q.issue_note }}{% endif %}. Saving again changes it.</p>
+    {% elif q.review %}<p class="note">Review: {{ q.review|capfirst }}{% if q.reviewed_by %} by {{ q.reviewed_by }}{% endif %}{% if q.scrapped %} · {{ q.scrapped }} taken off the count{% endif %}</p>{% endif %}</div>
+  <form method="post" class="card sv-form">{% csrf_token %}<input type="hidden" name="back" value="{{ back }}">
+    <h2>Process out</h2>
+    <p class="muted">The filters that failed come off the count of this shift and MO and go on the MO's scrap, and the line is told. The check is marked disapproved.</p>
+    <label class="fld"><span>How many failed the QC</span><input type="number" name="qty" min="1" step="1" inputmode="numeric" required value="{{ form.qty }}" {% if not can %}disabled{% endif %} autofocus></label>
+    <label class="fld"><span>Quality issue</span><select name="issue" required {% if not can %}disabled{% endif %}><option value="">Pick one…</option>{% for i in issues %}<option {% if i == form.issue %}selected{% endif %}>{{ i }}</option>{% endfor %}</select></label>
+    <label class="fld" style="grid-column:1/-1"><span>Details</span><textarea name="note" rows="3" maxlength="500" placeholder="What was wrong, where on the filter, what was done" {% if not can %}disabled{% endif %}>{{ form.note }}</textarea></label>
+    {% if can %}<div class="row"><button class="btn go" type="submit">Process out</button></div>
+    {% else %}<p class="muted">Processing out needs the <b>Approve out-of-spec QC</b> permission (Admin › Permissions).</p>{% endif %}
+  </form>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

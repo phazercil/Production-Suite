@@ -21,7 +21,7 @@ from plant.util import local
 PERM = "section.supervisor"
 EDIT_PERM = "history.edit"   # Correct history: change, split or delete past records (supervisor/edit.py)
 PER_PAGE = 100
-TABS = [("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs")]
+TABS = [("status", "Line status"), ("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs")]
 NOBODY = "Nobody logged in"
 
 
@@ -48,7 +48,7 @@ def filters(q):
     if a > b:
         a, b = b, a
     a = max(a, b - timedelta(days=366))   # at most a year at a time
-    tab = q.get("tab") if q.get("tab") in dict(TABS) else "logs"
+    tab = q.get("tab") if q.get("tab") in dict(TABS) else "status"
     try:
         pg = max(1, int(q.get("page") or 1))
     except ValueError:
@@ -202,6 +202,36 @@ def csv_rows(tab, qs):
 
 
 # ------------------------------------------------------------------ pages
+def line_status():
+    """Supervisor › Line status: each machine now: running, stopped or in a changeover, who's logged in, the MO and how
+    many are made, the speed and today's shift count."""
+    from hmi.engine import shift_stats
+    from hmi.models import PpmReading
+    from plant.models import MO
+    now = timezone.now()
+    pills = {"running": ("ok", "Running"), "changeover": ("warn", "Changeover"), "stopped": ("bad", "Stopped")}
+    cards = []
+    for m in Machine.objects.filter(stage="s1").order_by("sort", "id"):
+        sh = ShiftRun.objects.filter(machine=m, active=True).select_related("mo").first()
+        last = PpmReading.objects.filter(machine=m).order_by("-t").values("t", "ppm").first()
+        fresh = bool(last and (now - last["t"]).total_seconds() < 180)
+        pill = pills.get(sh.state, ("idle", sh.state.title())) if sh else (("idle", "No shift") if m.active else ("bad", "Out of service"))
+        mo = sh.mo if sh else None
+        nxt = None
+        if sh and sh.state == "changeover" and (sh.co or {}).get("newMo"):
+            nxt = MO.objects.filter(pk=sh.co["newMo"]).first()
+        stats = shift_stats(sh) if sh else None
+        made = max(0, mo.produced - mo.scrap) if mo else 0
+        cards.append({"m": m, "sh": sh, "pill": pill, "mo": mo, "next": nxt, "made": made, "qty": mo.qty if mo else 0,
+                      "pct": min(100, round(100 * made / mo.qty)) if mo and mo.qty else None,
+                      "ppm": last["ppm"] if fresh else None, "since": last["t"] if last else None, "stale": bool(last) and not fresh,
+                      "who": (sh.user_name or "") if sh else "", "stats": stats})
+    run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running")
+    return cards, {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped"),
+                   "Changeover": sum(1 for c in cards if c["sh"] and c["sh"].state == "changeover"),
+                   "Made this shift": sum(c["sh"].count for c in cards if c["sh"])}
+
+
 @ensure_csrf_cookie
 @require_GET
 def page(request):
@@ -209,6 +239,11 @@ def page(request):
     if denied:
         return denied
     f = filters(request.GET)
+    if f["tab"] == "status":
+        cards, totals = line_status()
+        return render(request, "supervisor/page.html", {
+            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "cards": cards, "totals": totals, "now": timezone.now(),
+            "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS}, "nobody": NOBODY, "msg": request.GET.get("msg", "")[:200]})
     qs, totals = LISTS[f["tab"]](f)
     if request.GET.get("csv") == "1":
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -307,10 +342,13 @@ def _fields(kind, x):
             else:
                 out.append({"name": it["key"], "label": it["label"] + (" (in)" if it["type"] == "measure" else ""), "type": "number",
                             "step": "any", "value": "" if vals.get(it["key"]) is None else vals.get(it["key"])})
+        out.insert(0, {"name": "item", "label": "Part (filter number)", "type": "text", "value": x.item,
+                       "help": "Judged against this part's drawing, read fresh from the asset database." if x.item else
+                       "Missing: the check was saved with no MO running. Enter the part so it's judged against its drawing."})
         return out + [{"name": "by", "label": "Checked by", "type": "text", "value": x.by},
                       {"name": "review", "label": "Review", "type": "select", "value": x.review,
                        "options": [("", "Not needed"), ("pending", "Waiting for review"), ("approved", "Approved"), ("disapproved", "Disapproved")],
-                       "help": "Pass or fail follows the values and the part's specs."},
+                       "help": "Pass or fail follows the values, the part's drawing and Quality › Tolerances."},
                       {"name": "late_reason", "label": "Late reason", "type": "textarea", "value": x.late_reason}]
     if kind == "co":
         return [{"name": "by", "label": "Who", "type": "text", "value": x.by, "help": "Blank: nobody logged in"},
@@ -340,7 +378,7 @@ def edit(request, kind, pk):
         raise Http404("No such record")
     x = E.KINDS[kind].objects.filter(pk=pk).first()
     back = request.GET.get("back") or request.POST.get("back") or ""
-    back = back if back.startswith("/supervisor/") else "/supervisor/"
+    back = back if back.startswith(("/supervisor/", "/quality/")) else "/supervisor/"
     if not x:
         return HttpResponseRedirect(back)
     can = perms.can(me, EDIT_PERM)
@@ -370,3 +408,35 @@ def edit(request, kind, pk):
         "can": can, "err": err, "msg": request.GET.get("msg", "")[:200], "back": back, "sh": sh,
         "canDelete": not (kind == "log" and x.active), "split": kind == "downtime",
         "edits": HistoryEdit.objects.filter(kind=kind, obj_id=x.pk)[:50]})
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def process_out(request, pk):
+    """Process Out a failed QC check: how many filters failed the QC (taken off the count) and what the quality issue
+    was. From Supervisor › History and Quality › Quality report; doing it needs "Approve out-of-spec QC"."""
+    from hmi import engine
+    me, _ = current_person(request)
+    if not (perms.can(me, PERM) or perms.can(me, "section.quality")):
+        return _gate(request)[1]
+    touch(request)
+    back = request.GET.get("back") or request.POST.get("back") or ""
+    back = back if back.startswith(("/supervisor/", "/quality/")) else "/supervisor/?tab=qc"
+    q = QCCheck.objects.select_related("shift").filter(pk=pk).first()
+    if not q:
+        return HttpResponseRedirect(back)
+    can = perms.can(me, "qc.approve")
+    err = ""
+    if request.method == "POST":
+        r = engine.execute("qcProcessOut", {"id": q.pk, "qty": request.POST.get("qty"), "issue": request.POST.get("issue"),
+                                            "note": request.POST.get("note")}, engine.Ctx(user=me))
+        if r.get("ok"):
+            sep = "&" if "?" in back else "?"
+            return HttpResponseRedirect(f"{back}{sep}{urlencode({'msg': r.get('msg', 'Processed out.')})}")
+        err = r.get("error") or "That didn't save."
+    issues = PlantSettings.load().config.get("qualityIssues") or []
+    labels = _qc_labels()
+    return render(request, "supervisor/processout.html", {
+        "mode": "supervisor", "me": me, "q": q, "vals": qc_values(q, labels), "issues": issues, "can": can, "err": err, "back": back,
+        "form": {"qty": request.POST.get("qty") if err else (q.scrapped or ""), "issue": request.POST.get("issue") if err else q.issue,
+                 "note": request.POST.get("note") if err else q.issue_note}})

@@ -6,6 +6,7 @@
   <div class="sv-head"><a class="btn ghost" href="{{ back }}">‹ Back</a>{% if sh and kind != "log" %}<a class="btn ghost" href="/supervisor/log/{{ sh.pk }}/">Its shift report</a>{% endif %}<span class="grow"></span><span class="who">{{ me.name }}</span></div>
   <h1>{{ label }} · {{ x.line }}</h1>
   <p class="muted">{{ summary }}</p>
+  {% if kind == "qc" and not x.passed %}<div class="card row" style="display:flex;align-items:center;gap:12px"><span class="grow">{% if x.issue %}Processed out {{ x.scrapped }} · {{ x.issue }}{% if x.issue_note %}: {{ x.issue_note }}{% endif %}{% else %}This check failed. Process out the filters that failed and say what the quality issue was.{% endif %}</span><a class="btn go" href="/supervisor/processout/{{ x.pk }}/?back={{ request.get_full_path|urlencode }}">{% if x.issue %}Change process out{% else %}Process out{% endif %}</a></div>{% endif %}
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
   {% if not can %}<div class="flash">You can look but not change it: correcting history needs the <b>Correct history</b> permission (Admin › Permissions).</div>{% endif %}
