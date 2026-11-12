@@ -18,7 +18,7 @@
       <label class="f">Table{% include "hmi/k/admin/_bsel.html" with k="table" act="codata" tgt="codata" qn=q.name val=q.bld.table opts=C.T.tables|names %}</label>
       {% for r in q.D.roles %}<label class="f">{{ r.1 }}{% if r.2 %} *{% endif %}{% include "hmi/k/admin/_bsel.html" with k=r.0 act="codata" tgt="codata" qn=q.name val=q.bld|get:r.0 opts=q.cols %}</label>{% endfor %}
       <label class="f">Part number column *{% include "hmi/k/admin/_bsel.html" with k="f_part" act="codata" tgt="codata" qn=q.name val=q.bld.f_part opts=q.cols %}</label>
-      {% if q.name != "part_spec" %}<label class="f">Machine column (blank rows apply to all){% include "hmi/k/admin/_bsel.html" with k="f_machine" act="codata" tgt="codata" qn=q.name val=q.bld.f_machine opts=q.cols %}</label>{% endif %}
+      {% if not q.perPart %}<label class="f">Machine column (blank rows apply to all){% include "hmi/k/admin/_bsel.html" with k="f_machine" act="codata" tgt="codata" qn=q.name val=q.bld.f_machine opts=q.cols %}</label>{% endif %}
       {% if q.name == "changeover_steps" %}<label class="f">From-part column (blank rows apply to all){% include "hmi/k/admin/_bsel.html" with k="f_from" act="codata" tgt="codata" qn=q.name val=q.bld.f_from opts=q.cols %}</label>{% endif %}</div>
     <div class="row" style="margin-top:8px"><button type="button" class="btn" hx-post="/kiosk/do/codata" hx-vals='{"op": "build", "q": "{{ q.name }}"}'>Write the SQL</button></div></details>
   <label class="f">SQL<textarea name="sql" spellcheck="false" style="font-family:var(--f-mono);font-size:13px;min-height:130px" placeholder="SELECT instruction AS step, step_no AS seq FROM changeover_steps WHERE part_no = :part ORDER BY step_no">{{ q.sql }}</textarea></label>

@@ -1,4 +1,4 @@
 {% extends "hmi/k/m_base.html" %}
 {% block title %}Drawing · {{ p.key }}{% endblock %}
 {% block body %}<div class="drawing">{% include "hmi/k/_drawing_svg.html" %}</div><p class="note">{{ note }}</p>{% endblock %}
-{% block foot %}<button type="button" class="btn" hx-get="/kiosk/m/override" hx-target="#modal" hx-swap="innerHTML">Change setting - Admin</button><button type="button" class="btn primary" hx-post="/kiosk/do/getDrawing" hx-vals='{"part": "{{ p.key|escapejs }}"}' hx-params="part">Get updated drawing</button>{% endblock %}
+{% block foot %}{% include "hmi/k/_open_drawing.html" with cls="" %}<button type="button" class="btn" hx-get="/kiosk/m/override" hx-target="#modal" hx-swap="innerHTML">Change setting - Admin</button><button type="button" class="btn primary" hx-post="/kiosk/do/getDrawing" hx-vals='{"part": "{{ p.key|escapejs }}"}' hx-params="part">Get updated drawing</button>{% endblock %}

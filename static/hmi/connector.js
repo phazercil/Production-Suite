@@ -15,10 +15,13 @@
   function state(g) {
     if (!g._st) {
       try { g._st = JSON.parse(g.dataset.state || "{}"); } catch (e) { g._st = {}; }
-      g._st.map = g._st.map || {};
-      g._st.where = g._st.where || {};
-      if (g.dataset.kind === "machine") g._st.run2Name = g._st.run2Name || "";
+      const norm = s => { s.map = s.map || {}; s.where = s.where || {}; if (g.dataset.kind === "machine") s.run2Name = s.run2Name || ""; return s; };
+      norm(g._st);
       g._orig = JSON.stringify(g._st);
+      // a Save the server refused comes back with what was wired and what's saved: still unsaved, so it stays dirty
+      if (g.dataset.saved) {
+        try { const sv = norm(JSON.parse(g.dataset.saved)); g._orig = JSON.stringify(Object.assign({}, g._st, sv)); } catch (e) { /* keep as is */ }
+      }
     }
     return g._st;
   }
@@ -205,12 +208,19 @@
     t.querySelectorAll(".cgroup[data-dirty]").forEach(g => { stash[g.dataset.group] = state(g); });
   });
 
+  function take(g) {   // a box as the server drew it
+    state(g);
+    const m = g.querySelector(".gmsg"), why = g.dataset.saved && m ? m.innerHTML : null;
+    paint(g);
+    if (why) m.innerHTML = why;   // a refused Save: keep the server's reason in view
+  }
+
   function init(root) {
     if (root._ready) return; root._ready = true;
     root.querySelectorAll(".cgroup").forEach(g => {
       state(g);
       if (stash && stash[g.dataset.group]) g._st = JSON.parse(JSON.stringify(stash[g.dataset.group]));   // unsaved wires survive a card change
-      paint(g);
+      take(g);
     });
     stash = null;
     const ed = root.querySelector(".srcard.editing"); if (ed) ed.scrollIntoView({block: "nearest"});
@@ -406,7 +416,7 @@
     // a box redrawn after its Save, or a new source card: take it in
     const root = el.closest && el.closest("[data-connector]");
     if (root && root._ready) {
-      if (el.matches(".cgroup")) { state(el); paint(el); }
+      if (el.matches(".cgroup")) take(el);
       soon(root);
     }
   }

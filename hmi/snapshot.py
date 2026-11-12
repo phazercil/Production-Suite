@@ -23,8 +23,14 @@ QDEF = {
     "asset_settings": {"title": "Machine settings for the part", "help": "One row per setting, shown above the steps (pleat height, glue temperature, blade, dies…).",
                        "roles": [["name", "Setting", 1], ["value", "Value", 1], ["unit", "Unit"], ["asset", "Asset"]]},
     "part_spec": {"title": "Part specs (drawing)", "help": "One row for the part. \"Get updated drawing\" copies these into Parts & specs, so QC checks use them.",
-                  "roles": [["rev", "Drawing rev", 1], ["pleats", "Pleats per unit"], ["len", "Length"], ["wid", "Width"], ["ph", "Pleat height"],
+                  "perPart": True,
+                  "roles": [["rev", "Drawing rev"], ["pleats", "Pleats per unit"], ["len", "Length"], ["wid", "Width"], ["ph", "Pleat height"],
                             ["sb", "Side band height"], ["tol", "Tolerance ±"], ["media", "Media"]]},
+    "part_drawing": {"title": "Drawing file", "help": "The part's drawing: its rev and a link to the file (PDF or image, e.g. on AWS). \"Get updated drawing\" "
+                                                  "keeps them, and operators get an Open drawing button. Its rev wins over Part specs' rev.",
+                     "perPart": True,
+                     "roles": [["url", "Drawing link (PDF or image)"], ["rev", "Drawing rev"],
+                               ["newest", "Newest first by (date or rev), when the part has a row per rev"]]},
     "part_tooling": {"title": "Tooling for the part", "help": "What the run screen shows under Up Next and Current MO. Either one row per tool (Tool type + Tool), "
                                                                 "or one row with a column each for screws, helix, media and side bands.",
                      "roles": [["kind", "Tool type (screws, helix, media, side band)"], ["name", "Tool / part number"], ["detail", "Size or note"],

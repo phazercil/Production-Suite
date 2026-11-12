@@ -1111,23 +1111,46 @@ def _spec_number(v):
     return float(m.group()) if m else None
 
 
+def _drawing_link(v):
+    """A drawing link worth an Open drawing button: a web address (http/https), else ""."""
+    v = str(v or "").strip()
+    return v if re.match(r"(?i)^https?://[^\s]+$", v) and len(v) <= 2048 else ""
+
+
+def _first_row(name, key, ctx):
+    q = SavedQuery.objects.filter(name=name).first()
+    if not q:
+        return None
+    rows = integrations.run_saved(q.sql, {"part": key, "machine": ctx.line or "", "from_part": "", "mo": "",
+                                          **machine_params(line_of(ctx.line) if ctx.line else None)})["rows"]
+    return {str(k).lower(): v for k, v in rows[0].items()} if rows else {}
+
+
 @cmd("getDrawing")
 def get_drawing(p, ctx):
+    """The part's drawing from the asset database: Part specs (dimensions, rev) and Drawing file (rev, link). The
+    drawing file's rev wins: it comes with the file operators open."""
     m = line_of(ctx.line)
     sh = active_run(m) if m else None
     key = part_key(p.get("part"))
-    q = SavedQuery.objects.filter(name="part_spec").first()
     msg = None
-    if q and integrations.assets_ready():
+    if integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists():
         try:
-            rows = integrations.run_saved(q.sql, {"part": key, "machine": ctx.line or "", "from_part": "", "mo": "", **machine_params(line_of(ctx.line) if ctx.line else None)})["rows"]
-            if rows:
-                o = {str(k).lower(): v for k, v in rows[0].items()}
+            o, d = _first_row("part_spec", key, ctx), _first_row("part_drawing", key, ctx)
+            if o or d:
+                o, d = o or {}, d or {}
                 cur = spec_for(key)
                 vals = {f: n for f in ("pleats", "len", "wid", "ph", "sb", "tol") if (n := _spec_number(o.get(f))) is not None}
-                PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
-                                                                     "rev": str(o.get("rev") or cur["rev"]), "media": str(o.get("media") or cur["media"])})
-                msg = f"Drawing rev {o.get('rev') or cur['rev']} loaded from the asset database ({fmt_t(ctx.now)})."
+                rev = str(d.get("rev") or o.get("rev") or cur["rev"]).strip()[:20]
+                url = _drawing_link(d.get("url")) or cur.get("url") or ""
+                if vals or PartSpec.objects.filter(key=key).exists():
+                    PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
+                                                                         "rev": rev, "media": str(o.get("media") or cur["media"])[:80],
+                                                                         "drawing_url": url})
+                    msg = f"Drawing rev {rev} loaded from the asset database ({fmt_t(ctx.now)})."
+                else:   # a drawing file but no dimensions: estimated specs aren't saved as if they were the drawing's
+                    msg = (f"Drawing rev {rev} found, but the asset database has no dimensions for {key}. Add them in Admin › Parts & specs "
+                           f"(or wire Part specs in the Connector builder) to keep the drawing.")
         except Exception as e:
             msg = f"Asset database not reachable ({e}). Showing the drawing on file."
     if sh:
@@ -2866,7 +2889,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_tooling": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):

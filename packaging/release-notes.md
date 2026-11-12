@@ -1,3 +1,14 @@
+## What's new in 1.8.9
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Drawing file (Admin › Connector builder)**
+  - A new **Drawing file** box reads the part's drawing rev and a link to the drawing (PDF or image, e.g. on AWS) from its own table, so it can live somewhere other than Part specs. When a part has a row per rev, wire **Newest first by** to a date (or rev) column and the newest one is used. Its rev wins over Part specs' rev.
+  - **Get updated drawing** keeps the link with the part, and operators get an **Open drawing** button on the drawing, changeover and QC screens and next to the drawing rev on the run screen. It opens in a new tab. Only web addresses (http/https) are kept; signed AWS links are refreshed every time the drawing is fetched again.
+- **Connector builder**
+  - **Drawing rev** is no longer required to save Part specs (it can come from Drawing file instead).
+  - Fixed: when a Save was refused (something still missing or wrong), the box came back as if saved, and the next automatic refresh wiped the wires. It now stays unsaved with its wires and the reason, until it's fixed and saved or undone.
+
 ## What's new in 1.8.8
 
 - **Part specs from an attribute table (Admin › Connector builder)**
