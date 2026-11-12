@@ -315,3 +315,77 @@ class SecondRunSignalTests(Base):
         self.assertTrue(self.save(group=f"m:{bar.pk}", src=c, map=mp)["ok"])
         bar.refresh_from_db()
         self.assertNotIn("run2", bar.feed_src)
+
+
+class AttributeTableTests(Base):
+    """Part specs from a table with one value per row and a code saying which spec it is (part_attribute: partnumber,
+    PAID 30 = length, 31 = width, value)."""
+    WHERE = {"len": [{"col": "PAID", "val": "30"}], "wid": [{"col": "PAID", "val": "31"}], "rev": [{"col": "PAID", "val": "5"}]}
+
+    def setUp(self):
+        super().setUp()
+        sch = {**SCHEMA, "tables": SCHEMA["tables"] + [{"name": "part_attribute", "columns": [
+            {"name": n, "type": "varchar"} for n in ("id", "partnumber", "PAID", "userDefinedAttributeName", "value", "uom")]}]}
+        p = mock.patch.object(engine.integrations, "schema", return_value=sch)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_each_spec_reads_its_own_code(self):
+        c = self.card("assets", "part_attribute")
+        mp = {"f_part": "partnumber", "rev": "value", "len": "value", "wid": "value", "media": "uom"}
+        r = self.save(group="q:part_spec", src=c, map=mp, where={**self.WHERE, "len": [{"col": "PAID", "val": ""}]})
+        self.assertIn("Type the value to keep for: Length", r["error"])
+        r = self.save(group="q:part_spec", src=c, map=mp, where={**self.WHERE, "len": [{"col": "nope", "val": "30"}]})
+        self.assertIn('no column "nope"', r["error"])
+        r = self.save(group="q:part_spec", src=c, map=mp, where=self.WHERE)
+        self.assertTrue(r["ok"], r)
+        sql = SavedQuery.objects.get(name="part_spec").sql
+        self.assertIn("MAX(CASE WHEN `PAID` = '30' THEN `value` END) AS len", sql)
+        self.assertIn("MAX(`uom`) AS media", sql)         # an input without its own code: the part's rows as they are
+        self.assertIn("GROUP BY `partnumber`", sql)
+        g = next(x for x in connector.groups() if x["key"] == "q:part_spec")   # read back for the page
+        self.assertEqual(g["status"], "done")
+        self.assertEqual(g["state"]["map"], mp)
+        self.assertEqual(g["state"]["where"], self.WHERE)
+        self.assertEqual(g["filters"], [])                 # the codes aren't mistaken for the card's own filters
+        # the query really folds the rows into one row for the part (SQLite reads this MySQL quoting too)
+        import sqlite3
+        db = sqlite3.connect(":memory:")
+        db.execute("create table part_attribute (id int, partnumber varchar, PAID int, userDefinedAttributeName varchar, value varchar, uom varchar)")
+        db.executemany("insert into part_attribute values (?,?,?,?,?,?)", [
+            (1, "1010", 30, "Length", "9.25", "in"), (2, "1010", 31, "Width", "7.5", "in"), (3, "1010", 5, "Rev", "C", ""),
+            (4, "1010", 40, "Pleats", "No", ""), (5, "2020", 30, "Length", "11", "in")])
+        cur = db.execute(sql, {"part": "1010"})
+        row = dict(zip([d[0] for d in cur.description], cur.fetchone()))
+        self.assertEqual((row["rev"], row["len"], row["wid"]), ("C", "9.25", "7.5"))
+        self.assertIsNone(cur.fetchone())
+        self.assertEqual(db.execute(sql, {"part": "9999"}).fetchall(), [])   # no rows: no row of blanks
+
+    def test_only_part_specs_offer_it_and_the_page_shows_it(self):
+        from django.template.loader import render_to_string
+        gs = {g["key"]: g for g in connector.groups()}
+        self.assertEqual(set(gs["q:part_spec"]["filterable"]), {"rev", "pleats", "len", "wid", "ph", "sb", "tol", "media"})
+        self.assertEqual(gs["q:asset_settings"]["filterable"], [])
+        html = render_to_string("hmi/k/admin/_cgroup.html", {"g": gs["q:part_spec"], "C": {"groups": list(gs.values())}, "tabCan": True})
+        self.assertIn('data-for="len"', html)
+        self.assertNotIn('data-for="f_part"', html)
+        self.assertIn("PAID = the code for length", html)
+        self.assertNotIn('class="sfil"', render_to_string("hmi/k/admin/_cgroup.html", {"g": gs["q:asset_settings"], "C": {}, "tabCan": True}))
+
+    def test_test_data_runs_the_folded_query(self):
+        c = SourceCard.objects.get(pk=self.card("assets", "part_attribute"))
+        g = next(x for x in connector.groups() if x["key"] == "q:part_spec")
+        seen = {}
+
+        def fake(sql, params, limit=500, db="assets"):
+            seen["sql"] = sql
+            return {"columns": ["rev", "len"], "rows": [{"rev": "C", "len": "9.25"}], "ms": 1, "truncated": False}
+        with mock.patch.object(connector.integrations, "run_saved", side_effect=fake), \
+                mock.patch.object(connector.integrations, "kind_of", return_value="mysql"):
+            t = connector.test_data(g, c, {"f_part": "partnumber", "rev": "value", "len": "value"}, slot_where=self.WHERE)
+        self.assertIn("MAX(CASE WHEN `PAID` = '5' THEN `value` END) AS rev", seen["sql"])
+        self.assertEqual(t["rows"], [["C", "9.25"]])
+
+    def test_drawing_values_kept_as_text(self):
+        self.assertEqual([engine._spec_number(v) for v in (12.5, "9.25", "9.25 in", "±0.06", "1,250", "No", None, "")],
+                         [12.5, 9.25, 9.25, 0.06, 1250.0, None, None, None])

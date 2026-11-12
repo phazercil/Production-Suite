@@ -394,7 +394,18 @@ def build_codata_sql(qname, b, kind=None):
         raise ValueError("Pick the column that holds the part number.")
     if not any(b.get(r[0]) for r in D["roles"]):
         raise ValueError("Pick at least one column to show.")
-    sel = ",\n       ".join(f"{q(b[r[0]])} AS {r[0]}" for r in D["roles"] if b.get(r[0]))
+    from .connector import clean_slot_where, query_filterable
+    sw = {k: v[0] for k, v in clean_slot_where(b.get("slotWhere"), keys=query_filterable(qname)).items() if b.get(k)}
+    empty = [r[1] for r in D["roles"] if r[0] in sw and not sw[r[0]]["val"]]
+    if empty:
+        raise ValueError("Type the value to keep for: " + ", ".join(empty) + ".")
+    if sw:
+        # a table with one value per row and a code saying which it is (PAID = 30: length): each input reads the
+        # rows with its own code, folded into one row for the part
+        sel = ",\n       ".join((f"MAX(CASE WHEN {q(sw[r[0]]['col'])} = {dbkinds.literal(kind, sw[r[0]]['val'])} THEN {q(b[r[0]])} END)"
+                                 if r[0] in sw else f"MAX({q(b[r[0]])})") + f" AS {r[0]}" for r in D["roles"] if b.get(r[0]))
+    else:
+        sel = ",\n       ".join(f"{q(b[r[0]])} AS {r[0]}" for r in D["roles"] if b.get(r[0]))
     w = [f"{q(b['f_part'])} = :part"]
     if b.get("f_machine"):
         w.append(f"({q(b['f_machine'])} = :machine OR {q(b['f_machine'])} IS NULL)")
@@ -402,6 +413,8 @@ def build_codata_sql(qname, b, kind=None):
         w.append(f"({q(b['f_from'])} = :from_part OR {q(b['f_from'])} IS NULL)")
     w += where_sql(kind, b.get("where"))
     order = f"\nORDER BY {q(b['seq'])}" if D.get("order") and b.get("seq") else ""
+    if sw:   # no rows for the part: no row (not one of blanks)
+        order = f"\nGROUP BY {q(b['f_part'])}"
     return f"SELECT {sel}\nFROM {qt(b['table'])}\nWHERE " + "\n  AND ".join(w) + order
 
 
