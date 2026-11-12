@@ -1,15 +1,15 @@
 {% extends "base.html" %}{% load static %}
-{% block title %}Supervisor{% endblock %}
+{% block title %}{{ title|default:"Supervisor" }}{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
 {% block content %}<div class="lgate">
-  <form class="lcard" id="sv-login" autocomplete="off">
-    <h1>Supervisor</h1>
-    <p>The history of every shift log, QC check, downtime entry and changeover. Shift leads and supervisors only.</p>
+  <form class="lcard" id="sv-login" autocomplete="off" data-perm="{{ perm|default:'section.supervisor' }}" data-title="{{ title|default:'Supervisor' }}">
+    <h1>{{ title|default:"Supervisor" }}</h1>
+    <p>{{ blurb|default:"The history of every shift log, QC check, downtime entry and changeover. Shift leads and supervisors only." }}</p>
     {% if note %}<p class="lnote">{{ note }}</p>{% endif %}
     <label for="lpin">PIN</label>
     <input id="lpin" type="password" inputmode="numeric" autofocus>
     <p class="lerr" id="lerr" aria-live="polite"></p>
-    <button type="submit">Open Supervisor</button>
+    <button type="submit">Open {{ title|default:"Supervisor" }}</button>
   </form>
 </div>{% endblock %}
 {% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

@@ -15,7 +15,8 @@
     <div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div>
     <label class="f">Scan next MO<input type="text" name="mo" autofocus placeholder="Scan or type MO number" value="{{ mo_pick }}"></label>
     {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/changeover?refresh=1&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.number }} · {{ m.part }}</button> {% endfor %}</div>
-    {% else %}<p class="note">Nothing else scheduled on this line. Scan an MO or ask your shift lead.</p>{% endif %}
+    {% else %}<p class="note">Nothing else scheduled on this line. Scan an MO, or a supervisor can run it by filter number.</p>{% endif %}
+    <div><button type="button" class="btn {% if queue %}ghost{% else %}warn{% endif %} sm" hx-get="/kiosk/m/nomo" hx-target="#modal" hx-swap="innerHTML">No MO? Run by filter number - Supervisor</button></div>
   {% else %}
     <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
     {% if co.loading %}<div class="panel empty">Loading steps for this part from the database…</div>{% else %}

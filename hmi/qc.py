@@ -1,7 +1,7 @@
-"""QC checks: which items each stage checks (Admin › QC checks), when a check is due, and pass / fail.
+"""QC checks: which items each stage checks (Quality › QC checks), when a check is due, and pass / fail.
 
 Each stage has its own list of items. Built-in items are the drawing measurements (checked against the
-part's specs ± its tolerance), the glue and cut checks and the scrap count; Admin can add its own pass/fail
+part's specs and the tolerances in Quality › Tolerances), the glue and cut checks and the scrap count; Admin can add its own pass/fail
 checks and numbers (with an allowed range). Stored in PlantSettings.config["qcItems"] = {stage: [item, ...]},
 where an item is {"key": built-in key} or {"key": "c...", "label", "type": "check" | "number", "min", "max"}.
 
@@ -22,6 +22,49 @@ BUILTIN = OrderedDict([
     ("cut", {"label": "Cut", "type": "check"}),
     ("scrap", {"label": "Scrap count, past 30 min", "type": "count"}),
 ])
+# The drawing measurements Quality › Tolerances sets for every filter: how far under and over the drawing a
+# measurement may be. Stored in PlantSettings.config["qcTol"] = {spec: {"minus": in, "plus": in}}. A spec with no
+# tolerance set there uses the part's own tolerance (Parts & specs › Tol ±) both ways.
+TOL_SPECS = [("len", "Length"), ("wid", "Width"), ("ph", "Pleat height"), ("sb", "Side band height")]
+EPS = 1e-9
+
+
+def plant_tols(cfg=None):
+    """{spec: {"minus", "plus"}} for the specs Quality › Tolerances sets (the rest follow the part)."""
+    from plant.models import PlantSettings
+    cfg = cfg if cfg is not None else PlantSettings.load().config
+    out = {}
+    for k, _ in TOL_SPECS:
+        t = (cfg.get("qcTol") or {}).get(k)
+        if isinstance(t, dict):
+            try:
+                out[k] = {"minus": abs(float(t["minus"])), "plus": abs(float(t["plus"]))}
+            except (KeyError, TypeError, ValueError):
+                pass
+    return out
+
+
+def tol_for(spec, part, tols=None):
+    """(under, over): how far below and above the drawing a measurement of this spec may be."""
+    t = (plant_tols() if tols is None else tols).get(spec)
+    if t:
+        return t["minus"], t["plus"]
+    own = abs(float(part.get("tol") or 0))
+    return own, own
+
+
+def in_tol(v, target_v, spec, part, tols=None):
+    under, over = tol_for(spec, part, tols)
+    return target_v - under - EPS <= v <= target_v + over + EPS
+
+
+def fmt_tol(spec, part, tols=None):
+    """"±0.06", or "+0.03 / −0.06" when under and over differ."""
+    under, over = tol_for(spec, part, tols)
+    f = lambda x: f"{x:.3f}".rstrip("0").rstrip(".") if x else "0"   # noqa: E731
+    return f"±{f(over)}" if abs(under - over) < EPS else f"+{f(over)} / −{f(under)}"
+
+
 DEFAULTS = {"s1": list(BUILTIN), "eb": ["glue", "scrap"], "ac": ["scrap"], "gb": ["glue", "scrap"]}
 TYPES = {"check": "Pass / fail", "number": "Number (with an allowed range)"}
 
@@ -47,6 +90,10 @@ def items_for(stage, cfg=None):
 
 def target(item, part):
     return part.get(item["spec"]) if item["type"] == "measure" else None
+
+
+def item_spec(item):
+    return item.get("spec") or BUILTIN.get(item.get("key"), {}).get("spec")
 
 
 def parse(items, raw):
@@ -77,8 +124,9 @@ def parse(items, raw):
     return vals
 
 
-def judge(items, vals, part):
-    """(passed, [keys out of spec])."""
+def judge(items, vals, part, tols=None):
+    """(passed, [keys out of spec]). Measurements: the drawing ± Quality › Tolerances (else the part's own)."""
+    tols = plant_tols() if tols is None else tols
     fails = []
     for it in items:
         k, v = it["key"], vals.get(it["key"])
@@ -86,7 +134,7 @@ def judge(items, vals, part):
             fails.append(k)
         elif it["type"] == "measure" and v is not None:
             t = target(it, part)
-            if t is not None and abs(v - t) > float(part.get("tol") or 0) + 1e-9:
+            if t is not None and not in_tol(v, t, item_spec(it), part, tols):
                 fails.append(k)
         elif it["type"] == "number" and v is not None:
             if (it.get("min") not in (None, "") and v < float(it["min"])) or (it.get("max") not in (None, "") and v > float(it["max"])):

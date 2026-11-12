@@ -1,0 +1,11 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Run without an MO{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/coPickPart"{% endblock %}
+{% block body %}<p class="sub">{{ sh.line }} has no MO to run. Enter the filter number it runs by. It runs as an MO of its own (NOMO-…), so counts, QC checks and reports work as usual, and the planners are told. Close it at the next changeover like any MO.</p>
+  <div class="grid2">
+    <label class="f">Filter number<input type="text" name="part" autofocus autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="Scan or type, e.g. MG4062HP"></label>
+    <label class="f">How many <span class="note">(if known)</span><input type="number" name="qty" min="1" inputmode="numeric" placeholder="Leave blank if not known"></label>
+  </div>
+  <label class="f">Why there's no MO<input type="text" name="why" maxlength="200" placeholder="e.g. S2K is down, order not entered yet"></label>
+  <p class="note">{% if S.sup %}Supervisor: {{ S.sup.name }}{% else %}{{ S.actor.name }}{% endif %}</p>{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">Back</button><button class="btn go" type="submit">Run this filter</button>{% endblock %}

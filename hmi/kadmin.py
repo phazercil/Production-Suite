@@ -21,7 +21,7 @@ from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
-        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("qc", "QC checks"), ("maintenance", "Maintenance lists"), ("parts", "Parts & specs"),
+        ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
         ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
@@ -115,13 +115,6 @@ def tab_data(s, tab, request):
                            "state": "in effect now" if v.date_from <= today <= v.date_to else "over" if v.date_to < today else "coming up"})
             out.append({"i": i, "sh": {"name": x.name}, **c, "variants": vs})
         return {"shifts": out}
-    if tab == "parts":
-        from plant.models import PartSpec
-        P = {x.key: x.as_dict() for x in PartSpec.objects.all()}
-        fields = [("pleats", "Pleats/unit", "1"), ("len", "Length", ".01"), ("wid", "Width", ".01"), ("ph", "Pleat ht", ".01"),
-                  ("sb", "Side band", ".01"), ("tol", "Tol ±", ".01")]
-        return {"parts": [{"k": k, "p": P[k], "vals": [(f, lbl, st, P[k].get(f)) for f, lbl, st in fields]} for k in sorted(P)],
-                "fields": fields}
     if tab == "rules":
         r = s.rules
         nums = [("stopPpm", "Line counts as stopped at or below (P/m)", "Speed readings at or below this count as downtime, unless the machine has a run signal (Admin › Connections › Machine data).", 0),
@@ -160,13 +153,6 @@ def tab_data(s, tab, request):
         return connector_data(s, focus=request.GET.get("focus", ""))
     if tab == "permissions":
         return permissions_data(s, request)
-    if tab == "qc":
-        from plant.models import STAGES
-
-        from . import qc
-        return {"stages": [{"k": k, "label": lbl, "items": qc.items_for(k, cfg),
-                            "free": [(b, d["label"]) for b, d in qc.BUILTIN.items() if b not in {i["key"] for i in qc.items_for(k, cfg)}]}
-                           for k, lbl in STAGES], "types": qc.TYPES}
     if tab == "codata":
         return codata_data(s, request)
     return {}
@@ -355,6 +341,7 @@ GUESS = {"step": ["step", "instruction", "step_text", "description", "text"], "s
          "sideband": ["sideband", "sidebands", "side_band", "side_band_material"],
          "unit": ["unit", "units", "uom"], "asset": ["asset", "asset_id", "tool", "tool_id"], "image": ["image", "image_url", "photo", "photo_url"],
          "url": ["url", "link", "drawing_url", "drawing_link", "file_url", "pdf", "s3_url", "aws_url"], "newest": ["updated", "updated_at", "modified", "created", "date"],
+         "uom": ["uom", "unit", "units", "unit_of_measure"],
          "name": ["name", "setting", "setting_name", "parameter"], "rev": ["rev", "revision", "drawing_rev"], "pleats": ["pleats", "pleat_count", "pleats_per_unit"],
          "len": ["length", "len", "length_in"], "wid": ["width", "wid", "width_in"], "ph": ["pleat_height", "ph"], "sb": ["side_band", "side_band_height", "sb"],
          "tol": ["tol", "tolerance"], "media": ["media", "media_type", "material"], "f_part": ["part", "part_no", "part_number", "item", "sku"],
@@ -377,6 +364,9 @@ def guess_columns(qname, cols):
         if hit:
             out[k] = cols[low.index(hit)]
     return out
+
+
+UOM_SPECS = ("len", "wid", "ph", "sb", "tol")   # dimensions a unit of measure applies to
 
 
 def build_codata_sql(qname, b, kind=None):
@@ -405,6 +395,9 @@ def build_codata_sql(qname, b, kind=None):
         # rows with its own code, folded into one row for the part
         sel = ",\n       ".join((f"MAX(CASE WHEN {q(sw[r[0]]['col'])} = {dbkinds.literal(kind, sw[r[0]]['val'])} THEN {q(b[r[0]])} END)"
                                  if r[0] in sw else f"MAX({q(b[r[0]])})") + f" AS {r[0]}" for r in D["roles"] if b.get(r[0]))
+        if b.get("uom"):   # each dimension's unit, from its own rows (e.g. PAID 30's uom for the length)
+            sel += "".join(f",\n       MAX(CASE WHEN {q(sw[k]['col'])} = {dbkinds.literal(kind, sw[k]['val'])} THEN {q(b['uom'])} END) AS {k}_uom"
+                           for k in UOM_SPECS if k in sw)
     else:
         sel = ",\n       ".join(f"{q(b[r[0]])} AS {r[0]}" for r in D["roles"] if b.get(r[0]))
     w = [f"{q(b['f_part'])} = :part"]
@@ -817,6 +810,12 @@ def a_alert_save(request, s, p):
 def a_alert_test(request, s, p):
     r = run(request, s, "alertTest", {"id": int(p.get("id") or 0)})
     return alerts_panel(request, s, msgs={"people": {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}})
+
+
+@action("alertToggle")
+def a_alert_toggle(request, s, p):
+    r = run(request, s, "alertToggle", {"id": int(p.get("id") or 0), "on": p.get("on") == "1"})
+    return alerts_panel(request, s, msgs={} if r["ok"] else {"people": {"ok": False, "text": r["error"]}})
 
 
 @action("alertDelete")

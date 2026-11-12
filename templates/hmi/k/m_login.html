@@ -3,6 +3,7 @@
 {% block form_attrs %}hx-post="/kiosk/do/{% if sup %}supStart{% elif changeop %}changeOp{% else %}login{% endif %}"{% endblock %}
 {% block body %}
   {% if changeop %}<p class="sub">The next operator logs in and takes over {{ station }} from now{% if changeop.mo %}, on MO {{ changeop.mo }}{% endif %}. {{ changeop.before }} keeps everything up to now.</p>
+  {% elif sup and why == "nomo" %}<p class="sub">Running without an MO needs a supervisor. A supervisor's PIN takes over this screen for it, without logging {% if me %}{{ me.name }}{% else %}anyone{% endif %} out. It ends with End override, or after 10 minutes without a tap.</p>
   {% elif sup %}<p class="sub">A supervisor's PIN lets this screen change finished entries (downtime reasons, QC checks) without logging {% if me %}{{ me.name }}{% else %}anyone{% endif %} out. It ends with End override, or after 10 minutes without a tap.</p>
   {% elif perm %}<p class="sub">This needs someone allowed to: <b>{{ perm_label }}</b>.</p>{% endif %}
   <input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="next_q" value="{{ next_q }}">

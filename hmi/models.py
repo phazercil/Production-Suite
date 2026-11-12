@@ -99,7 +99,7 @@ class QCCheck(models.Model):
     item = models.CharField(max_length=40)
     by = models.CharField(max_length=120)
     # the drawing measurements and standard checks have their own columns (Grafana and Reports read them);
-    # every item the stage checks (Admin › QC checks) is in `values`
+    # every item the stage checks (Quality › QC checks) is in `values`
     len = models.FloatField(null=True, blank=True)
     wid = models.FloatField(null=True, blank=True)
     ph = models.FloatField(null=True, blank=True)
@@ -117,6 +117,8 @@ class QCCheck(models.Model):
     reviewed_by = models.CharField(max_length=120, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
     scrapped = models.IntegerField(default=0)                 # filters taken off the count when disapproved
+    issue = models.CharField(max_length=80, blank=True)       # Process Out (Supervisor, Quality): what the quality issue was
+    issue_note = models.TextField(blank=True)
     edited_by = models.CharField(max_length=120, blank=True)
     edited_at = models.DateTimeField(null=True, blank=True)
 

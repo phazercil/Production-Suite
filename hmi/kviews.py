@@ -27,7 +27,7 @@ from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
 VIEWS = PAGES | {"admin"}   # Admin is its own section (/admin/) but its view is built the same way
-BUILT = {"controls", "schedule", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
+BUILT = {"controls", "schedule", "part-info", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -149,7 +149,7 @@ def page(request, page="controls", lock=None):
         q = request.GET.urlencode()
         return redirect("/admin/" + (f"?{q}" if q else ""))
     page = page if page in PAGES else "controls"
-    for k in ("tab", "view", "status", "sort", "inactive"):   # a link straight to a page's option (/operator/schedule/?view=calendar)
+    for k in ("tab", "view", "status", "sort", "inactive", "part"):   # a link straight to a page's option (/operator/schedule/?view=calendar)
         if request.GET.get(k) is not None:
             request.session[f"k.{k}"] = request.GET[k][:40]
     s = screen(request)
@@ -196,6 +196,9 @@ def view_data(s, page, request):
         sort = page_option(request, "sort", None, "")
         return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "calendar"}, "timeline"),
                                            page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort)}
+    if page == "part-info":
+        P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
+        return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}
     if page == "qc-log":
         return {"P": kscreen.qc_log_page(s)}
     if page == "downtime":
@@ -340,7 +343,7 @@ def changeover_modal(request, s):
         c["mo_pick"] = request.GET.get("mo") or (str(c["queue"][0].number) if c["queue"] else "")
     else:
         nmo = s.mo(co.get("newMo"))
-        p = s.part(nmo.part if nmo else "")
+        p = s.fresh_part(nmo.part if nmo else "")
         steps = co.get("steps") or [{"text": t} for t in s.cfg.get("coSteps", [])]
         def step(i, st):
             st = dict(st)
@@ -371,7 +374,7 @@ def m_copass(request, s):
 
 @modal("qc", login=True)
 def m_qc(request, s):
-    """A QC check: the items this machine's stage checks (Admin › QC checks). ?edit=id corrects a finished one."""
+    """A QC check: the items this machine's stage checks (Quality › QC checks). ?edit=id corrects a finished one."""
     from . import qc
     from .models import QCCheck
     edit = None
@@ -382,15 +385,22 @@ def m_qc(request, s):
         if not edit:
             return thin.refused("That QC check is no longer on file.")
         stage = edit.shift.machine.stage if edit.shift and edit.shift.machine else "s1"
-        p = s.part(edit.item)
+        if not edit.item:
+            return thin.refused("This check has no part, so it can't be judged here. Correct its part in Supervisor › History › Edit.")
+        p = s.fresh_part(edit.item)
         vals = edit.values or {k: getattr(edit, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut", "scrap")}
     else:
         if not s.shift_on:
             return thin.refused("Start a shift before logging QC.")
         stage = s.machine.stage if s.machine else "s1"
-        p = s.part(s.current_item())
+        if not s.current_item():
+            return thin.refused("No MO is running, so there's no part to check against. Start an MO in Change over first "
+                                "(or a supervisor runs it by filter number).")
+        p = s.fresh_part(s.current_item())
         vals = {}
-    items = [{**it, "target": qc.target(it, p), "v": vals.get(it["key"])} for it in qc.items_for(stage, s.cfg)]
+    tols = qc.plant_tols(s.cfg)
+    items = [{**it, "target": qc.target(it, p), "tolTxt": qc.fmt_tol(qc.item_spec(it), p, tols) if it["type"] == "measure" else "",
+              "v": vals.get(it["key"])} for it in qc.items_for(stage, s.cfg)]
     late = 0 if edit else s.qc_late()
     return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, items=items, edit=edit, late=late,
                                                                  afterCo=bool(not edit and s.shift and s.shift.qc_after_co)))
@@ -449,11 +459,17 @@ def m_photo(request, s):
 
 @modal("drawing")
 def m_drawing(request, s):
-    item = s.current_item() or "MG4062HP"
-    p = s.part(item)
+    item = s.current_item()
+    if not item:
+        return thin.refused("No MO is running, so there's no drawing to show. Part Info shows any part's drawing.")
+    p = s.fresh_part(item)
     note = (f"Rev {p['rev']} confirmed current at {engine.fmt_t(s.shift.draw_checked)}." if s.shift and s.shift.draw_checked
             else "Showing the drawing on file at shift start.")
-    return modal_response(request, "hmi/k/m_drawing.html", **ctx_for(s, p=p, note=request.GET.get("msg") or note,
+    from . import qc
+    tols = qc.plant_tols(s.cfg)
+    tol_txt = {k: qc.fmt_tol(k, p, tols) for k in ("len", "wid")}
+    tol_txt["other"] = qc.fmt_tol("ph", p, tols)
+    return modal_response(request, "hmi/k/m_drawing.html", **ctx_for(s, p=p, tolTxt=tol_txt, note=request.GET.get("msg") or note,
                                                                      pleat_xs=[70 + i * 14 for i in range(16)]))
 
 
@@ -677,6 +693,9 @@ def a_sup_start(request, s, p):
         return err_in_modal(err)
     request.session["sup"] = {"id": u.pk, "until": now().timestamp() + SUP_MINUTES * 60}
     engine.audit(engine.Ctx(user=u), f"Supervisor override on {s.station or 'a screen'}" + (f" (logged in: {s.me.name})" if s.me else ""))
+    if p.get("next") in ("nomo",):   # the override was for one thing: go straight on to it
+        resp = MODALS[p["next"]][0](request, screen(request))
+        return thin.trigger(resp, toast=f"Supervisor override: {u.name}", changed=True)
     return thin.done(toast=f"Supervisor override: {u.name}. It ends after {SUP_MINUTES} minutes without a tap.", close=True)
 
 
@@ -720,6 +739,26 @@ def _co_next(request, s, r):
 ACTIONS["coCancel"] = simple("coCancel", toast=False, close=True)
 ACTIONS["coEnd"] = simple("coEnd", toast=False, then=_co_next)
 ACTIONS["coPick"] = simple("coPick", toast=False, then=_co_next)
+
+
+@modal("nomo")
+def m_nomo(request, s):
+    """No MO to run: a supervisor enters the filter number (Supervisor button first when the operator can't)."""
+    if not s.can("runs.nomo"):
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm="floor.override", perm_label=_perm_label("floor.override"),
+                                                                       sup=True, next="nomo", why="nomo",
+                                                                       people=kscreen.people_for_login("runs.nomo")))
+    if not (s.shift and (s.shift.co or {}).get("step", 0) >= 2):
+        return thin.refused("Open Change over and end the current MO first.")
+    return modal_response(request, "hmi/k/m_nomo.html", **ctx_for(s, sh=s.shift))
+
+
+@action("coPickPart")
+def a_co_pick_part(request, s, p):
+    r = run(request, s, "coPickPart", {k: p.get(k, "") for k in ("part", "qty", "why")})
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.trigger(changeover_modal(request, screen(request)), toast=r.get("msg"), changed=True)
 ACTIONS["coReload"] = simple("coReload", toast=False, then=_co_next)
 ACTIONS["coFinish"] = simple("coFinish", close=True)
 @action("coPass")
@@ -801,14 +840,14 @@ def a_qc_field(request, s, p):
     """As a measurement is typed: in or out of tolerance (the part's spec), shown on the field."""
     from . import qc
     k = p.get("k", "")
-    pp = s.part(p.get("item") or s.current_item())
+    pp = s.fresh_part(p.get("item") or s.current_item())
     it = next((x for x in qc.items_for(s.machine.stage if s.machine else "s1", s.cfg) if x["key"] == k), None)
     target = qc.target(it, pp) if it else None
     try:
         v = float(p.get(k) or "")
     except ValueError:
         v = None
-    cls = "" if v is None or target is None else ("in" if abs(v - target) <= pp["tol"] + 1e-9 else "out")
+    cls = "" if v is None or target is None else ("in" if qc.in_tol(v, target, qc.item_spec(it), pp, qc.plant_tols(s.cfg)) else "out")
     resp = HttpResponse("")
     resp["HX-Reswap"] = "none"
     return thin.trigger(resp, **{"suite:mark": {"id": f"q-{k}", "cls": cls}})
@@ -866,6 +905,8 @@ def a_drawing(request, s, p):
     r = run(request, s, "getDrawing", {"part": p.get("part", "")})
     if not r["ok"]:
         return thin.refused(r["error"])
+    if p.get("from") == "info":   # Part Info: the page shows the new drawing as it refreshes
+        return thin.done(toast=r.get("msg"))
     request.GET = request.GET.copy()
     request.GET["msg"] = r.get("msg", "")
     return m_drawing(request, screen(request))

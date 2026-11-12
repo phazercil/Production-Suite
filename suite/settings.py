@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     "labor",
     "reports",
     "supervisor",
+    "quality",
     "suite",   # display helpers for the server-built screens (suite/templatetags)
 ]
 

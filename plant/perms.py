@@ -20,8 +20,12 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("qc.edit", "Edit finished QC checks", "Change a QC check after it was saved.", SUP),
         ("history.edit", "Correct history", "Change, split or delete past shift logs, downtime, QC checks, changeovers and MO runs in Supervisor › History. Every change is logged.", LEAD),
         ("qc.approve", "Approve out-of-spec QC", "Approve or disapprove a QC check that failed, and scrap filters from the count.", SUP),
+        ("runs.nomo", "Run without an MO", "When a line has no MO to run, enter the filter number it runs by (Change over › No MO). With the Supervisor button on an operator's screen.", SUP),
         ("runs.override", "Override a running shift", "Change the speed or count settings of a shift that is running.", LEAD),
         ("tickets.work", "Work maintenance requests", "Add repair notes and close maintenance requests.", SUP),
+    ]),
+    ("Quality", [
+        ("quality.tolerances", "Quality settings", "Quality › QC checks, Parts & specs and Tolerances: what each stage's QC check asks, each part's drawing specs (and importing them from the asset database), how far each measurement may be under or over for every filter, and the Process Out issue list.", LEAD),
     ]),
     ("People", [
         ("team.manage", "Manage the team", "Add people and change names, PINs, roles (up to shift lead), training and status.", LEAD),
@@ -34,7 +38,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("costs.view", "See labor costs", "Labor cost per run in the Scheduler and Reports.", LEAD),
     ]),
     ("Admin", [
-        ("lists.edit", "Day-to-day lists", "Downtime reasons, checklists, maintenance lists, QC checks, shifts & breaks, parts & specs, rules.", LEAD),
+        ("lists.edit", "Day-to-day lists", "Downtime reasons, checklists, maintenance lists, shifts & breaks, rules.", LEAD),
         ("machines.edit", "Machines", "Add, rename and remove machines; their data sources.", ADMIN),
         ("connections.edit", "Connections", "Databases, accounts, Grafana, S2K, Paycom, incoming data, changeover data queries.", ADMIN),
         ("alerts.edit", "Alerts", "Who is told when a line is down; mail server and Twilio.", ADMIN),
@@ -46,13 +50,14 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
     ("Sections", [
         ("section.admin", "Open Admin", "The Admin section (what can be changed there follows the permissions above).", LEAD),
         ("section.supervisor", "Open Supervisor", "The Supervisor section.", LEAD),
+        ("section.quality", "Open Quality", "The Quality section: the quality report and the tolerances.", LEAD),
         ("section.maintenance", "Open Maintenance", "The Maintenance section.", SUP),
     ]),
 ) for k, l, h, r in items)
 
 # Admin tabs and the permission that changes them
 TAB_PERM = {"machines": "machines.edit", "connections": "connections.edit", "connector": "connections.edit", "codata": "connections.edit", "shifts": "lists.edit",
-            "reasons": "lists.edit", "checklists": "lists.edit", "maintenance": "lists.edit", "qc": "lists.edit", "parts": "lists.edit",
+            "reasons": "lists.edit", "checklists": "lists.edit", "maintenance": "lists.edit",
             "rules": "lists.edit", "alerts": "alerts.edit", "network": "network.edit", "updates": "updates.install",
             "backup": "backup.manage", "permissions": "permissions.manage"}
 LOCKED = {("permissions.manage", "admin")}   # (permission, role) that can't be turned off

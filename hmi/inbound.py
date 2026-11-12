@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from plant.models import MO, Machine, PartSpec, part_key
 
+from . import qc
 from .models import AutoQC, DataSource, InboundRecord, ShiftRun
 
 MAX_ITEMS = 1000
@@ -166,6 +167,7 @@ def ingest(src, payload):
     now = timezone.now()
     lines = {m.name.lower(): m.name for m in Machine.objects.all()}
     specs = {s.key: s for s in PartSpec.objects.all()}
+    tols = None   # Quality › Tolerances, read when a record needs judging
     stored, errors = 0, []
     with transaction.atomic():
         active = {sh.line: sh for sh in ShiftRun.objects.filter(active=True).select_related("mo")}
@@ -190,7 +192,9 @@ def ingest(src, payload):
                             errors.append(f"record {i + 1}: no pass/fail field and no drawing specs for part {part or '(none)'}")
                         continue
                     target = {"len": sp.len, "wid": sp.wid, "ph": sp.ph, "sbl": sp.sb, "sbr": sp.sb}
-                    passed = all(abs(v - target[k]) <= sp.tol + 1e-9 for k, v in r["vals"].items() if v is not None)
+                    tols = tols if tols is not None else qc.plant_tols()
+                    spec = {"len": "len", "wid": "wid", "ph": "ph", "sbl": "sb", "sbr": "sb"}
+                    passed = all(qc.in_tol(v, target[k], spec[k], {"tol": sp.tol}, tols) for k, v in r["vals"].items() if v is not None)
                 extra = {k: v for k, v in r["raw"].items() if isinstance(v, (int, float, str, bool)) and len(str(v)) < 200} if isinstance(r["raw"], dict) else {}
                 AutoQC.objects.create(source=src, source_name=src.name, shift=sh, t=r["t"], line=r["line"], mo=mo, item=part,
                                       passed=bool(passed), data=dict(list(extra.items())[:40]), **r["vals"])
