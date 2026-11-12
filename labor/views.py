@@ -159,7 +159,7 @@ def save(request):
             return JsonResponse({"ok": False, "conflict": True, "version": plan.version, "updatedBy": plan.updated_by,
                                  "updatedAt": plan.updated_at.isoformat() if plan.updated_at else None,
                                  "error": f"{plan.updated_by or 'Someone'} changed the labor plan on another screen."}, status=409)
-        if budget == "A":   # budget A is the master of the suite's lines and shifts
+        if budget == "A":   # budget A starts new lines in the suite (it never changes existing ones)
             data, changes = apply_to_suite(data, old=plan.data if plan.version else None)
             if changes:
                 from hmi.engine import Ctx, audit, refresh_schedule

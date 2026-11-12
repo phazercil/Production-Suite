@@ -66,8 +66,8 @@ def labor_json(world, lead, a=None, b=None):
     for mid, info in (world.get("laborLines") or {}).items():
         lines[mid] = {"line": info["line"], "shifts": {str(sid): {k: v for k, v in sh.items() if lead or k != "costPerHour"}
                                                         for sid, sh in info["shifts"].items()}}
-    from labor.sync import master_on
-    return {"on": bool(plan), "master": master_on(), "enabled": world["cfg"].get("useLabor", True), "version": plan.version if plan else 0,
+    from labor.sync import budget_diff
+    return {"on": bool(plan), "diff": {str(k): v for k, v in budget_diff().items()}, "enabled": world["cfg"].get("useLabor", True), "version": plan.version if plan else 0,
             "lines": lines, "days": plan.special_days(a, b) if plan and a and b else {}}
 
 
@@ -347,12 +347,7 @@ def save_config(request):
             raise BadRequest(f"{what} must be between {lo:g} and {hi:g}.")
         return f
 
-    from labor.sync import master_on
-    labor = master_on()   # the Labor Budget is the master of lines and shifts: only machine settings are saved here
-    if labor:
-        known = set(Machine.objects.values_list("id", flat=True))
-        if any(not isinstance(m, dict) or m.get("id") not in known for m in machines_in) or (p.get("removedMachines") or []):
-            raise BadRequest("Lines are added and removed in the Labor Budget now. Change them there; this page follows it.")
+    labor = False   # the lines are the suite's own (the Labor Budget only starts new ones; Lines & Shifts shows where it differs)
     st = PlantSettings.load()
     st.planner = {"coSamePart": bool(p.get("coSamePart")), "coFirst": p.get("coFirst") is not False,
                   "useLabor": p.get("useLabor") is not False}
@@ -413,8 +408,7 @@ def save_config(request):
         obj.scrap_pct = num(m.get("scrap"), f"{name} scrap %", 0, 90)
         obj.downtime_pct = num(m.get("downtime"), f"{name} downtime %", 0, 90)
         obj.changeover_min = num(m.get("changeover"), f"{name} changeover minutes", 0, 1440)
-        if not labor:
-            obj.run_lunch = bool(m.get("runLunch"))
+        lunch_in = [x for x in m.get("lunchShifts") or [] if x in sid_map]
         if Machine.objects.filter(name__iexact=name).exclude(pk=obj.pk).exclude(pk__in=[x.get("id") for x in machines_in if isinstance(x.get("id"), int)]).exists():
             raise BadRequest(f"There is already a line called {name}.")
         # free the name if another line in this save is taking it over (renames that swap names)
@@ -424,7 +418,10 @@ def save_config(request):
             clash.save(update_fields=["name"])
         obj.save()
         if not labor:
-            obj.shifts.set([sid_map[x] for x in m.get("shifts") or [] if x in sid_map])
+            runs = [sid_map[x] for x in m.get("shifts") or [] if x in sid_map]
+            obj.shifts.set(runs)
+            obj.lunch_shifts = sorted({sid_map[x] for x in lunch_in} & set(runs))   # runs through lunch, per shift it runs
+            obj.save(update_fields=["lunch_shifts"])
         keep_m.append(obj.id)
     removed = Machine.objects.filter(id__in=[x for x in p.get("removedMachines") or [] if isinstance(x, int) and x not in keep_m])
     busy = [r.name for r in removed if ShiftRun.objects.filter(machine=r, active=True).exists()]

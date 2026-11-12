@@ -1546,6 +1546,7 @@ __SUITEBAR__
     const STAGES = ['Stage 1', 'Stage 2', 'Stage 3', 'Glue Bead', 'Packaging Only', 'Non Production', 'Backup'];
     const FROM_SUITE_TEXT = "A machine setting: set in Admin \u203a Machines or the Scheduler (Lines & Shifts).";
     const LOCK_ATTR = 'style="opacity:.6;cursor:not-allowed" title="' + FROM_SUITE_TEXT.replace(/&/g, '&amp;') + '"';
+    const LOCK_NAME = 'style="opacity:.6;cursor:not-allowed" title="' + "This line is a machine in the suite: rename it or change its stage in Admin \u203a Machines or the Scheduler (Lines & Shifts).".replace(/&/g, '&amp;') + '"';
     const isLaborOnly = (stage) => stage === 'Packaging Only' || stage === 'Non Production' || stage === 'Backup' || stage === 'Stage 3' || stage === 'Glue Bead';
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -4207,21 +4208,21 @@ __SUITEBAR__
               <div class="flex flex-wrap items-center gap-2.5 flex-1">
                 <button type="button" onclick="toggleLineCollapsed(${jsArg(line.id)})" class="w-9 h-9 shrink-0 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold cursor-pointer" title="${collapsed ? 'Expand' : 'Collapse'} this line" aria-expanded="${!collapsed}">${collapsed ? '&#9656;' : '&#9662;'}</button>
                 <input type="color" value="${line.color || '#2563eb'}" ${line.machineId ? 'disabled ' + LOCK_ATTR : ''} onchange="updateLine(${lIdx}, 'color', this.value)" class="w-9 h-9 p-0.5 bg-white rounded-lg cursor-pointer shrink-0" title="Choose Line Color Code">
-                <input type="text" value="${esc(line.name)}" onchange="updateLine(${lIdx}, 'name', this.value)" class="font-bold text-base bg-white px-3 py-1.5 min-w-[240px]">
-                <select onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">
+                <input type="text" value="${esc(line.name)}" ${line.machineId ? 'readonly ' + LOCK_NAME : ''} onchange="updateLine(${lIdx}, 'name', this.value)" class="font-bold text-base bg-white px-3 py-1.5 min-w-[240px]">
+                <select ${line.machineId ? 'disabled ' + LOCK_NAME : ''} onchange="updateLine(${lIdx}, 'stage', this.value)" class="bg-white font-bold text-xs text-slate-800 py-1.5 px-3">
                   ${STAGES.map(st => `<option value="${st}" ${line.stage === st ? 'selected' : ''}>${st}</option>`).join('')}
                 </select>
                 <span class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-200 text-slate-700">
                   Total Active Employees: ${totalActiveSlots}
                 </span>
                 ${thresholdLineBadge(line.id)}
-                ${line.machineId ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#e0f2fe;color:#075985" title="A machine in the Scheduler and the Operator Kiosk. Its name, stage and shifts are set here; its color and speed in Admin.">Machine${line.inService === false ? ' · out of service' : ''}</span>`
-                  : line.suiteMissing ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#fee2e2;color:#991b1b" title="Save the plan to add this line to the Scheduler and Admin.">New machine</span>` : ''}
+                ${line.machineId ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#e0f2fe;color:#075985" title="A machine in the Scheduler and the Operator Kiosk. Its name, stage, color and speed are the suite's; the shifts and lunch here are this plan's (the Scheduler's Lines & Shifts shows where they differ).">Machine${line.inService === false ? ' · out of service' : ''}</span>`
+                  : line.suiteMissing ? `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;background:#fee2e2;color:#991b1b" title="Save the plan to add this line to the Scheduler and Admin, with this plan's shifts and lunch to start.">New machine</span>` : ''}
                 ${collapsed ? `<span class="text-xs font-semibold text-emerald-700">Running: ${[1,2,3,4,5,6].filter(n => n <= maxShiftCount && line.activeShifts && line.activeShifts[n]).map(n => 'S' + n).join(', ') || 'none'}</span>` : ''}
               </div>
               <div class="flex items-center space-x-2">
                 <button onclick="promptCopyLine(${lIdx})" class="text-xs bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold px-3 py-1.5 rounded-lg shadow-2xs cursor-pointer transition">📋 Copy Line</button>
-                <button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Deleting it takes the machine out of service when the plan is saved (its records are kept)"' : ''} class="text-xs text-red-600 hover:text-red-800 font-semibold px-2.5 py-1 rounded hover:bg-red-50 cursor-pointer">Delete Line</button>
+                <button onclick="removeLine(${lIdx})" ${line.machineId ? 'title="Removes it from this plan only: the machine stays in the suite (take it out of service in Admin › Machines)"' : ''} class="text-xs text-red-600 hover:text-red-800 font-semibold px-2.5 py-1 rounded hover:bg-red-50 cursor-pointer">Delete Line</button>
               </div>
             </div>
 

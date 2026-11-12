@@ -61,8 +61,12 @@ def seed_demo(reset=True):
 
     def machine(name, **kw):
         shifts = kw.pop("shifts", [s1, s2])
+        thru = kw.pop("run_lunch", False)
         m = Machine.objects.create(name=name, **kw)
         m.shifts.set(shifts)
+        if thru:   # runs through lunch on every shift it runs
+            m.lunch_shifts = [s.id for s in shifts]
+            m.save(update_fields=["lunch_shifts"])
         return m
 
     bar = machine("Barbara", code="BARB", stage="s1", speed_mode="new", ppm=285, scrap_pct=5, downtime_pct=10, changeover_min=30, run_lunch=True,

@@ -410,10 +410,11 @@ class ReviewerFindingTests(TestCase):
         self.lead()
         st = self.c.get("/api/scheduler/state").json()
         cfg = {**st["cfg"], "cfgSig": st["cfgSig"]}
-        for m in cfg["machines"]:
-            m["runLunch"] = m["name"] == "Salvatore"
+        second = cfg["shifts"][1]["id"]
+        for m in cfg["machines"]:   # through lunch per shift: Salvatore on 2nd shift only
+            m["lunchShifts"] = [second] if m["name"] == "Salvatore" else []
         self.assertTrue(self.post("/api/scheduler/config", cfg).json()["ok"])
-        self.assertEqual(set(Machine.objects.filter(run_lunch=True).values_list("name", flat=True)), {"Salvatore"})
+        self.assertEqual({m.name: m.lunch_shifts for m in Machine.objects.all() if m.lunch_shifts}, {"Salvatore": [second]})
 
     def test_stale_lines_save_keeps_machines_added_elsewhere(self):
         self.lead()

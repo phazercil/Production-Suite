@@ -96,3 +96,26 @@ class ShiftHistoryTests(TestCase):
         for txt in ("Add seasonal variant", "Seasonal variant ·", ">Mon<", ">Sun<"):
             self.assertIn(txt, r)
 
+
+
+class LunchPerShiftTests(TestCase):
+    """Running through lunch is set per shift: through on 1st shift (relief cover), stopped for lunch on 2nd."""
+    def test_lunch_per_shift(self):
+        from hmi.models import ShiftRun
+        from plant.models import ShiftBreak
+        seed_demo(reset=True)
+        ShiftVersion.objects.all().delete()
+        s1, s2 = Shift.objects.get(name="1st shift"), Shift.objects.get(name="2nd shift")
+        Shift.objects.filter(pk__in=[s1.pk, s2.pk]).update(days=[0, 1, 2, 3, 4, 5, 6])
+        ShiftBreak.objects.create(shift=s1, label="Lunch", start="10:00", end="10:30")
+        ShiftBreak.objects.create(shift=s2, label="Lunch", start="18:00", end="18:30")
+        ShiftVersion.objects.all().delete()
+        bar = Machine.objects.get(name="Barbara")
+        bar.lunch_shifts = [s1.pk]
+        bar.save(update_fields=["lunch_shifts"])
+        y = timezone.localdate() - timedelta(days=1)
+        a = timezone.make_aware(datetime(y.year, y.month, y.day, 6, 0))
+        sh = ShiftRun.objects.create(machine=bar, line=bar.name, shift_name="1st shift", start=a, end=a + timedelta(hours=17), active=False)
+        kinds = [(timezone.localtime(s).strftime("%H:%M"), k) for s, e, k in engine.planned_windows(sh, kinds=True) if k == "Lunch"]
+        self.assertIn(("18:00", "Lunch"), kinds)        # 2nd shift: the line stops for lunch
+        self.assertNotIn(("10:00", "Lunch"), kinds)     # 1st shift: it runs through
