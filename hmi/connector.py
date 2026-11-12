@@ -120,7 +120,7 @@ def groups():
         p = parse_sql(sv.sql) if sv else {"table": "", "map": {}, "fval": "", "where": [], "slotWhere": {}}
         keys = query_filterable(name)
         defs = [("f_part", "Part number (to look the part up)", True, "")]
-        if name != "part_spec":
+        if not D.get("perPart"):
             defs.append(("f_machine", "Machine (blank rows = every machine)", False, ""))
         if name == "changeover_steps":
             defs.append(("f_from", "Part changing from", False, ""))
@@ -144,10 +144,10 @@ SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "run2", "errCode", "errText"
 
 
 def query_filterable(name):
-    """The inputs of a database query that can each read their own rows. Part specs: a table that keeps one value
-    per row with a code saying which spec it is (e.g. part_attribute: value, with PAID 30 = length, 31 = width)."""
+    """The inputs of a database query that can each read their own rows. Part specs and the drawing file: a table that
+    keeps one value per row with a code saying which it is (e.g. part_attribute: value, with PAID 30 = length)."""
     from .snapshot import QDEF
-    return {r[0] for r in QDEF[name]["roles"]} if name == "part_spec" else set()
+    return {r[0] for r in QDEF[name]["roles"] if r[0] != "newest"} if QDEF[name].get("perPart") else set()
 
 
 def clean_slot_where(raw, cols=None, keys=None):

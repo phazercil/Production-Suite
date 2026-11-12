@@ -389,3 +389,76 @@ class AttributeTableTests(Base):
     def test_drawing_values_kept_as_text(self):
         self.assertEqual([engine._spec_number(v) for v in (12.5, "9.25", "9.25 in", "±0.06", "1,250", "No", None, "")],
                          [12.5, 9.25, 9.25, 0.06, 1250.0, None, None, None])
+
+
+class DrawingFileTests(Base):
+    """The drawing's rev and a link to its file (e.g. on AWS) from their own table, with Part specs from another."""
+
+    def setUp(self):
+        super().setUp()
+        sch = {**SCHEMA, "tables": SCHEMA["tables"] + [
+            {"name": "part_attribute", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "PAID", "value")]},
+            {"name": "part_drawing", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "revision", "s3_url", "updated")]}]}
+        p = mock.patch.object(engine.integrations, "schema", return_value=sch)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_its_own_box_newest_rev_first(self):
+        g = next(x for x in connector.groups() if x["key"] == "q:part_drawing")
+        self.assertEqual([s["k"] for s in g["slots"]], ["f_part", "url", "rev", "newest"])   # per part: no machine column
+        c = self.card("assets", "part_drawing")
+        r = self.save(group="q:part_drawing", src=c, map={"f_part": "partnumber", "url": "s3_url", "rev": "revision", "newest": "updated"})
+        self.assertTrue(r["ok"], r)
+        sql = SavedQuery.objects.get(name="part_drawing").sql
+        self.assertIn("`s3_url` AS url", sql)
+        self.assertIn("ORDER BY `updated` DESC", sql)
+        g = next(x for x in connector.groups() if x["key"] == "q:part_drawing")
+        self.assertEqual((g["status"], g["state"]["map"]["newest"]), ("done", "updated"))
+
+    def test_part_specs_save_without_a_rev(self):
+        c = self.card("assets", "part_attribute")
+        r = self.save(group="q:part_spec", src=c, map={"f_part": "partnumber", "len": "value"}, where={"len": [{"col": "PAID", "val": "30"}]})
+        self.assertTrue(r["ok"], r)
+
+    def test_a_refused_save_stays_unsaved(self):
+        c = self.card("assets", "part_attribute")
+        cl = Client(HTTP_HX_REQUEST="true")
+        cl.post("/kiosk/do/login", {"pin": "9999"})
+        r = cl.post("/kiosk/do/connectorSave", {"group": "q:part_spec", "src": c, "db": "assets", "table": "part_attribute",
+                                                "map": json.dumps({"f_part": "partnumber", "len": "value"}),
+                                                "where": json.dumps({"len": [{"col": "PAID", "val": ""}]})})
+        self.assertContains(r, "Type the value to keep for: Length")
+        self.assertContains(r, "data-saved=")   # what's saved goes along, so the page keeps the wires as unsaved
+        self.assertContains(r, "&quot;len&quot;: &quot;value&quot;")
+
+    def run_drawing(self, spec_rows, drawing_rows):
+        def fake(sql, params, limit=500, db="assets"):
+            return {"columns": [], "rows": drawing_rows if "part_drawing" in sql else spec_rows, "ms": 1, "truncated": False}
+        with mock.patch.object(engine.integrations, "run_saved", side_effect=fake), \
+                mock.patch.object(engine.integrations, "assets_ready", return_value=True):
+            return engine.execute("getDrawing", {"part": "MG4017"}, self.ctx)
+
+    def test_get_updated_drawing_keeps_the_link(self):
+        from plant.models import PartSpec
+        SavedQuery.objects.create(name="part_spec", sql="SELECT 1 FROM part_attribute", saved_by="x")
+        SavedQuery.objects.create(name="part_drawing", sql="SELECT 1 FROM part_drawing", saved_by="x")
+        PartSpec.objects.filter(key="MG4017").delete()
+        link = "https://drawings.s3.amazonaws.com/MG4017_C.pdf?X-Amz-Signature=" + "a" * 1200
+        r = self.run_drawing([{"len": "9.25 in", "rev": "B"}], [{"url": link, "rev": "C"}])
+        self.assertIn("Drawing rev C loaded", r["msg"])                   # the drawing file's rev wins
+        p = PartSpec.objects.get(key="MG4017")
+        self.assertEqual((p.rev, p.len, p.drawing_url), ("C", 9.25, link))
+        self.run_drawing([{"len": "9.25"}], [{"url": "javascript:alert(1)", "rev": "D"}])
+        p.refresh_from_db()
+        self.assertEqual((p.rev, p.drawing_url), ("D", link))             # not a web address: the link on file stays
+        # a drawing file but no dimensions for a part not on file: estimated specs aren't saved as the drawing's
+        PartSpec.objects.filter(key="MG4017").delete()
+        r = self.run_drawing([], [{"url": link, "rev": "C"}])
+        self.assertIn("no dimensions", r["msg"])
+        self.assertFalse(PartSpec.objects.filter(key="MG4017").exists())
+
+    def test_open_drawing_button(self):
+        from django.template.loader import render_to_string
+        html = render_to_string("hmi/k/_open_drawing.html", {"p": {"url": "https://x.s3.amazonaws.com/a.pdf?s=1&t=2", "rev": "C", "key": "MG4017"}})
+        self.assertIn('href="https://x.s3.amazonaws.com/a.pdf?s=1&amp;t=2" target="_blank" rel="noopener noreferrer"', html)
+        self.assertEqual(render_to_string("hmi/k/_open_drawing.html", {"p": {"url": "", "rev": "C"}}).strip(), "")

@@ -17,7 +17,7 @@
     {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/changeover?refresh=1&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.number }} · {{ m.part }}</button> {% endfor %}</div>
     {% else %}<p class="note">Nothing else scheduled on this line. Scan an MO or ask your shift lead.</p>{% endif %}
   {% else %}
-    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
+    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
     {% if co.loading %}<div class="panel empty">Loading steps for this part from the database…</div>{% else %}
       {% if src == "db" %}<p class="note">Steps and settings from the database for {{ p.key }} on {{ sh.line }}.</p>
       {% elif src == "cache" %}<p class="note" style="color:var(--warn)">Database not reachable. Showing the steps saved for this part{% if cacheT %} at {{ cacheT|clock }}{% endif %}.</p>

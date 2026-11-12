@@ -187,8 +187,9 @@ class PartSpec(models.Model):
     ph = models.FloatField()
     sb = models.FloatField()
     tol = models.FloatField(default=0.06)
-    rev = models.CharField(max_length=10, default="A")
+    rev = models.CharField(max_length=20, default="A")
     media = models.CharField(max_length=80, blank=True)
+    drawing_url = models.URLField(max_length=2048, blank=True, default="")   # the drawing file (Admin › Connector builder › Drawing file)
 
     class Meta:
         ordering = ["key"]
@@ -196,7 +197,7 @@ class PartSpec(models.Model):
 
     def as_dict(self):
         return {"key": self.key, "pleats": self.pleats, "len": self.len, "wid": self.wid, "ph": self.ph, "sb": self.sb,
-                "tol": self.tol, "rev": self.rev, "media": self.media}
+                "tol": self.tol, "rev": self.rev, "media": self.media, "url": self.drawing_url}
 
 
 class CostItem(models.Model):

@@ -22,7 +22,7 @@
     <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
     {% if R.mo %}
     <div class="mo"><b>MO {{ R.mo.number }}</b><span>Part {{ R.mo.part }}</span></div>
-    <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
+    <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }} {% include "hmi/k/_open_drawing.html" with p=R.p %}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
     <div class="prog"><div class="lbl"><span>Good parts</span><b class="num">{{ R.good|num }} <small>/ {{ R.mo.qty|num }}</small></b></div><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ R.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ R.pct|floatformat:1 }}%"></i></div></div>
     <div class="metrics">
       <div class="metric"><span>Rate (pcs/min)</span><b class="num">{{ R.rate }} <small>{{ R.lastPpm }} {{ R.unit|default:"P/m" }}</small></b></div>

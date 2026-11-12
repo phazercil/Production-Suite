@@ -354,6 +354,7 @@ GUESS = {"step": ["step", "instruction", "step_text", "description", "text"], "s
          "kind": ["kind", "tool_type", "tooling_type", "category", "type"], "screws": ["screws", "screw", "screw_set"], "helix": ["helix", "helix_set"],
          "sideband": ["sideband", "sidebands", "side_band", "side_band_material"],
          "unit": ["unit", "units", "uom"], "asset": ["asset", "asset_id", "tool", "tool_id"], "image": ["image", "image_url", "photo", "photo_url"],
+         "url": ["url", "link", "drawing_url", "drawing_link", "file_url", "pdf", "s3_url", "aws_url"], "newest": ["updated", "updated_at", "modified", "created", "date"],
          "name": ["name", "setting", "setting_name", "parameter"], "rev": ["rev", "revision", "drawing_rev"], "pleats": ["pleats", "pleat_count", "pleats_per_unit"],
          "len": ["length", "len", "length_in"], "wid": ["width", "wid", "width_in"], "ph": ["pleat_height", "ph"], "sb": ["side_band", "side_band_height", "sb"],
          "tol": ["tol", "tolerance"], "media": ["media", "media_type", "material"], "f_part": ["part", "part_no", "part_number", "item", "sku"],
@@ -368,7 +369,7 @@ def guess_columns(qname, cols):
     for k, names in GUESS.items():
         if k == "f_from" and qname != "changeover_steps":
             continue
-        if k == "f_machine" and qname == "part_spec":
+        if k == "f_machine" and QDEF[qname].get("perPart"):
             continue
         if not k.startswith("f_") and k not in roles:
             continue
@@ -413,6 +414,8 @@ def build_codata_sql(qname, b, kind=None):
         w.append(f"({q(b['f_from'])} = :from_part OR {q(b['f_from'])} IS NULL)")
     w += where_sql(kind, b.get("where"))
     order = f"\nORDER BY {q(b['seq'])}" if D.get("order") and b.get("seq") else ""
+    if b.get("newest") and not sw:   # a row per rev: the newest one first (the suite reads the first row)
+        order = f"\nORDER BY {q(b['newest'])} DESC"
     if sw:   # no rows for the part: no row (not one of blanks)
         order = f"\nGROUP BY {q(b['f_part'])}"
     return f"SELECT {sel}\nFROM {qt(b['table'])}\nWHERE " + "\n  AND ".join(w) + order
@@ -465,7 +468,7 @@ def codata_data(s, request, states=None):
         st = states.get(name) or {}
         b = st.get("bld") or {}
         sv = saved.get(name)
-        q_ = {"name": name, "D": D, "saved": sv, "sql": st.get("sql") if st.get("sql") is not None else (sv.sql if sv else ""),
+        q_ = {"name": name, "D": D, "saved": sv, "perPart": bool(D.get("perPart")), "sql": st.get("sql") if st.get("sql") is not None else (sv.sql if sv else ""),
               "tp": st.get("tp") or (sv.params if sv and isinstance(getattr(sv, "params", None), dict) and sv.params else tp_default),
               "bld": b, "cols": columns_of(T, b.get("table")), "res": st.get("res"), "msg": st.get("msg"),
               "required": ", ".join(r[0] for r in D["roles"] if len(r) > 2 and r[2])}
@@ -569,8 +572,8 @@ def a_connector_save(request, s, p):
     g = next((x for x in gs if x["key"] == key), None)
     if not g:
         return thin.refused(msg["text"])
-    if not r["ok"]:   # keep what was wired, so it can be fixed and saved again
-        g = {**g, "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
+    if not r["ok"]:   # keep what was wired, so it can be fixed and saved again (still unsaved: refreshes leave it alone)
+        g = {**g, "saved": g["state"], "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
                             "table": p.get("table", ""), "map": mp, "where": where, "run2Name": p.get("run2Name", "")}}
     C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
     html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
