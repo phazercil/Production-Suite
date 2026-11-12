@@ -1,3 +1,10 @@
+## What's new in 1.8.8
+
+- **Part specs from an attribute table (Admin › Connector builder)**
+  - Part specs (drawing) can now read a table that keeps one value per row with a code saying which spec it is, like the asset database's `part_attribute` (`value`, with `PAID` telling length, width and so on apart). Wire `value` to each spec, then click ⚑ on it and pick the rows it reads, e.g. `PAID = 30` for Length. Once one spec has its column, the next ⚑ offers the same one, so you only type the codes. The suite folds those rows into one row for the part.
+  - **Get updated drawing** now reads numbers stored as text with units (e.g. "9.25 in"), and skips values with no number in them instead of failing.
+  - Fixed: clicking **Test data** on a box with unsaved wires could let the next automatic refresh wipe them.
+
 ## What's new in 1.8.7
 
 - **Database connection tests (Admin › Connections)**

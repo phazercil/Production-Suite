@@ -1102,6 +1102,15 @@ def ack_notices(p, ctx):
             NoticeRead.objects.get_or_create(notice=n, line=line, defaults={"by": ctx.by, "t": ctx.now})
 
 
+def _spec_number(v):
+    """A drawing value as a number: 12.5, "12.5", "12.5 in" or "±0.06" (attribute tables keep them as text); None if
+    there's no number in it."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"-?\d+(?:\.\d+)?|-?\.\d+", str(v or "").replace(",", ""))
+    return float(m.group()) if m else None
+
+
 @cmd("getDrawing")
 def get_drawing(p, ctx):
     m = line_of(ctx.line)
@@ -1115,7 +1124,7 @@ def get_drawing(p, ctx):
             if rows:
                 o = {str(k).lower(): v for k, v in rows[0].items()}
                 cur = spec_for(key)
-                vals = {f: float(o[f]) for f in ("pleats", "len", "wid", "ph", "sb", "tol") if o.get(f) not in (None, "")}
+                vals = {f: n for f in ("pleats", "len", "wid", "ph", "sb", "tol") if (n := _spec_number(o.get(f))) is not None}
                 PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
                                                                      "rev": str(o.get("rev") or cur["rev"]), "media": str(o.get("media") or cur["media"])})
                 msg = f"Drawing rev {o.get('rev') or cur['rev']} loaded from the asset database ({fmt_t(ctx.now)})."
@@ -2974,7 +2983,10 @@ def _apply_group(g, c, mp, ctx, slot_where=None, run2_name=None):
             name = "s2k_mos"
         else:
             name = g["key"][2:]
-            sql = kadmin.build_codata_sql(name, {"table": table, **mp, "where": filters})
+            sw = connector.clean_slot_where(g["state"].get("where") if slot_where is None else slot_where, keys=set(g.get("filterable") or []))
+            bad = sorted({f["col"] for v in sw.values() for f in v if f["col"] not in sch[table]})
+            need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{x}"' for x in bad) + ".")
+            sql = kadmin.build_codata_sql(name, {"table": table, **mp, "where": filters, "slotWhere": sw})
     except ValueError as e:
         raise Need(str(e))
     db_save({"name": name, "sql": sql, "params": {"source": c.pk}}, ctx)

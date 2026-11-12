@@ -296,7 +296,10 @@
         const sl = sf.closest(".slot"), g = sl.closest(".cgroup"), st = state(g), k = sl.dataset.slot;
         if (!(st.where[k] || []).length) {
           const cols = cardCols(root, st.src), used = new Set(Object.values(st.map));
-          st.where[k] = [{col: cols.find(c => TAGGY.test(c) && !used.has(c)) || cols.find(c => TAGGY.test(c)) || "", val: ""}];
+          // the column this box's other inputs already filter on (PAID for every part spec), else a tag-like one
+          const prev = Object.values(st.where).map(v => (v[0] || {}).col).find(c => c && cols.includes(c));
+          const guess = g.dataset.kind === "machine" ? cols.find(c => TAGGY.test(c) && !used.has(c)) || cols.find(c => TAGGY.test(c)) : "";
+          st.where[k] = [{col: prev || guess || "", val: ""}];
           paint(g);
           const row = g.querySelector(`.sfil[data-for="${CSS.escape(k)}"]`); if (row) row.querySelector(st.where[k][0].col ? ".sfval" : ".sfcol").focus();
         } else { const row = g.querySelector(`.sfil[data-for="${CSS.escape(k)}"]`); if (row) row.querySelector(".sfval").focus(); }
@@ -339,6 +342,13 @@
       if (!from) return;
       e.preventDefault();   // no text selection while drawing a wire
       drag = {from, x0: e.clientX, y0: e.clientY, moved: false, id: e.pointerId, root};
+    });
+    // Test data comes from inside the box's form, and a form the server answered counts as saved (thin.js), which
+    // would let the next automatic refresh replace the box and drop its unsaved wires: a box still differing from
+    // what's saved stays marked unsaved (a Save that went through replaces the box, so it's gone by then)
+    root.addEventListener("htmx:afterRequest", e => {
+      const g = e.detail.elt.closest && e.detail.elt.closest(".cgroup"); if (!g || !g._st) return;
+      setTimeout(() => { if (g.isConnected && JSON.stringify(g._st) !== g._orig) g.dataset.dirty = "1"; }, 0);
     });
     // Save sends this box's wires
     root.addEventListener("htmx:configRequest", e => {

@@ -47,11 +47,24 @@ def _unq(x):
     return x
 
 
+_LIT = r"'((?:[^'\\]|''|\\.)*)'"
+
+
+def _unlit(v):
+    return v.replace("''", "'").replace("\\\\", "\\")
+
+
 def parse_sql(sql):
     """Table and column links back out of SQL the suite's own builders made (any of the three dialects):
-    FROM `t` / "s"."t" / [t], `col` AS role, `col` = :part / :machine / :from_part, `col` = 'value'."""
+    FROM `t` / "s"."t" / [t], `col` AS role, `col` = :part / :machine / :from_part, `col` = 'value', and for a table
+    with one value per row and a tag, MAX(CASE WHEN `tag` = 'value' THEN `col` END) AS role (that input's own rows)."""
     sql = sql or ""
-    out = {"table": "", "map": {}, "fval": "", "where": []}
+    out = {"table": "", "map": {}, "fval": "", "where": [], "slotWhere": {}}
+    for tag, val, col, role in re.findall(rf"MAX\(\s*CASE\s+WHEN\s+({_ID})\s*=\s*{_LIT}\s+THEN\s+({_ID})\s+END\s*\)\s+AS\s+(\w+)", sql, re.I):
+        out["map"][role.lower()] = _unq(col)
+        out["slotWhere"][role.lower()] = [{"col": _unq(tag), "val": _unlit(val)}]
+    sql = re.sub(rf"MAX\(\s*CASE\s+WHEN\s+{_ID}\s*=\s*{_LIT}\s+THEN\s+{_ID}\s+END\s*\)", "", sql, flags=re.I)
+    sql = re.sub(rf"MAX\(\s*({_ID})\s*\)", r"\1", sql, flags=re.I)
     m = re.search(rf"FROM\s+({_ID})(?:\.({_ID}))?", sql, re.I)
     if m:
         out["table"] = _unq(m.group(1)) + ("." + _unq(m.group(2)) if m.group(2) else "")
@@ -59,8 +72,7 @@ def parse_sql(sql):
         out["map"][role.lower()] = _unq(col)
     for col, par in re.findall(rf"({_ID})\s*=\s*:(part|machine|from_part)\b", sql, re.I):
         out["map"]["f_" + {"part": "part", "machine": "machine", "from_part": "from"}[par.lower()]] = _unq(col)
-    out["where"] = [{"col": _unq(c), "val": v.replace("''", "'").replace("\\\\", "\\")}
-                    for c, v in re.findall(rf"({_ID})\s*=\s*'((?:[^'\\]|''|\\.)*)'", sql, re.I)]
+    out["where"] = [{"col": _unq(c), "val": _unlit(v)} for c, v in re.findall(rf"({_ID})\s*=\s*{_LIT}", sql, re.I)]
     if out["where"]:
         out["map"]["fcol"], out["fval"] = out["where"][0]["col"], out["where"][0]["val"]
     return out
@@ -93,19 +105,20 @@ def groups():
                     "dbs": ["machines", "assets"], "db": src.get("db") or "machines", "table": src.get("table", "") if m.feed_type == "db" else "",
                     "slots": _slots(MACHINE_SLOTS, cur), "other": other,
                     "run2Name": (src.get("run2") or {}).get("name", "") if m.feed_type == "db" else "",
-                    "slotWhere": clean_slot_where(src.get("slotWhere")) if m.feed_type == "db" else {},
+                    "slotWhere": clean_slot_where(src.get("slotWhere")) if m.feed_type == "db" else {}, "filterable": sorted(SLOT_FILTERABLE),
                     "src": src.get("source") if m.feed_type == "db" else None,
                     "filters": (src.get("where") or ([{"col": src["keyCol"], "val": src.get("keyVal", "")}] if src.get("keyCol") else []))
                     if m.feed_type == "db" else []})
     sv = saved.get("s2k_mos")
-    p = parse_sql(sv.sql) if sv else {"table": "", "map": {}, "fval": "", "where": []}
+    p = parse_sql(sv.sql) if sv else {"table": "", "map": {}, "fval": "", "where": [], "slotWhere": {}}
     s2k_defs = [(k, lbl, req, "") for k, lbl, req in S2K_ROLES]
     out.append({"key": "s2k", "kind": "s2k", "title": "Open MOs", "sub": "From S2K: what the Scheduler plans", "color": "",
                 "dbs": ["s2k"], "db": "s2k", "table": p["table"], "slots": _slots(s2k_defs, p["map"]), "filters": p["where"],
                 "src": (sv.params or {}).get("source") if sv else None, "custom": bool(sv and not p["table"]), "other": ""})
     for name, D in QDEF.items():
         sv = saved.get(name)
-        p = parse_sql(sv.sql) if sv else {"table": "", "map": {}, "fval": "", "where": []}
+        p = parse_sql(sv.sql) if sv else {"table": "", "map": {}, "fval": "", "where": [], "slotWhere": {}}
+        keys = query_filterable(name)
         defs = [("f_part", "Part number (to look the part up)", True, "")]
         if name != "part_spec":
             defs.append(("f_machine", "Machine (blank rows = every machine)", False, ""))
@@ -114,7 +127,8 @@ def groups():
         defs += [(r[0], r[1], bool(len(r) > 2 and r[2]), "") for r in D["roles"]]
         out.append({"key": f"q:{name}", "kind": "query", "title": D["title"], "sub": D["help"], "color": "", "dbs": ["assets"], "db": "assets",
                     "table": p["table"], "slots": _slots(defs, p["map"]), "filters": p["where"],
-                    "src": (sv.params or {}).get("source") if sv else None, "custom": bool(sv and not p["table"]), "other": ""})
+                    "src": (sv.params or {}).get("source") if sv else None, "custom": bool(sv and not p["table"]), "other": "",
+                    "filterable": sorted(keys), "slotWhere": clean_slot_where(p["slotWhere"], keys=keys)})
     for g in out:
         req = [s for s in g["slots"] if s["req"]]
         done = [s for s in g["slots"] if s["col"]]
@@ -129,13 +143,22 @@ def groups():
 SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "run2", "errCode", "errText"}   # (not "Newest row")
 
 
-def clean_slot_where(raw, cols=None):
-    """Each machine input's own rows: {input: [{"col", "val"}]} for a table that keeps one value per row with a tag
-    (e.g. tag = Salvatore_Speed for the speed and tag = Salvatore_Count for the count, both in the value column).
-    Inputs with no filter are left out. cols: the table's columns, to drop any it doesn't have."""
+def query_filterable(name):
+    """The inputs of a database query that can each read their own rows. Part specs: a table that keeps one value
+    per row with a code saying which spec it is (e.g. part_attribute: value, with PAID 30 = length, 31 = width)."""
+    from .snapshot import QDEF
+    return {r[0] for r in QDEF[name]["roles"]} if name == "part_spec" else set()
+
+
+def clean_slot_where(raw, cols=None, keys=None):
+    """Each input's own rows: {input: [{"col", "val"}]} for a table that keeps one value per row with a tag
+    (e.g. tag = Salvatore_Speed for the speed and tag = Salvatore_Count for the count, both in the value column; or
+    PAID = 30 for a part's length and PAID = 31 for its width). Inputs with no filter are left out. cols: the
+    table's columns, to drop any it doesn't have. keys: the inputs that can have one (default: a machine's)."""
+    keys = SLOT_FILTERABLE if keys is None else keys
     out = {}
     for k, fs in (raw or {}).items() if isinstance(raw, dict) else []:
-        if k not in SLOT_FILTERABLE or not isinstance(fs, list):
+        if k not in keys or not isinstance(fs, list):
             continue
         keep = [{"col": str(f.get("col")), "val": str(f.get("val") if f.get("val") is not None else "").strip()[:120]}
                 for f in fs if isinstance(f, dict) and f.get("col") and (cols is None or f.get("col") in cols)]
@@ -249,7 +272,8 @@ def test_data(g, card, mp, rows=5, slot_where=None):
                 sql = kadmin.s2k_build_sql({"table": table, **mp, "where": filters}, kind)
                 note = "The open MOs the Scheduler would get (first rows)."
             else:
-                sql = kadmin.build_codata_sql(g["key"][2:], {"table": table, **mp, "where": filters}, kind)
+                sql = kadmin.build_codata_sql(g["key"][2:], {"table": table, **mp, "where": filters,
+                                                             "slotWhere": clean_slot_where(slot_where, keys=set(g.get("filterable") or []))}, kind)
                 from plant.models import MO
                 mo = MO.objects.filter(status="OPEN").exclude(part="").order_by("due", "id").first()
                 m = Machine.objects.filter(stage="s1", active=True).order_by("sort", "id").first()
@@ -259,7 +283,7 @@ def test_data(g, card, mp, rows=5, slot_where=None):
             raise integrations.ConnError(str(e))
     labels = {k: slots[k]["label"].split(" (")[0] for k in slots}
     now = []
-    sw = {k: v for k, v in clean_slot_where(slot_where).items() if mp.get(k)}
+    sw = {k: v for k, v in clean_slot_where(slot_where, keys=set(g.get("filterable") or [])).items() if mp.get(k)}
     if g["kind"] == "machine" and mp.get("orderCol") and mp.get("ppm"):
         # what the suite reads each minute: per input, the newest row of its own rows (the card's filter, and the
         # input's own filter when the table keeps one value per row with a tag)
@@ -274,7 +298,7 @@ def test_data(g, card, mp, rows=5, slot_where=None):
         for k, v in machinedata.read_slots(m).items():
             now.append({"label": labels.get(k, k), "col": v["col"], "own": sw.get(k) or [], "value": v["value"],
                         "newest": v["newest"], "err": v["err"]})
-    if sw:   # rows of a tag table mix every input, so the plain newest rows aren't shown
+    if sw and g["kind"] == "machine":   # rows of a tag table mix every input, so the plain newest rows aren't shown
         return {"cols": [], "rows": [], "now": now, "note": f"Each input reads the newest row of its own rows, by {mp.get('orderCol', '?')}.",
                 "ms": 0, "card": card.title, "filters": card.filters or [], "sql": "", "tags": True}
     r = integrations.run_saved(sql, params, limit=rows if g["kind"] == "machine" else 10, db=db)
