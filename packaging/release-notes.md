@@ -16,6 +16,8 @@
 - **Part Info (Operator Kiosk, under Schedule):** the drawing and the filter's dimensions, each with its tolerance and the smallest and largest it may measure, for the part running now. You can switch to the next parts on the line's schedule or type any filter number. It has **Open drawing** and **Get updated drawing**.
 - **No MO? Run by filter number:** when a line has no MO to run, Change over › Next MO has **No MO? Run by filter number - Supervisor**. A supervisor (using the Supervisor button's PIN if the operator can't) enters the filter number, how many if known, and why. It runs as an MO of its own, numbered NOMO-<line>-<date>-<time>, so counts, QC and reports work as usual. The planners are told and it's kept in the audit log. It needs the new **Run without an MO** permission (maintenance, shift leads and Admins by default).
 - **Downtime alerts:** each person has an **On / Off** switch in Admin › Alerts.
+- **S2K open MOs from the S2K API:** Admin › Connections › S2K schedule › Read open MOs from › **The S2K API**. Enter the address, Company and Location (sent as `company=` and `location=`), and the token, which is kept in the server's `.env` and sent as `X-Api-Token`. **Test** shows what it sends. It's one opt-in internet connection, used only for that address. Each open MO and sequence comes in as an MO (e.g. 318555-002) with the quantity still due and the current due date.
+- **S2K process, MFG and hot flag removed:** which line runs an MO is set in the Scheduler, so the S2K query builder and the Schedule page no longer show them.
 
 ## What's new in 1.8.9
 

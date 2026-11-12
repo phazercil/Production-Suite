@@ -164,6 +164,41 @@ def assets_ready():
     return "assets" in connections.databases
 
 
+def s2k_api_ready():
+    liveconfig.refresh()
+    s = settings.SUITE
+    return bool(s.get("S2K_API_URL") and s.get("S2K_API_TOKEN"))
+
+
+def s2k_api_url(base=None, company=None, location=None):
+    """The open-MO address with this plant's company and location filters (replacing any already on it)."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    s = settings.SUITE
+    base = s.get("S2K_API_URL", "") if base is None else base
+    company = s.get("S2K_API_COMPANY", "") if company is None else company
+    location = s.get("S2K_API_LOCATION", "") if location is None else location
+    u = urlsplit(base)
+    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k not in ("company", "location")]
+    q += [(k, v) for k, v in (("company", company), ("location", location)) if v]
+    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), ""))
+
+
+def s2k_api_rows(base=None, company=None, location=None, token=None):
+    """Open MOs from the S2K API: [{"mo", "item", "qty", "due"}], one row per open MO and sequence. HTTPS only, with
+    the token from .env in X-Api-Token. Choosing this source is the opt-in for this one internet address."""
+    liveconfig.refresh()
+    url = s2k_api_url(base, company, location)
+    if not url.lower().startswith("https://"):
+        raise ConnError("The S2K API address must start with https://.")
+    tok = settings.SUITE.get("S2K_API_TOKEN", "") if token is None else token
+    if not tok:
+        raise ConnError("The S2K API token isn't set (Admin › Connections › S2K schedule).")
+    rows = _request(url, headers={"X-Api-Token": tok}, timeout=30, public_ok=True)
+    if not isinstance(rows, list):
+        raise ConnError("The S2K API did not send a list of MOs.")
+    return rows
+
+
 def s2k_db_ready():
     liveconfig.refresh()
     return "s2k" in connections.databases
@@ -353,6 +388,10 @@ def test(key):
                 return set_conn(key, True, f"Connected, {len(schema('s2k')['tables'])} tables · no query saved yet")
             rows, _ = s2k_db_rows(q.sql)
             return set_conn(key, True, f"{len(rows)} open MO rows (read-only)")
+        if key == "s2k" and s.get("s2kSource") == "api":
+            if not s2k_api_ready():
+                return set_conn(key, False, "S2K API not set up (address and token)")
+            return set_conn(key, True, f"{len(s2k_api_rows())} open MO rows from the S2K API")
         if key in ("s2k", "people"):
             url = s["s2kUrl" if key == "s2k" else "peopleUrl"]
             if not url:

@@ -1350,6 +1350,8 @@ def s2k_rows():
         if truncated:
             log.warning("S2K query returned more than 5000 rows; only the first 5000 were read")
         return rows
+    if s.get("s2kSource") == "api":
+        return integrations.s2k_api_rows()
     if not s.get("s2kUrl"):
         raise integrations.ConnError("Set the S2K export URL in Admin › Connections first.")
     rows = integrations.get_json(s["s2kUrl"])
@@ -1359,7 +1361,8 @@ def s2k_rows():
 
 
 def s2k_on(s):
-    return bool(s.get("s2kUrl")) if s.get("s2kSource") != "db" else integrations.s2k_db_ready()
+    src = s.get("s2kSource")
+    return integrations.s2k_db_ready() if src == "db" else integrations.s2k_api_ready() if src == "api" else bool(s.get("s2kUrl"))
 
 
 @cmd("s2kPull", "lead")
@@ -2371,7 +2374,7 @@ def setting_set(p, ctx):
         except netsafety.NotPrivate as e:
             raise Need(str(e))
     if k == "s2kSource":
-        need(v in ("url", "db"), "Unknown S2K source.")
+        need(v in ("url", "db", "api"), "Unknown S2K source.")
     if k == "paycom.pinFrom":
         need(v in ("code", "badge", "none"), "Unknown PIN source.")
     if k == "kiosk.layout":
@@ -2484,6 +2487,23 @@ def conn_save(p, ctx):
                    + (" (outside the plant network, allowed by this login)" if v["internet"] else ""))
         return {"msg": f"{what} saved. {r['msg']}" + (" Note: this login is allowed to change data; a read-only login is safer." if r.get("writable") else ""),
                 "data": liveconfig.info()}
+    if group == "s2kapi":
+        from urllib.parse import urlsplit
+        url = str(f.get("url") or "").strip()
+        u = urlsplit(url)
+        need(u.scheme == "https" and u.hostname and not (u.username or u.password) and len(url) <= 500,
+             "Type the S2K API address, starting with https:// (e.g. https://api.aps.dev/datalake/api/open-mos/).")
+        comp, loc = str(f.get("company") or "").strip(), str(f.get("location") or "").strip()
+        need(re.fullmatch(r"[A-Za-z0-9_-]{1,20}", comp), "Type the company (e.g. 1).")
+        need(re.fullmatch(r"[A-Za-z0-9_-]{1,20}", loc), "Type the location (e.g. 07).")
+        token = str(f.get("token") or "").strip()
+        saved = liveconfig.info()["s2kapi"]
+        need(token or saved["hasToken"], "Paste the S2K API token.")
+        need(not token or TEXT_RE.match(token), "That token has a character the settings file can't hold.")
+        base = url.split("?")[0]
+        liveconfig.save({"S2K_API_URL": base, "S2K_API_COMPANY": comp, "S2K_API_LOCATION": loc, **({"S2K_API_TOKEN": token} if token else {})})
+        audit(ctx, f"S2K API set to {base} (company {comp}, location {loc})" + (", new token" if token else ""))
+        return {"msg": "S2K API saved. Test it to see the open MOs it sends.", "data": liveconfig.info()}
     if group == "paycom":
         sid = str(f.get("sid") or "").strip()
         token = str(f.get("token") or "")
@@ -2549,7 +2569,7 @@ def conn_remove(p, ctx):
     keys = {"assets": ["ASSET_DB_HOST", "ASSET_DB_PORT", "ASSET_DB_NAME", "ASSET_DB_USER", "ASSET_DB_PASSWORD", "ASSET_DB_INTERNET", "ASSET_DB_KIND"],
             "s2k": ["S2K_DB_HOST", "S2K_DB_PORT", "S2K_DB_NAME", "S2K_DB_USER", "S2K_DB_PASSWORD", "S2K_DB_INTERNET", "S2K_DB_KIND"],
             "machines": ["MACHINE_DB_HOST", "MACHINE_DB_PORT", "MACHINE_DB_NAME", "MACHINE_DB_USER", "MACHINE_DB_PASSWORD", "MACHINE_DB_INTERNET", "MACHINE_DB_KIND"],
-            "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
+            "paycom": ["PAYCOM_SID", "PAYCOM_TOKEN"], "s2kapi": ["S2K_API_URL", "S2K_API_COMPANY", "S2K_API_LOCATION", "S2K_API_TOKEN"], "feed": ["FEED_KEY"], "grafana": ["GRAFANA_TOKEN"],
             "github": ["GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK"],
             "influx": ["INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET"]}.get(group)
     need(keys, "Unknown connection.")

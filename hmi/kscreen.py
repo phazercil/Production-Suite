@@ -607,15 +607,13 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
                       for d in days]
     rows = list(MO.objects.select_related("line").all() if status == "ALL" else MO.objects.select_related("line").filter(status=status))
     keys = {"added": lambda m: m.added or date.min, "mo": lambda m: m.number, "due": lambda m: m.due or date.max, "qty": lambda m: m.qty,
-            "item": lambda m: m.part, "process": lambda m: m.process or "", "mfg": lambda m: m.mfg or "", "produced": lambda m: m.produced,
+            "item": lambda m: m.part, "produced": lambda m: m.produced,
             "scrap": lambda m: m.scrap, "final": lambda m: m.produced - m.scrap, "status": lambda m: m.status, "line": lambda m: m.line.name if m.line else ""}
     if sort and sort.lstrip("-") in keys:
         rows.sort(key=keys[sort.lstrip("-")], reverse=sort.startswith("-"))
     today = _local_ms(t_ms).date()
-    out["rows"] = [{"m": m, "late": m.status == "OPEN" and m.due and m.due < today, "final": m.produced - m.scrap,
-                    "process": m.process or (m.line.code if m.line else "")} for m in rows]
-    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("process", "Process"),
-                   ("mfg", "MFG/OUT"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Line")]
+    out["rows"] = [{"m": m, "late": m.status == "OPEN" and m.due and m.due < today, "final": m.produced - m.scrap} for m in rows]
+    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Line")]
     return out
 
 

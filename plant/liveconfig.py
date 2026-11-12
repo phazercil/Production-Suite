@@ -20,7 +20,7 @@ from .envfile import read_env, write_env
 
 DB_GROUPS = {"assets": ("ASSET_DB", "The asset database"), "s2k": ("S2K_DB", "The S2K database"),
              "machines": ("MACHINE_DB", "The machine data database")}
-SUITE_KEYS = ("PAYCOM_SID", "PAYCOM_TOKEN", "FEED_KEY", "ALERT_SMTP_HOST", "ALERT_SMTP_PORT", "ALERT_SMTP_SECURITY", "ALERT_SMTP_USER",
+SUITE_KEYS = ("S2K_API_URL", "S2K_API_COMPANY", "S2K_API_LOCATION", "S2K_API_TOKEN", "PAYCOM_SID", "PAYCOM_TOKEN", "FEED_KEY", "ALERT_SMTP_HOST", "ALERT_SMTP_PORT", "ALERT_SMTP_SECURITY", "ALERT_SMTP_USER",
               "ALERT_SMTP_PASSWORD", "ALERT_FROM", "ALERT_SMTP_INTERNET", "TWILIO_SID", "TWILIO_TOKEN", "TWILIO_FROM", "GRAFANA_TOKEN",
               "INFLUX_URL", "INFLUX_VERSION", "INFLUX_ORG", "INFLUX_TOKEN", "INFLUX_USER", "INFLUX_DB", "INFLUX_WRITE_BUCKET",
               "GITHUB_UPDATES_REPO", "GITHUB_UPDATES_TOKEN", "GITHUB_UPDATES_CHECK")
@@ -91,6 +91,8 @@ def info():
         out[group] = {"on": bool(v.get(f"{prefix}_HOST")), "host": v.get(f"{prefix}_HOST", ""), "port": v.get(f"{prefix}_PORT", "3306") or "3306",
                       "name": v.get(f"{prefix}_NAME", ""), "user": v.get(f"{prefix}_USER", ""), "hasPassword": bool(v.get(f"{prefix}_PASSWORD")),
                       "internet": v.get(f"{prefix}_INTERNET") == "1", "kind": v.get(f"{prefix}_KIND", "") or ("mysql" if v.get(f"{prefix}_HOST") else "")}
+    out["s2kapi"] = {"on": bool(v.get("S2K_API_URL") and v.get("S2K_API_TOKEN")), "url": v.get("S2K_API_URL", ""),
+                     "company": v.get("S2K_API_COMPANY", ""), "location": v.get("S2K_API_LOCATION", ""), "hasToken": bool(v.get("S2K_API_TOKEN"))}
     out["paycom"] = {"on": bool(v.get("PAYCOM_SID") and v.get("PAYCOM_TOKEN")), "sid": v.get("PAYCOM_SID", ""), "hasToken": bool(v.get("PAYCOM_TOKEN"))}
     out["feed"] = {"on": bool(v.get("FEED_KEY"))}
     out["smtp"] = {"on": bool(v.get("ALERT_SMTP_HOST")), "host": v.get("ALERT_SMTP_HOST", ""), "port": v.get("ALERT_SMTP_PORT", "") or "25",
