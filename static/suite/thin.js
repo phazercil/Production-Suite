@@ -196,6 +196,9 @@
     document.querySelectorAll("[data-since]").forEach(el => { el.textContent = fmt(t - +el.dataset.since, "timer"); });
   }
   setInterval(tick, 1000); tick();
+  // milliseconds since a moment (the kiosk banner: since the last machine data pull)
+  function tickMs() { const t = now(); document.querySelectorAll("[data-ms-since]").forEach(el => { el.textContent = Math.max(0, Math.round(t - +el.dataset.msSince)); }); }
+  setInterval(tickMs, 100); tickMs();
 
   // ------------------------------------------------------------ wall screens stay awake where the browser allows it
   if (body.dataset.awake && navigator.wakeLock) {

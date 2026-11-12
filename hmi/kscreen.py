@@ -318,7 +318,10 @@ class Screen:
         w = shift_at(ms(self.t))
         from .snapshot import server_info
         srv = server_info()
-        return {"parts": parts, "state": state, "shiftName": w["name"] if w else "Off shift",
+        from .models import LineState
+        q = LineState.objects.filter(machine=self.machine) if self.machine else LineState.objects.all()
+        last = max((x for x in q.values_list("last_tick", flat=True) if x), default=None)   # the last machine data pull
+        return {"pulled": ms(last) if last else None, "parts": parts, "state": state, "shiftName": w["name"] if w else "Off shift",
                 "operator": (sh.user_name if sh else (self.me.name if self.me else "")),
                 "storeOk": srv["storeOk"], "storeErr": srv["storeErr"], "demo": self.st.demo, "admin": self.is_lead, "sysadmin": self.is_admin,
                 "choose": [m.name for m in self.active_lines] if not self.lock and len(self.active_lines) > 1 else []}

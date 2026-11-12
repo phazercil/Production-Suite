@@ -572,3 +572,4 @@ table.xl tr.grouprow td{text-align:left;background:var(--panel-2,rgba(255,255,25
 .daypick .day.on{background:var(--accent,#6E9FE8);border-color:var(--accent,#6E9FE8);color:#0b1220}
 .daypick .day:disabled{cursor:default;opacity:.7}
 .panel.variant{border-left:4px solid var(--accent,#6E9FE8);display:flex;flex-direction:column;gap:8px;background:rgba(255,255,255,.02)}
+.banner .pullage{font:500 13px var(--f-mono,"IBM Plex Mono",monospace);color:var(--ink-2,#A7AFB8);min-width:6ch;text-align:right;font-variant-numeric:tabular-nums}
