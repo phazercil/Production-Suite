@@ -1,0 +1,128 @@
+# The installer zip, Windows signing and scheduled tasks, and the Linux install on Rocky 9 and Fedora 44. They take
+# the most Actions minutes (Windows minutes count double), so they run only on pull requests that change how the
+# suite is packaged or installed, or by hand (Actions › Install checks › Run workflow).
+name: Install checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "packaging/**"
+      - "!packaging/release-notes.md"   # (almost every pull request adds to the release notes)
+      - "requirements*.txt"
+      - "suite/settings.py"
+      - "suite/version.py"
+      - "manage.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Installer and screens
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Screen scripts have no syntax errors
+        run: |
+          set -e
+          for f in $(git ls-files 'static/**/*.js' 'labor/**/*.js'); do node --check "$f"; done
+      - name: PowerShell scripts parse (installer, updater window, admin program)
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in (git ls-files '*.ps1')) {
+            $errs = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errs)
+            foreach ($e in $errs) { Write-Host "::error file=$f,line=$($e.Extent.StartLineNumber)::$($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+      - name: Installer zip builds (also checks the version numbers match)
+        run: python packaging/build.py
+
+  windows:
+    name: Windows (signing and scheduled tasks)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sign a build with a test certificate, and register the scheduled tasks
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\ci\windows-check.ps1
+
+  linux:
+    name: Linux (${{ matrix.name }} install with Apache)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Rocky 9
+            os: el9
+          - name: Fedora 44
+            os: fedora
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the Linux package
+        run: python packaging/build.py
+      - name: Start ${{ matrix.name }} with systemd
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" = fedora ]; then
+            # Fedora's container image has no systemd: add it once, then boot that image
+            for img in docker.io/library/fedora:44 registry.fedoraproject.org/fedora:44; do
+              if docker pull -q "$img"; then BASE="$img"; break; fi
+            done
+            [ -n "$BASE" ] || { echo "No Fedora 44 image"; exit 1; }
+            docker run --name prep "$BASE" bash -c "dnf -y -q install systemd procps-ng && dnf clean all"
+            docker commit prep fedora-init >/dev/null
+            IMG=fedora-init; INIT=/usr/sbin/init
+          else
+            for img in docker.io/rockylinux/rockylinux:9-ubi-init docker.io/almalinux/9-init; do
+              if docker pull -q "$img"; then IMG="$img"; break; fi
+            done
+            INIT=/sbin/init
+          fi
+          echo "Using $IMG"
+          docker run -d --name el9 --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw -v "$PWD:/src:ro" "$IMG" $INIT
+          for i in $(seq 1 30); do docker exec el9 systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded' && break; sleep 2; done
+          docker exec el9 cat /etc/os-release | head -3
+      - name: Install with install.sh and check it through Apache
+        run: docker exec el9 bash /src/packaging/ci/linux-check.sh
+      - name: From outside the plant network, Apache refuses (even a faked address)
+        run: |
+          IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' el9)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://$IP/api/version")
+          echo "from the GitHub machine to $IP: $code"; [ "$code" = 403 ]
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 192.168.100.5' "http://$IP/operator/")
+          echo "same, claiming 192.168.100.5: $code"; [ "$code" = 403 ]
+          code=$(curl -s -o /dev/null -w '%{http_code}' "http://$IP:8008/api/version" || true)
+          echo "straight to the suite's own port 8008: $code"; [ "$code" = 000 ]
+      - name: Logs if something failed
+        if: failure()
+        run: |
+          docker exec el9 tail -80 /var/log/production-suite-install.log || true
+          docker exec el9 journalctl -u production-suite-web -u production-suite-ticker -u httpd -u production-suite-network -u production-suite-updater --no-pager -n 80 || true
+          docker exec el9 cat /etc/httpd/conf.d/production-suite-allow.inc || true
