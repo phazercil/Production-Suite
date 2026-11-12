@@ -1,3 +1,10 @@
+## What's new in 1.8.7
+
+- **Database connection tests (Admin › Connections)**
+  - Fixed: repeated **Test connection** clicks could make a MariaDB server block the suite's server ("Packet sequence number wrong - got 1 expected 0"). Each test opened extra connections to see what kind of database it was and closed them without signing in, which MariaDB counts toward blocking a host. On the standard ports (3306, 1433, 5432) the test now just signs in.
+  - A blocked server now says so plainly, with how to unblock it (`mariadb-admin flush-hosts` on the database server).
+  - Fixed: the page no longer jumps down and loses its place after **Test connection** (or any other part of a page that's sent again); it stays where it was, with the button still focused.
+
 ## What's new in 1.8.6
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).

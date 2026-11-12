@@ -109,3 +109,28 @@ class OutsideConnectionTests(TestCase):
             r = test_read_only("sql1.example", "1433", "Plant", "ro", "pw", "The S2K database", internet=True)
         self.assertEqual((r["ok"], r["kind"]), (True, "mssql"))
         self.assertEqual(t.call_args[0][0], "mssql")
+
+    def test_standard_ports_are_not_probed(self):
+        """Each probe is a connection closed without signing in, which MariaDB counts toward blocking the host."""
+        from plant.dbcheck import test_read_only
+        with mock.patch.object(dbkinds, "detect") as det, mock.patch("plant.dbcheck._test_mysql", return_value={"ok": True, "msg": "fine"}):
+            r = test_read_only("db1.example", "3306", "pim", "ro", "pw", "The asset database", internet=True)
+        det.assert_not_called()
+        self.assertEqual(r["kind"], "mysql")
+        with mock.patch.object(dbkinds, "detect", return_value="mysql") as det, mock.patch("plant.dbcheck._test_mysql", return_value={"ok": True, "msg": "fine"}):
+            test_read_only("db1.example", "3399", "pim", "ro", "pw", "The asset database", internet=True)
+        det.assert_called_once()                                  # an unusual port: looked at once
+
+    def test_a_blocked_host_is_explained(self):
+        from plant.dbcheck import explain
+        for e in (Exception(1129, "Host '10.0.0.5' is blocked because of many connection errors"),
+                  Exception("Packet sequence number wrong - got 1 expected 0")):   # what PyMySQL says for it (MDEV-21252)
+            msg, code = explain(e, 3306)
+            self.assertEqual(code, 1129)
+            self.assertIn("flush-hosts", msg)
+
+    def test_an_unreachable_server_is_not_called_the_wrong_kind(self):
+        import socket
+        with mock.patch.object(socket, "create_connection", side_effect=ConnectionRefusedError(111, "refused")):
+            with self.assertRaises(OSError):
+                dbkinds.detect("db1.example", 3399, timeout=1)
