@@ -78,8 +78,8 @@ def extra_breaks(start, end):
         while d <= min(x.last_day, b):
             s = timezone.make_aware(datetime(d.year, d.month, d.day)) + timedelta(minutes=hm(x.start))
             e = s + timedelta(minutes=x.minutes)
-            if s < end and e > start:
-                out.append({"id": x.pk, "s": s, "e": e, "label": x.label or "Break", "machines": ids})
+            if s < end and e > start and not (x.cancelled_at and s >= x.cancelled_at):   # (a cancelled break's earlier times stay)
+                out.append({"id": x.pk, "s": s, "e": e, "label": x.label or "Break", "machines": ids, "by": x.by})
             d += timedelta(days=1)
     return sorted(out, key=lambda w: w["s"])
 

@@ -541,7 +541,7 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
     from plant.util import local
     today = local(s.t).date()
     up = []
-    for x in ExtraBreak.objects.filter(models.Q(until__gte=today) | models.Q(until__isnull=True, day__gte=today)).prefetch_related("machines")[:30]:
+    for x in ExtraBreak.objects.filter(models.Q(until__gte=today) | models.Q(until__isnull=True, day__gte=today)).filter(cancelled_at__isnull=True).prefetch_related("machines")[:30]:
         from suite.templatetags.suite import clock
         up.append({"x": x, "lines": ", ".join(m.name for m in x.machines.all()) or "Every line",
                    "from": clock(_dt_hm(x.start)), "to": clock(_dt_hm(x.start) + timedelta(minutes=x.minutes))})
@@ -692,7 +692,7 @@ def downtime_page(s):
     by = Counter()
     for d in mine:
         by[d.reason or "Not entered"] += d.minutes or 0
-    top = max(by.values()) if by else 1
+    top = (max(by.values()) if by else 0) or 1   # (stops of 0 minutes: no division by zero)
     rows = downtime_rows(s, mine)
     for i, x in enumerate(rows):
         x["letter"] = chr(65 + i % 26)
@@ -795,7 +795,7 @@ def report_for(sh, need_reason=0):
     by = Counter()
     for d in downs:
         by[d.reason or "Not entered"] += d.minutes or 0
-    top = max(by.values()) if by else 1
+    top = (max(by.values()) if by else 0) or 1   # (stops of 0 minutes: no division by zero)
     st = shift_stats(sh)
     person = Person.objects.filter(pk=sh.person_id).first() if sh.person_id else None
     from .models import ChangeoverPiece
@@ -805,7 +805,20 @@ def report_for(sh, need_reason=0):
         ps = list(ChangeoverPiece.objects.filter(co_id=cid).order_by("start"))
         cos.append({"new": ps[-1].new_mo, "old": ps[0].old_mo, "mins": sum(x.minutes for x in ps), "pieces": ps,
                     "finished": any(x.ended == "finished" for x in ps)})
-    r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
+    # every planned stretch in the shift: the shift's own lunch and breaks, start-up, and breaks added from Schedule a break
+    from plant.util import extra_breaks
+    from .engine import planned_windows
+    end_t = sh.end or now()
+    added = [w for w in extra_breaks(sh.start, end_t) if w["machines"] is None or sh.machine_id in w["machines"]]
+    breaks = []
+    for a0, b0, kind in planned_windows(sh, kinds=True):
+        if kind == "No shift scheduled" or b0 <= sh.start or a0 >= end_t:
+            continue
+        x = next((w for w in added if w["label"] == kind and w["s"] < b0 and w["e"] > a0), None)
+        a0, b0 = max(a0, sh.start), min(b0, end_t)
+        breaks.append({"label": kind, "s": a0, "e": b0, "mins": round((b0 - a0).total_seconds() / 60),
+                       "src": f"Scheduled by {x['by']}" if x and x.get("by") else "Scheduled" if x else "Shift schedule"})
+    r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "breaks": breaks, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
          "scrap": sum(q.scrap for q in qc) + sum(m["scrap"] or 0 for m in mos), "rolls": rolls, "mos": mos,
          "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
          "tickets": [{"t": t, "pics": npics.get(t.id, 0)} for t in tickets], "notes": notes, "needReason": need_reason, "downs": downs, "qcList": sorted(qc, key=lambda q: q.t)}

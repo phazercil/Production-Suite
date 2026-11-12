@@ -1464,7 +1464,7 @@ def extra_break_add(p, ctx):
 @cmd("extraBreakDel", "lists.edit")
 def extra_break_del(p, ctx):
     from plant.models import ExtraBreak
-    x = ExtraBreak.objects.filter(pk=p.get("id")).prefetch_related("machines").first()
+    x = ExtraBreak.objects.filter(pk=p.get("id"), cancelled_at__isnull=True).prefetch_related("machines").first()
     need(x, "That break is already gone.")
     names = [m.name for m in x.machines.all()]
     audit(ctx, f"Removed extra break \"{x.label}\" {x.start} on {x.day}")
@@ -1472,7 +1472,15 @@ def extra_break_del(p, ctx):
     from datetime import datetime as _dt
     at = clock(_dt(2000, 1, 1, int(x.start[:2]), int(x.start[3:5])))
     notify(f"{x.label} at {at} on {x.day:%a} {x.day.month}/{x.day.day} was cancelled by {ctx.by}", "break", lines=names or None, go="schedule")
-    x.delete()
+    from datetime import datetime as _dtm
+
+    from django.utils import timezone as _tz
+    first = _tz.make_aware(_dtm(x.day.year, x.day.month, x.day.day)) + timedelta(minutes=int(x.start[:2]) * 60 + int(x.start[3:5]))
+    if first > ctx.now:
+        x.delete()   # it never happened: nothing to keep
+    else:            # some of its times are past: they stay on record (and stops then stay planned); the rest are off
+        x.cancelled_at, x.cancelled_by = ctx.now, ctx.by
+        x.save(update_fields=["cancelled_at", "cancelled_by"])
     refresh_schedule(f"{ctx.by} (extra break removed)")
     return {"msg": "Break removed"}
 
