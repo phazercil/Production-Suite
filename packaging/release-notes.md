@@ -1,5 +1,7 @@
 ## What's new in 1.8.6
 
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
 - **Run screen speed chart**
   - Operators see their whole shift, start to end, plus the last half of the shift before it (shaded), with the shift's start marked and a line at the current time.
   - Shift leads and admins (Shift lead / Admin mode) see the whole day, midnight to midnight, with every shift's start marked.
