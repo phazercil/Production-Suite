@@ -47,7 +47,11 @@ def qdef():
     d = copy.deepcopy(QDEF)
     roles = d["part_spec"]["roles"]
     i = next((n for n, r in enumerate(roles) if r[0] == "uom"), len(roles))
-    d["part_spec"]["roles"] = roles[:i] + [[f["key"], f["label"]] for f in qc.features()] + roles[i:]
+    try:
+        feats = qc.features()
+    except Exception:  # noqa: BLE001 - no settings to read (no database): the standard roles
+        feats = []
+    d["part_spec"]["roles"] = roles[:i] + [[f["key"], f["label"]] for f in feats] + roles[i:]
     return d
 
 
