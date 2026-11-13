@@ -7,18 +7,18 @@
   {% if handoff %}<div class="panel" style="border-color:var(--accent)"><b>Passed over by {{ handoff.by|default:"the last operator" }}</b>{% if handoff.shift %} ({{ handoff.shift }}){% endif %} at {{ handoff.at }}{% if handoff.note %}<br><span>“{{ handoff.note }}”</span>{% endif %}</div>{% endif %}
   {% if canPass and nearEnd %}<div class="panel" style="border-color:var(--warn)"><b>{{ shiftName|default:"Your shift" }} ends at {{ shiftEnd }}.</b> Not finished? <button type="button" class="btn warn sm" hx-get="/kiosk/m/copass" hx-target="#modal" hx-swap="innerHTML">Pass over</button> hands it to the next shift, with your time and steps kept.</div>{% endif %}
   {% if step == 1 %}
-    {% if mo %}<div class="panel"><dl class="kv"><dt>Ending MO</dt><dd>{{ mo.number }} · {{ mo.part }}</dd><dt>MO timer</dt><dd class="num" {% if sh.mo_start %}data-since="{{ sh.mo_start|ms }}"{% endif %}>{{ moTimer }}</dd><dt>Made this run</dt><dd class="num">{{ sh.mo_count|num }}</dd><dt>Total produced</dt><dd class="num">{{ mo.produced|num }} of {{ mo.qty|num }}</dd></dl></div>
+    {% if mo %}<div class="panel"><dl class="kv"><dt>Ending MO</dt><dd>{{ mo.floor_number }} · {{ mo.part }}</dd><dt>MO timer</dt><dd class="num" {% if sh.mo_start %}data-since="{{ sh.mo_start|ms }}"{% endif %}>{{ moTimer }}</dd><dt>Made this run</dt><dd class="num">{{ sh.mo_count|num }}</dd><dt>Total produced</dt><dd class="num">{{ mo.produced|num }} of {{ mo.qty|num }}</dd></dl></div>
     <div class="grid2"><label class="f">Final count for this run<input type="number" name="qty" value="{{ sh.mo_count }}" autofocus></label><label class="f">Scrap<input type="number" name="scrap" value="0" min="0"></label></div>
     <label class="chk"><input type="hidden" name="close:b" value="0"><input type="checkbox" name="close:b" value="1" {% if close %}checked{% endif %}> Close this MO (order complete)</label>
     {% else %}<p>No MO is running. Go on to pick the next one.</p>{% endif %}
   {% elif step == 2 %}
     <div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div>
     <label class="f">Scan next MO<input type="text" name="mo" autofocus placeholder="Scan or type MO number" value="{{ mo_pick }}"></label>
-    {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/changeover?refresh=1&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.number }} · {{ m.part }}</button> {% endfor %}</div>
+    {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/changeover?refresh=1&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.floor_number }} · {{ m.part }}</button> {% endfor %}</div>
     {% else %}<p class="note">Nothing else scheduled on this line. Scan an MO, or a supervisor can run it by filter number.</p>{% endif %}
     <div><button type="button" class="btn {% if queue %}ghost{% else %}warn{% endif %} sm" hx-get="/kiosk/m/nomo" hx-target="#modal" hx-swap="innerHTML">No MO? Run by filter number - Supervisor</button></div>
   {% else %}
-    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
+    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.floor_number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
     {% if co.loading %}<div class="panel empty">Loading steps for this part from the database…</div>{% else %}
       {% if src == "db" %}<p class="note">Steps and settings from the database for {{ p.key }} on {{ sh.line }}.</p>
       {% elif src == "cache" %}<p class="note" style="color:var(--warn)">Database not reachable. Showing the steps saved for this part{% if cacheT %} at {{ cacheT|clock }}{% endif %}.</p>

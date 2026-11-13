@@ -7,7 +7,7 @@
       {% for l in lines %}<option value="{{ l.name }}" {% if l.name == line %}selected{% endif %} {% if not l.ok %}disabled{% endif %}>{{ l.name }}{{ l.why }}</option>{% endfor %}</select></label>
     <label class="f">Scan MO<input type="text" name="mo" id="ssMO" placeholder="Scan or type MO number" autofocus value="{{ mo_pick }}"></label>
   </div>
-  {% if queue %}<div class="note">Next on {{ line }}: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/start?line={{ line|urlencode }}&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.number }} · {{ m.part }}</button> {% endfor %}</div>{% endif %}
+  {% if queue %}<div class="note">Next on {{ line }}: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/start?line={{ line|urlencode }}&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.floor_number }} · {{ m.part }}</button> {% endfor %}</div>{% endif %}
   {% if not trained %}<p style="color:var(--bad)">You are not trained on any machine. Ask your shift lead.</p>{% endif %}
   <div><h3 class="h2">QC and safety checklist</h3><div class="grid2" style="margin-top:8px">{% for c in safety %}<label class="chk"><input type="checkbox" name="check" value="s{{ forloop.counter0 }}"> {{ c }}</label>{% endfor %}</div></div>
   <div><h3 class="h2">Shift PM checklist</h3><div class="grid2" style="margin-top:8px">{% for c in pm %}<label class="chk"><input type="checkbox" name="check" value="p{{ forloop.counter0 }}"> {{ c }}</label>{% endfor %}</div></div>

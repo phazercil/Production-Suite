@@ -8,7 +8,7 @@
 {% else %}
 <div class="grid2" style="align-items:start;grid-template-columns:repeat(auto-fit,minmax(380px,1fr))">
   <div class="panel"><div class="drawing">{% include "hmi/k/_drawing_svg.html" %}</div>
-    <p class="note">Drawing rev {{ p.rev }}{% if p.estimated %} · <span style="color:var(--warn)">estimated specs: this part isn't in Parts &amp; specs yet</span>{% endif %}{% if P.mos %} · {% for m in P.mos %}MO {{ m.number }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p></div>
+    <p class="note">Drawing rev {{ p.rev }}{% if p.estimated %} · <span style="color:var(--warn)">estimated specs: this part isn't in Parts &amp; specs yet</span>{% endif %}{% if P.mos %} · {% for m in P.mos %}MO {{ m.floor_number }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</p></div>
   <div class="panel"><h2 class="h2">Dimensions</h2>
     <div class="tblwrap"><table class="xl"><thead><tr><th>Measurement</th><th class="num">Drawing</th><th>Tolerance</th><th class="num">Min</th><th class="num">Max</th></tr></thead><tbody>
       {% for d in P.dims %}<tr><td>{{ d.label }}</td><td class="num"><b>{{ d.v|floatformat:3 }}</b></td><td class="num">{{ d.tol }}{% if not d.plant %} <span class="note">part's own</span>{% endif %}</td><td class="num">{{ d.lo|floatformat:3 }}</td><td class="num">{{ d.hi|floatformat:3 }}</td></tr>{% endfor %}

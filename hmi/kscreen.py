@@ -601,11 +601,12 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
         start = first - td(days=(first.weekday() + 1) % 7)
         days = [start + td(days=i) for i in range(42)]
         due = {}
-        for mo in MO.objects.filter(status="OPEN", due__gte=days[0], due__lte=days[-1]).select_related("line"):
+        for mo in MO.objects.filter(status="OPEN", due__gte=days[0], due__lte=days[-1], parent__isnull=True).select_related("line"):
             due.setdefault(mo.due, []).append(mo)
         out["cal"] = [{"d": d, "out": d.month != today.month, "today": d == today, "mos": due.get(d, [])[:3], "more": max(0, len(due.get(d, [])) - 3)}
                       for d in days]
-    rows = list(MO.objects.select_related("line").all() if status == "ALL" else MO.objects.select_related("line").filter(status=status))
+    base = MO.objects.select_related("line").filter(parent__isnull=True)   # an S2K order's stage MOs show with their order
+    rows = list(base if status == "ALL" else base.filter(status=status))
     keys = {"added": lambda m: m.added or date.min, "mo": lambda m: m.number, "due": lambda m: m.due or date.max, "qty": lambda m: m.qty,
             "item": lambda m: m.part, "produced": lambda m: m.produced,
             "scrap": lambda m: m.scrap, "final": lambda m: m.produced - m.scrap, "status": lambda m: m.status, "line": lambda m: m.line.name if m.line else ""}

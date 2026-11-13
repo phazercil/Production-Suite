@@ -277,7 +277,17 @@ def shift_of(p, ctx):
 
 
 def open_mo(v):
-    return MO.objects.filter(number=str(v).strip(), status="OPEN").first()
+    """An open MO by what was scanned or typed: its number, any S2K revision of it (306556-007), or the S2K number of
+    one of its stages (the 1MG… MO a pleater runs gives its order)."""
+    from django.db.models import Q
+
+    from plant.mofamily import split_number
+    v = str(v).strip()
+    base, _ = split_number(v)
+    mo = MO.objects.filter(Q(number=v) | Q(base=base), status="OPEN").select_related("parent").order_by("parent_id").first()
+    if mo and mo.parent and mo.parent.status == "OPEN":
+        return mo.parent
+    return mo
 
 
 def running_elsewhere(mo, machine):
@@ -1232,13 +1242,10 @@ def to_inches(v, unit, spec=""):
     return round(v * f, 4) if f != 1 else v
 
 
-FRESH_SECS = 60   # a part's dimensions are read from the asset database again after this long
-
-
 def refresh_part(item, force=False):
     """Make sure Parts & specs has the asset database's latest for this part before it's used (a QC check judged, a
-    drawing or Part Info shown). At most once a minute per part (also when the database can't be reached), unless
-    force. Never raises: the dimensions on file are used when the database can't be read."""
+    drawing or Part Info shown). At most every "assetsEvery" minutes per part (Admin › Connections › Pulls every; also
+    when the database can't be reached), unless force. Never raises: the dimensions on file are used when the database can't be read."""
     from django.core.cache import cache
     key = part_key(item)
     if not key:
@@ -1246,7 +1253,9 @@ def refresh_part(item, force=False):
     ck = "spec-fresh:" + key
     if not force and cache.get(ck):
         return
-    cache.set(ck, 1, FRESH_SECS)
+    every = settings_obj().settings.get("assetsEvery", 1)   # Admin › Connections › Pulls every (0: every time)
+    if every:
+        cache.set(ck, 1, int(float(every) * 60))
     try:
         pull_drawing(key)
     except Exception as e:  # noqa: BLE001 - the dimensions on file still work
@@ -1306,24 +1315,12 @@ def valid_date(s):
 
 
 def import_mos(ctx, rows, source="s2k"):
-    cat = Catalog()
-    added = 0
-    skipped = 0
-    for r in rows or []:
-        if not isinstance(r, dict) or not r.get("mo"):
-            continue
-        number, part, qty = str(r["mo"]).strip(), str(r.get("item") or "").strip(), to_number(r.get("qty"))
-        if not number or not part or len(number) > 40 or len(part) > 40 or qty is None or qty < 1:
-            skipped += 1  # a bad row is skipped; the rest still come in
-            continue
-        if MO.objects.filter(number=number).exists():
-            continue
-        item = (cat.matches(part) or [None])[0]
-        due = str(r.get("due") or "")[:10] or None
-        MO.objects.create(number=number, part=part, qty=int(qty),
-                          due=valid_date(due), process=str(r.get("process") or "")[:12],
-                          mfg=str(r.get("mfg") or "MFGOUT")[:12], hot=bool(r.get("hot")), ops=default_ops(item), source=source)
-        added += 1
+    """Open MOs from S2K: new ones added and merged into their orders (one MO per stage, plant/mofamily.py), a
+    newer revision of one on file updates it. A bad row is skipped; the rest still come in."""
+    from plant import mofamily
+    added, updated, skipped = mofamily.upsert(rows, source)
+    if updated:
+        log.info("MO import updated %s MOs to S2K's latest revision", updated)
     if added:
         notify(f"{added} new MO{'s' if added > 1 else ''} from S2K are waiting in the Scheduler", "planner")
         audit(ctx, f"Imported {added} MOs")
@@ -2330,7 +2327,7 @@ def rule_set(p, ctx):
     audit(ctx, f"Rule {p['k']} set to {v:g}")
 
 
-SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2kEvery": "n", "peopleUrl": "s", "peopleEvery": "n", "webhook": "s", "useDb": "b",
+SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2kEvery": "n", "peopleUrl": "s", "peopleEvery": "n", "assetsEvery": "n", "influxEvery": "n", "webhook": "s", "useDb": "b",
             "grafana.on": "b", "grafana.url": "s", "grafana.uid": "s", "grafana.slug": "s", "grafana.org": "n", "grafana.ppm": "n",
             "grafana.uptime": "n", "grafana.count": "n", "grafana.refresh": "s", "grafana.lineVar": "s",
             "paycom.auto": "b", "paycom.every": "n", "paycom.dept": "s", "paycom.position": "s", "paycom.positionExact": "b", "paycom.pinFrom": "s",
@@ -2367,6 +2364,11 @@ def setting_set(p, ctx):
             notify(f"QC checks are now every {v:g} minutes ({ctx.by})", "qc", go="qc-log")
     if k == "paycom.every":
         v = max(15, v or 60)
+    if k in ("s2kEvery", "peopleEvery", "assetsEvery", "influxEvery"):
+        need(v is not None and 0 <= v <= 24 * 60, "Enter a number of minutes from 0 to 1440.")
+        v = round(v)
+    if k == "influxEvery":
+        v = max(1, v)
     if k in ("s2kUrl", "peopleUrl", "webhook", "grafana.url") and v:
         try:
             v = netsafety.check_url(v, {"s2kUrl": "The S2K address", "peopleUrl": "The people list address", "webhook": "The webhook address",

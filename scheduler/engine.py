@@ -53,11 +53,15 @@ def load_world(jobs_override=None):
     # Stage 1 slot, but any End Band / Arts & Crafts / Glue Bead work already on the board stays scheduled.
     from django.db.models import Q
     mos = {}
-    later = Job.objects.filter(Q(op__in=["eb", "ac", "gb"]) | Q(part__gt=1)).values("mo_id")   # (or the rest of a split Stage 1)
-    for mo in MO.objects.filter(Q(status="OPEN") | Q(status="CLOSE", pk__in=later)):
-        mos[mo.id] = {"id": mo.id, "mo": mo.number, "part": mo.part, "qty": mo.qty, "due": ms_from_date(mo.due), "pleats": mo.pleats,
+    later = Job.objects.filter(Q(op__in=["eb", "ac", "gb", "pk"]) | Q(part__gt=1)).values("mo_id")   # (or the rest of a split Stage 1)
+    # An S2K order's stage MOs (1MG…, 2MG…) are shown as stages of their order MO, not as orders of their own.
+    for mo in MO.objects.filter(Q(status="OPEN") | Q(status="CLOSE", pk__in=later), parent__isnull=True).prefetch_related("stage_mos"):
+        kids = {c.stage: c for c in mo.stage_mos.all() if c.stage}
+        mos[mo.id] = {"id": mo.id, "mo": mo.s2k_number, "part": mo.part, "qty": mo.qty, "due": ms_from_date(mo.due), "pleats": mo.pleats,
                       "ops": mo.ops or {"s1": True}, "itemUid": mo.item_uid, "status": mo.status, "produced": mo.produced,
-                      "example": mo.example}
+                      "example": mo.example, "stageQty": dict(mo.stage_qty or {}),
+                      "stageMos": {**{st: {"mo": c.s2k_number, "part": c.part, "left": c.remaining} for st, c in kids.items()},
+                                   **({mo.stage: {"mo": mo.s2k_number, "part": mo.part, "left": mo.remaining}} if mo.stage else {})}}
     if jobs_override is not None:
         jobs = jobs_override
     else:
@@ -298,10 +302,12 @@ def compute(world, jobs=None):
 
 
 def _stage_total(mo, st):
-    """What a stage still has to make: Stage 1 what is left at the pleater, later stages the whole order."""
+    """What a stage still has to make: Stage 1 what is left at the pleater, later stages the whole order. An S2K
+    order's stages each make what their own MO says (2 per finished part makes Stage 1 and 2 twice packaging)."""
+    q = float((mo.get("stageQty") or {}).get(st) or mo["qty"] or 0)
     if st == "s1":
-        return max(0, float(mo["qty"] or 0) - float(mo.get("produced") or 0))
-    return float(mo["qty"] or 0)
+        return max(0, q - float(mo.get("produced") or 0))
+    return q
 
 
 def _part_qty(j, mo, st, parts, cuts):
@@ -335,6 +341,7 @@ def _compute(world, jobs, cuts):
     running = world.get("running", {})
     t_now = world.get("now") or ms(now())
     res, by_m, s1_res, s1_done, new_cuts = {}, {}, {}, set(), {}
+    mid_res = {}   # each order's later-stage output (end bands…), which packaging follows
     parts = {}
     for j in jobs.values():
         parts.setdefault((j["moId"], j["op"]), []).append(j)
@@ -364,9 +371,11 @@ def _compute(world, jobs, cuts):
                         if _stage_total(mo, st) <= 0 or mo["status"] != "OPEN" and all(_part_qty(x, mo, st, parts, cuts)[0] <= 0 for x in ps):
                             s1_done.add(mo["id"])  # Stage 1 already made the full quantity
                         continue
+                elif st == "pk" and mid_res.get(mo["id"]):
+                    up = mid_res[mo["id"]]   # packaging follows the end bands (or whatever stage comes before it)
                 elif mo["id"] not in s1_done:
                     up = s1_res.get(mo["id"])
-                    if not up:
+                    if not up and (mo.get("ops") or {}).get("s1", True):
                         waiting = True
                         warn.append("Stage 1 for this order is not scheduled yet")
                 pkey = item["uid"] if item else str(mo["part"]).upper()
@@ -465,6 +474,9 @@ def _compute(world, jobs, cuts):
                 if st == "s1" and not rest:   # later stages pace against every part of Stage 1
                     u = s1_res.get(mo["id"])
                     s1_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
+                elif st in ("eb", "ac", "gb") and not rest:
+                    u = mid_res.get(mo["id"])
+                    mid_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
     return {"res": res, "byM": by_m, "cal": cal, "cuts": new_cuts}
 
 

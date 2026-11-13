@@ -149,7 +149,10 @@ class Catalog:
             v.sort(key=lambda x: x[0])
 
     def matches(self, part):
-        return [it for _, it in self.index.get(str(part or "").strip().upper(), [])]
+        """Cost sheet rows for a part number; a stage part (1MG4062, 2MG4062) matches its finished part's rows."""
+        p = str(part or "").strip().upper()
+        hit = self.index.get(p) or self.index.get(part_key(p)) or []
+        return [it for _, it in hit]
 
     def item_for(self, mo):
         uid = mo.get("itemUid") if isinstance(mo, dict) else mo.item_uid

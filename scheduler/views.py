@@ -131,7 +131,7 @@ def put_job(request):
     if not mo or not m or op not in STAGE_ORDER:
         return fail("That order or line no longer exists.")
     if m.stage != op:
-        return fail(f"That work can only go on a {dict([('s1','Stage 1'),('eb','End Band'),('ac','Arts & Crafts'),('gb','Glue Bead')])[op]} line.")
+        return fail(f"That work can only go on a {dict([('s1','Stage 1'),('eb','End Band'),('ac','Arts & Crafts'),('gb','Glue Bead'),('pk','Packaging')])[op]} line.")
     s1_finished = mo.status != "OPEN" or mo.produced >= mo.qty
     if op != "s1" and not s1_finished and not Job.objects.filter(mo=mo, op="s1").exists():
         return fail("Schedule Stage 1 for this order first.")
@@ -261,7 +261,8 @@ def _mo_fields(mo, p):
         raise BadRequest("Check the quantity, due date and pleats.")
     if "ops" in p and isinstance(p["ops"], dict):
         mo.ops = {k: bool(p["ops"].get(k)) for k in STAGE_ORDER}
-        mo.ops["s1"] = True
+        # an S2K order has the stages it has MOs for (plant/mofamily.py); any other order always starts at Stage 1
+        mo.ops["s1"] = "s1" in (mo.stage_qty or {}) if mo.stage_qty else True
     if "itemUid" in p:
         mo.item_uid = p["itemUid"] or None
 
@@ -464,34 +465,12 @@ def import_preview(request):
 @json_api
 @mutate
 def import_commit(request):
-    from hmi.models import ShiftRun
+    """The same as an S2K pull (plant/mofamily.py): new MOs merged into their orders by stage, a newer revision of an
+    MO on file updates what's still to make and the due date, keeping its schedule."""
+    from plant import mofamily
     lst = imports.orders(body(request))
-    added = updated = skipped = 0
-    running = set(ShiftRun.objects.filter(active=True, mo__isnull=False).values_list("mo_id", flat=True))
-    for o in lst:
-        if len(o["mo"]) > 40 or len(o["part"]) > 40:
-            skipped += 1
-            continue
-        due = date.fromisoformat(o["due"]) if o["due"] else None
-        mo = MO.objects.filter(number=o["mo"]).first()
-        if mo:
-            if mo.status != "OPEN":
-                skipped += 1  # closed at the pleater: the export can't reopen or change it
-                continue
-            if mo.part != o["part"] and (mo.id in running or mo.produced):
-                skipped += 1  # parts already made against the old part number: leave it for a person to sort out
-                continue
-            same = mo.part == o["part"]
-            mo.part, mo.qty, mo.due = o["part"], o["qty"], due
-            if o["pleats"] is not None:
-                mo.pleats = o["pleats"]
-            if not same:
-                mo.ops, mo.item_uid = o["ops"], None
-            mo.save()
-            updated += 1
-        else:
-            MO.objects.create(number=o["mo"], part=o["part"], qty=o["qty"], due=due, pleats=o["pleats"], ops=o["ops"], source="import")
-            added += 1
+    rows = [{"mo": o["mo"], "item": o["part"], "qty": o["qty"], "due": o["due"], "pleats": o["pleats"], "ops": o["ops"]} for o in lst]
+    added, updated, skipped = mofamily.upsert(rows, "import")
     return ok(added=added, updated=updated, skipped=skipped)
 
 

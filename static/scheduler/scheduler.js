@@ -9,8 +9,13 @@ const STAGES={
   s1:{name:"Stage 1 · Pleating",short:"Stage 1",tag:"S1"},
   eb:{name:"Stage 2 · End Bands",short:"End Band",tag:"EB"},
   ac:{name:"Arts & Crafts",short:"Arts & Crafts",tag:"A&C"},
-  gb:{name:"Glue Bead",short:"Glue Bead",tag:"GB"}};
-const STAGE_ORDER=["s1","eb","ac","gb"];
+  gb:{name:"Glue Bead",short:"Glue Bead",tag:"GB"},
+  pk:{name:"Packaging",short:"Packaging",tag:"PK"}};
+const STAGE_ORDER=["s1","eb","ac","gb","pk"];
+/* An S2K order (plant/mofamily.py) has one MO per stage: the stage's own S2K number, and what that stage makes. */
+const stageMo=(mo,o)=>(mo.stageMos||{})[o];
+const stageQty=(mo,o)=>((mo.stageQty||{})[o])||mo.qty;
+const noS1=mo=>!(mo.ops&&mo.ops.s1);
 
 const $=(s,r=document)=>r.querySelector(s);
 const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
@@ -262,17 +267,19 @@ function renderSchedule(){
     .sort((x,y)=>(x.due||9e15)-(y.due||9e15)||String(x.mo).localeCompare(String(y.mo)));
   const card=(mo,o)=>{
     const item=mo.item,k=jobKey(mo.id,o),r=S.res[k],j=S.jobs[k];
-    const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
+    const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
     const blocked=o!=="s1"&&!s1Done&&!S.jobs[jobKey(mo.id,"s1")];
+    const smo=stageMo(mo,o);
     const others=STAGE_ORDER.filter(x=>x!==o&&mo.ops&&mo.ops[x]).map(x=>{const rx=S.res[jobKey(mo.id,x)];const dn=x==="s1"&&s1Done;
       return `<span class="chip mini ${x} ${rx||dn?"done":""}" title="${esc(STAGES[x].name)}: ${dn?"finished at the pleater":rx?`${esc(machineById(rx.machineId)?.name||"")} ${fmtDT(rx.start)} → ${fmtDT(rx.end)}`:"not on the board yet"}">${STAGES[x].tag}</span>`}).join("");
     const where=r?`<span class="on">${esc(machineById(r.machineId)?.name||"")} · ${fmtDT(r.start)} → ${fmtDT(r.end).slice(4)}</span>`:blocked?`<span class="muted">Schedule Stage 1 first</span>`:`<span class="muted">Not on the board yet</span>`;
     return `<div class="mo ${o} ${blocked?"blocked":"grab"} ${j?"placed":""}" ${blocked?"":`draggable="true"`} data-mo="${esc(mo.id)}" data-op="${o}" tabindex="0" role="button" title="${blocked?"Schedule Stage 1 for this order first":`Drag onto a ${esc(STAGES[o].short)} line, or click to set a start time`}">
-      <div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${o!=="s1"&&mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater">S1 closed</span>':""}</span><span class="mo-qty">${fmtN(mo.qty)}</span></div>
+      <div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${o!=="s1"&&mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater">S1 closed</span>':""}</span><span class="mo-qty">${fmtN(stageQty(mo,o))}</span></div>
+      ${smo&&smo.mo!==mo.mo?`<div class="mo-meta"><span title="The S2K MO for this stage">${STAGES[o].tag} MO ${esc(smo.mo)} · ${esc(smo.part)}</span></div>`:""}
       <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}${o==="s1"&&mo.produced?`<span>${fmtN(mo.produced)} made</span>`:""}</div>
       <div class="mo-where">${where}${others?`<span class="others">${others}</span>`:""}</div></div>`};
   const sections=STAGE_ORDER.map(o=>{
-    const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
+    const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
       if(o==="s1"&&s1Done)return false;
       return S.view.showDone||!S.jobs[jobKey(mo.id,o)]});
     if(!list.length&&!S.cfg.machines.some(m=>m.stage===o))return "";
@@ -546,7 +553,8 @@ function renderOrders(){
   const mos=Object.values(S.mos).sort((a,b)=>(a.due||9e15)-(b.due||9e15));
   const rows=mos.map(mo=>{const item=mo.item;const ms=mo.matches||[];
     const st=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]).map(o=>{const r=S.res[jobKey(mo.id,o)];return r?`<span class="pill ${r.late?"bad":o}" title="${esc(machineById(r.machineId)?.name)}">${STAGES[o].tag} ${fmtDT(r.end).slice(4)}</span>`:`<span class="pill">${STAGES[o].tag} —</span>`}).join(" ");
-    return `<tr data-id="${esc(mo.id)}"><td class="mono">${esc(mo.mo)}</td><td>${esc(mo.part)}${ms.length>1?`<br><select data-pick id="pk-${esc(mo.id)}" aria-label="Cost sheet match">${ms.map(it=>`<option value="${esc(it.uid)}" ${item&&item.uid===it.uid?"selected":""}>${esc(it.aq)} / ${esc(it.cust||"—")} · ${esc(it.cat)} · ${it.pleats} pl</option>`).join("")}</select>`:""}</td>
+    const kids=STAGE_ORDER.filter(o=>stageMo(mo,o)&&stageMo(mo,o).mo!==mo.mo).map(o=>`<div class="small muted" title="${esc(STAGES[o].name)}">${STAGES[o].tag} ${esc(stageMo(mo,o).mo)} · ${esc(stageMo(mo,o).part)} · ${fmtN(stageQty(mo,o))}</div>`).join("");
+    return `<tr data-id="${esc(mo.id)}"><td class="mono">${esc(mo.mo)}${kids}</td><td>${esc(mo.part)}${ms.length>1?`<br><select data-pick id="pk-${esc(mo.id)}" aria-label="Cost sheet match">${ms.map(it=>`<option value="${esc(it.uid)}" ${item&&item.uid===it.uid?"selected":""}>${esc(it.aq)} / ${esc(it.cust||"—")} · ${esc(it.cat)} · ${it.pleats} pl</option>`).join("")}</select>`:""}</td>
       <td>${item?`${esc(item.cat)} · ${item.pleats} pl`:`<span class="pill bad">Not on cost sheet</span> <input type="number" min="1" data-pleats id="pl-${esc(mo.id)}" value="${mo.pleats||""}" placeholder="pleats" style="width:72px" aria-label="Pleats">`}</td>
       <td class="n"><input type="number" min="1" data-qty id="qt-${esc(mo.id)}" value="${mo.qty}" aria-label="Quantity"></td>
       <td><input type="date" data-due id="du-${esc(mo.id)}" value="${mo.due?isoDay(mo.due):""}" aria-label="Due date"></td>

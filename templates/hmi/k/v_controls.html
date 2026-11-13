@@ -2,17 +2,17 @@
 <div class="runscreen"><div class="runcol">
   {% if not R.on %}
   <div class="panel idlecard"><span class="eyebrow">Line {{ station }}</span><h2>No shift running</h2>
-    <p class="sub">Log in, walk the safety checklist and scan the first MO to start running.{% if R.first %} First up from the planner: MO {{ R.first.m.number }} · {{ R.first.m.part }}.{% endif %}</p>
+    <p class="sub">Log in, walk the safety checklist and scan the first MO to start running.{% if R.first %} First up from the planner: MO {{ R.first.m.floor_number }} · {{ R.first.m.part }}.{% endif %}</p>
     <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>
   {% else %}
   {% if R.unattended and R.offerName %}<div class="panel idlecard" style="border-color:var(--accent)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name }} started {{ R.sh.start|time:"g:i a" }}</span>
     <h2>{{ R.offerName }}, working into {{ R.sh.shift_name }}?</h2>
-    <p class="sub">Your log for the last shift closed at {{ R.sh.start|time:"g:i a" }}{% if R.sh.mo %}; MO {{ R.sh.mo.number }} carries on{% endif %}. Yes: what's recorded from now on is yours too.</p>
+    <p class="sub">Your log for the last shift closed at {{ R.sh.start|time:"g:i a" }}{% if R.sh.mo %}; MO {{ R.sh.mo.floor_number }} carries on{% endif %}. Yes: what's recorded from now on is yours too.</p>
     <div class="row" style="gap:10px;margin-top:10px"><button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-post="/kiosk/do/carryOn" hx-vals='{"id": "{{ R.sh.pk }}", "yes": "1"}'>Yes, I'm staying</button>
       <button class="btn bigbtn" style="width:auto;padding-inline:28px" hx-post="/kiosk/do/carryOn" hx-vals='{"id": "{{ R.sh.pk }}", "yes": "0"}'>No, I'm leaving</button></div></div>
   {% elif R.unattended and R.coHandoff %}<div class="panel idlecard" style="border-color:var(--warn)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name|default:"this shift" }} · changeover under way</span>
     <h2>Changeover waiting to be picked up</h2>
-    <p class="sub">{% if R.coHandoff.by %}{{ R.coHandoff.by }} passed it over{% if R.coHandoff.at %} at {{ R.coHandoff.at }}{% endif %}{% else %}Passed over from the last shift{% endif %}{% if R.coHandoff.new %}, setting up MO {{ R.coHandoff.new.number }} · {{ R.coHandoff.new.part }}{% endif %}: {{ R.coHandoff.done }} of {{ R.coHandoff.n }} steps done.{% if R.coHandoff.note %}<br>“{{ R.coHandoff.note }}”{% endif %}</p>
+    <p class="sub">{% if R.coHandoff.by %}{{ R.coHandoff.by }} passed it over{% if R.coHandoff.at %} at {{ R.coHandoff.at }}{% endif %}{% else %}Passed over from the last shift{% endif %}{% if R.coHandoff.new %}, setting up MO {{ R.coHandoff.new.floor_number }} · {{ R.coHandoff.new.part }}{% endif %}: {{ R.coHandoff.done }} of {{ R.coHandoff.n }} steps done.{% if R.coHandoff.note %}<br>“{{ R.coHandoff.note }}”{% endif %}</p>
     <p class="sub">Start your shift to pick it up where they left off.</p>
     <button class="btn go bigbtn" style="width:auto;padding-inline:28px" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML">{% icon "start" %}Start shift</button></div>
   {% elif R.unattended %}<div class="panel idlecard" style="border-color:var(--warn)"><span class="eyebrow">Line {{ station }} · {{ R.sh.shift_name|default:"this shift" }}</span><h2>{% if R.sh.shift_name == "No shift" %}No shift scheduled now{% else %}No one logged in{% endif %}</h2>
@@ -21,7 +21,7 @@
   <div class="panel order">
     <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
     {% if R.mo %}
-    <div class="mo"><b>MO {{ R.mo.number }}</b><span>Part {{ R.mo.part }}</span></div>
+    <div class="mo"><b>MO {{ R.mo.floor_number }}</b><span>Part {{ R.mo.part }}</span></div>
     <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }} {% include "hmi/k/_open_drawing.html" with p=R.p %}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
     <div class="prog"><div class="lbl"><span>Good parts</span><b class="num">{{ R.good|num }} <small>/ {{ R.mo.qty|num }}</small></b></div><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ R.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ R.pct|floatformat:1 }}%"></i></div></div>
     <div class="metrics">
@@ -44,11 +44,11 @@
     <div class="chartcard {% if R.alert %}alert{% endif %}">{% if R.grafana %}<iframe src="{{ R.grafana }}" title="Pleater speed (Grafana)" loading="lazy" id="gf-ppm"></iframe><span class="src">Grafana</span>{% else %}{{ R.chart|safe }}{% endif %}</div></div>
 </div>
 <aside class="panel upnext"><div class="row"><span class="eyebrow">Up next</span><span class="small">from planner{% if R.planAt %} · {{ R.planAt|clock }}{% endif %}</span></div>
-  {% if R.nextCo %}<div class="job nextco"><div class="t"><b>MO {{ R.nextCo.m.number }}</b><span>next changeover</span></div><div class="p">{{ R.nextCo.m.part }} · {{ R.nextCo.left|num }} pcs</div>
+  {% if R.nextCo %}<div class="job nextco"><div class="t"><b>MO {{ R.nextCo.m.floor_number }}</b><span>next changeover</span></div><div class="p">{{ R.nextCo.m.part }} · {{ R.nextCo.left|num }} pcs</div>
     <div class="w">{% if R.nextCo.unplanned %}No planned start yet{% else %}Planned {{ R.nextCo.m.plan_start|plan:S.t }}{% endif %}{% if R.nextCo.n > 1 %} · after {{ R.nextCo.n|add:"-1" }} more run{{ R.nextCo.n|add:"-1"|pluralize }}{% endif %}</div>
     {% include "hmi/k/_tooling.html" with groups=R.nextCo.tool.groups tool=R.nextCo.tool %}</div>
   {% elif R.on %}<div class="note">No changeover planned in the next 24 hours.</div>{% endif %}
-  {% for x in R.next %}{% if not R.nextCo or x.m.pk != R.nextCo.m.pk %}<div class="job"><div class="t"><b>MO {{ x.m.number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
+  {% for x in R.next %}{% if not R.nextCo or x.m.pk != R.nextCo.m.pk %}<div class="job"><div class="t"><b>MO {{ x.m.floor_number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
     {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>{% endif %}
   {% empty %}<div class="empty">Nothing else is planned for this line. The scheduler adds runs here.</div>{% endfor %}
   {% if R.more %}<div class="small">+{{ R.more }} more on the <a href="{{ base }}/schedule/" style="color:var(--accent)">schedule</a></div>{% endif %}

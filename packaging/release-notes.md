@@ -1,3 +1,14 @@
+## What's new in 1.9.1
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **S2K orders with one MO per stage are one order on the Scheduler.** S2K's MOs for one order (for example 312151 1MG4107HP for pleating, 312152 2MG4107HP for end bands and 312153 MG4107HP for the finished part) are merged into one order card, the finished part's MO. Each stage shows its own S2K MO number and makes what that MO says, so a filter where two stage units make one finished part (400 1MG3012 and 2MG3012 for 200 MG3012) is planned at 400 on the pleater and end bands and 200 at packaging. Stage MOs are matched by part number and consecutive MO numbers, in whatever order S2K lists them.
+- **Packaging stage:** the Scheduler has a Packaging stage after the end bands. Add your packaging line or lines in Admin › Machines (stage Packaging), and set a filters-per-hour rate in Lines & Shifts. An order whose only open MO is the finished part is a packaging-only order.
+- **S2K revisions:** when S2K moves an MO to a new revision (306556 → 306556-001) with the quantity still to make, the MO on file is updated: the screens show the new revision and S2K's "still to make", while the suite's quantity, made count, records and schedule stay. An older revision changes nothing.
+- **The pleater shows the MO it posts against:** the run screen, queue, changeover and schedule show the Stage 1 MO's number with its latest revision (312151-031), and scanning that label (any revision) starts the order.
+- **Cost sheet:** stage part numbers (1AQ1102, 2MG3041…) now match their finished part's cost sheet row.
+- **Pull intervals (Admin › Connections › Connection status):** a new **Pulls every** column sets, in minutes, how often the server reads each connection on a timer: S2K, the people list and Paycom; how old a part's drawing may get before the asset database is read again (0 = every time); and how often records are copied to InfluxDB. Machine data is read every minute, because each minute is what's counted.
+
 ## What's new in 1.9.0
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
