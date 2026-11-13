@@ -119,8 +119,21 @@ class QCCheck(models.Model):
     scrapped = models.IntegerField(default=0)                 # filters taken off the count when disapproved
     issue = models.CharField(max_length=80, blank=True)       # Process Out (Supervisor, Quality): what the quality issue was
     issue_note = models.TextField(blank=True)
+    # A disapproved / processed-out check needs a re-check right away, to prove the issue was corrected:
+    # recheck_due is when it became due, recheck the next check saved on the line after that.
+    recheck_due = models.DateTimeField(null=True, blank=True)
+    recheck = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="rechecked")
     edited_by = models.CharField(max_length=120, blank=True)
     edited_at = models.DateTimeField(null=True, blank=True)
+
+    def recheck_status(self):
+        """The re-check after this check was disapproved: {"state": "due" | "passed" | "failed", "t"}; None if none was needed."""
+        if not self.recheck_due:
+            return None
+        r = self.recheck
+        if not r:
+            return {"state": "due", "t": self.recheck_due}
+        return {"state": "passed" if r.passed else "failed", "t": r.t, "by": r.by}
 
     class Meta:
         db_table = "hmi_qc"

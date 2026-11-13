@@ -7,7 +7,9 @@ where an item is {"key": built-in key} or {"key": "c...", "label", "type": "chec
 
 A check is due right after a changeover, as soon as the machine runs, and then every "QC check interval"
 minutes. One saved more than "QC late after" minutes after it was due needs a reason. A check that fails
-waits for a supervisor to approve it, or to disapprove it and scrap filters from the count.
+waits for a supervisor to approve it, or to disapprove it and scrap filters from the count. A disapproved (or
+processed-out) check makes a re-check due on its line straight away, to prove the issue was corrected; it is due
+even with QC reminders off, and the next check saved on the line is that re-check.
 """
 from collections import OrderedDict
 from datetime import timedelta
@@ -142,20 +144,35 @@ def judge(items, vals, part, tols=None):
     return not fails, fails
 
 
-def due_at(sh, settings, now):
+def recheck_for(line):
+    """The disapproved checks on this line still waiting for their re-check, oldest first."""
+    from .models import QCCheck
+    if not line:
+        return []
+    return list(QCCheck.objects.filter(line=line, review="disapproved", recheck_due__isnull=False, recheck__isnull=True)
+                .order_by("recheck_due"))
+
+
+def due_at(sh, settings, now, recheck=None):
     """When this shift's next QC check is (or was) due; None when none is due (QC reminders off, or waiting for the
-    machine to run after a changeover)."""
-    if not sh or not sh.active or not settings.get("autoQC") or (sh.person_id is None and not sh.user_name):
+    machine to run after a changeover). A re-check after a disapproved check is due from the disapproval.
+    `recheck`: recheck_for(sh.line), if the caller already has it."""
+    if not sh or not sh.active or (sh.person_id is None and not sh.user_name):
         return None   # (no QC reminders while nobody is logged in: the run is only being recorded)
+    rc = recheck_for(sh.line) if recheck is None else recheck
+    if rc:
+        return rc[0].recheck_due
+    if not settings.get("autoQC"):
+        return None
     if sh.qc_after_co:
         return sh.qc_due_at   # set by the minute tick when the machine first runs after the changeover
     every = timedelta(minutes=float(settings.get("qcEvery") or 30))
     return (sh.qc_last or sh.start) + every
 
 
-def late_by(sh, settings, rules, now):
+def late_by(sh, settings, rules, now, recheck=None):
     """Minutes a due check is past its "QC late after" allowance (0 if it isn't late)."""
-    d = due_at(sh, settings, now)
+    d = due_at(sh, settings, now, recheck)
     if d is None:
         return 0
     over = (now - d).total_seconds() / 60 - float(rules.get("qcLate", 10) or 0)

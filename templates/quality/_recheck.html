@@ -1,0 +1,1 @@
+{% load suite %}{% if rs %}<div class="note">{% if rs.state == "due" %}<span class="pill warn">RE-CHECK DUE</span>{% elif rs.state == "passed" %}<span class="pill ok">RE-CHECK PASSED</span> {{ rs.t|clock }}{% else %}<span class="pill bad">RE-CHECK FAILED</span> {{ rs.t|clock }}{% endif %}</div>{% endif %}

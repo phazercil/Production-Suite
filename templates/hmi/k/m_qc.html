@@ -3,7 +3,8 @@
 {% block form_attrs %}hx-post="/kiosk/do/qcSave"{% endblock %}
 {% block body %}
   {% if edit %}<input type="hidden" name="id" value="{{ edit.id }}"><p class="sub">Checked by {{ edit.by }} · {{ edit.item }} · MO {{ edit.mo }}. Changes are recorded with your name.</p>
-  {% else %}<p class="sub">{{ p.key|default:"No MO" }} · drawing rev {{ p.rev }} · inches {% include "hmi/k/_open_drawing.html" %}{% if afterCo %} · <b>first check after the changeover</b>{% endif %}</p>{% endif %}
+  {% else %}<p class="sub">{{ p.key|default:"No MO" }} · drawing rev {{ p.rev }} · inches {% include "hmi/k/_open_drawing.html" %}{% if afterCo %} · <b>first check after the changeover</b>{% endif %}</p>
+  {% if recheck %}<div class="panel" style="border-color:var(--warn);margin:8px 0"><b>Re-check</b> after the failed check at {{ recheck.t|clock }}{% if recheck.issue %} ({{ recheck.issue }}){% endif %}. Fix the issue first; this check proves it's corrected.</div>{% endif %}{% endif %}
   {% if late %}<div class="panel" style="border-color:var(--bad);margin:8px 0"><label class="f"><span>This check is <b>{{ late }} min late</b>. Why wasn't it done on time?</span><textarea name="lateReason" required style="min-height:60px" placeholder="e.g. machine jammed right after the changeover"></textarea></label></div>{% endif %}
   <div class="spec">{% for it in items %}{% if it.type == "measure" or it.type == "number" %}
     <label class="f">{{ it.label }} {% if it.target is not None %}<span class="num">{{ it.target|floatformat:2 }} {{ it.tolTxt }}</span>{% elif it.min or it.max %}<span class="num">{% if it.min %}≥ {{ it.min }}{% endif %} {% if it.max %}≤ {{ it.max }}{% endif %}</span>{% endif %}

@@ -9,7 +9,7 @@
   {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
   <div class="card"><h2>What failed</h2><div class="vals">{% for v in vals %}<span class="{% if v.bad %}bad{% endif %}">{{ v.k }} <b>{{ v.v }}</b></span> {% endfor %}</div>
     {% if q.issue %}<p class="note">Processed out {{ q.scrapped }} by {{ q.reviewed_by }} · {{ q.issue }}{% if q.issue_note %}: {{ q.issue_note }}{% endif %}. Saving again changes it.</p>
-    {% elif q.review %}<p class="note">Review: {{ q.review|capfirst }}{% if q.reviewed_by %} by {{ q.reviewed_by }}{% endif %}{% if q.scrapped %} · {{ q.scrapped }} taken off the count{% endif %}</p>{% endif %}</div>
+    {% elif q.review %}<p class="note">Review: {{ q.review|capfirst }}{% if q.reviewed_by %} by {{ q.reviewed_by }}{% endif %}{% if q.scrapped %} · {{ q.scrapped }} taken off the count{% endif %}</p>{% endif %}{% include "quality/_recheck.html" with rs=q.recheck_status %}</div>
   <form method="post" class="card sv-form">{% csrf_token %}<input type="hidden" name="back" value="{{ back }}">
     <h2>Process out</h2>
     <p class="muted">The filters that failed come off the count of this shift and MO and go on the MO's scrap, and the line is told. The check is marked disapproved.</p>

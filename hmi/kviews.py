@@ -403,7 +403,8 @@ def m_qc(request, s):
               "v": vals.get(it["key"])} for it in qc.items_for(stage, s.cfg)]
     late = 0 if edit else s.qc_late()
     return modal_response(request, "hmi/k/m_qc.html", **ctx_for(s, p=p, items=items, edit=edit, late=late,
-                                                                 afterCo=bool(not edit and s.shift and s.shift.qc_after_co)))
+                                                                 afterCo=bool(not edit and s.shift and s.shift.qc_after_co),
+                                                                 recheck=None if edit else (s.qc_recheck() or [None])[0]))
 
 
 @modal("qcDisapprove")

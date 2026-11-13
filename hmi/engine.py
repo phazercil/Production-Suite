@@ -980,11 +980,18 @@ def qc_save(p, ctx):
                                values=vals, fails=fails, due_at=due, late_reason=reason[:500] if late else "", review="" if ok else "pending", **cols)
     if sh.mo and cols["scrap"]:
         MO.objects.filter(pk=sh.mo_id).update(scrap=F("scrap") + cols["scrap"])
+    rechecked = [r for r in qc.recheck_for(sh.line) if r.recheck_due <= ctx.now]
+    if rechecked:   # this is the re-check after a disapproved check: it proves (or not) the issue was corrected
+        QCCheck.objects.filter(pk__in=[r.pk for r in rechecked]).update(recheck=q)
+        audit(ctx, f"QC re-check on {sh.line} after the failed check at {fmt_t(rechecked[0].t)}: {'passed' if ok else 'failed again'}")
+        if not ok:
+            notify(f"QC re-check on {sh.line} failed again: the issue from {fmt_t(rechecked[0].t)} isn't corrected", "qc", lines=[sh.line], go="qc-log")
     sh.qc_last, sh.qc_after_co, sh.qc_due_at = ctx.now, False, None
     sh.save(update_fields=["qc_last", "qc_after_co", "qc_due_at"])
     event("qc", {"line": sh.line, "item": P["key"], "pass": ok, **vals})
-    return {"msg": "QC passed and saved" if ok else "QC out of spec — a supervisor needs to approve or disapprove it",
-            "data": {"pass": ok, "id": q.id}}
+    return {"msg": ("QC re-check passed: the issue is corrected" if rechecked else "QC passed and saved") if ok
+            else "QC out of spec — a supervisor needs to approve or disapprove it",
+            "data": {"pass": ok, "id": q.id, "recheck": bool(rechecked)}}
 
 
 @cmd("qcEdit", "qc.edit")
@@ -1043,15 +1050,23 @@ def qc_review(p, ctx):
     q.review, q.reviewed_by, q.reviewed_at = d, ctx.by, ctx.now
     q.scrapped = q.scrapped + n
     fields = ["review", "reviewed_by", "reviewed_at", "scrapped"]
+    recheck = d == "disapproved" and not q.recheck_due
+    if recheck:   # once the scrap is counted, a re-check is due on the line straight away, to prove the issue is corrected
+        q.recheck_due = ctx.now
+        fields.append("recheck_due")
+    elif d == "approved" and q.recheck_due and not q.recheck_id:   # changed to approved: no re-check needed
+        q.recheck_due = None
+        fields.append("recheck_due")
     if p.get("issue") is not None:   # Process Out: what the quality issue was
         q.issue, q.issue_note = p["issue"], p.get("issueNote") or ""
         fields += ["issue", "issue_note"]
     q.save(update_fields=fields)
     audit(ctx, f"QC check {q.line} {fmt_t(q.t)} {d}" + (f", {q.scrapped} scrapped from the count" if q.scrapped else "")
           + (f" (processed out: {q.issue}" + (f" — {q.issue_note}" if q.issue_note else "") + ")" if q.issue else ""))
-    notify(f"QC check at {fmt_t(q.t)} {d} by {ctx.by}" + (f": {q.scrapped} filters scrapped from the count" if q.scrapped else ""),
-           "qc", lines=[q.line], go="qc-log")
-    return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"}
+    notify(f"QC check at {fmt_t(q.t)} {d} by {ctx.by}" + (f": {q.scrapped} filters scrapped from the count" if q.scrapped else "")
+           + (". Do a QC re-check now to prove the issue is corrected." if recheck else ""), "qc", lines=[q.line], go="qc-log")
+    return {"msg": "Approved" if d == "approved" else f"Disapproved · {q.scrapped} scrapped from the count"
+                   + (" · a QC re-check is due on the line now" if recheck else "")}
 
 
 @cmd("qcProcessOut", "qc.approve")
@@ -1069,8 +1084,9 @@ def qc_process_out(p, ctx):
     need(issue in issues, "Pick the quality issue from the list.")
     note = str(p.get("note") or "").strip()[:500]
     need(note or issue != "Other", "Describe the issue (you picked Other).")
-    qc_review({"id": q.pk, "decision": "disapproved", "scrap": int(n), "issue": issue, "issueNote": note}, ctx)
-    return {"msg": f"Processed out {int(n)} filter{'s' if n != 1 else ''} ({issue}); taken off the count."}
+    r = qc_review({"id": q.pk, "decision": "disapproved", "scrap": int(n), "issue": issue, "issueNote": note}, ctx)
+    return {"msg": f"Processed out {int(n)} filter{'s' if n != 1 else ''} ({issue}); taken off the count."
+                   + (" A QC re-check is due on the line now." if "re-check" in r["msg"] else "")}
 
 
 @cmd("rollAdd")

@@ -169,9 +169,16 @@ class Screen:
         snooze = self.request.session.get("down_snooze", 0)
         return self.reason_due() and ms(self.t) > snooze
 
+    def qc_recheck(self):
+        """Disapproved checks on this line waiting for their re-check (one is due now)."""
+        if not hasattr(self, "_recheck"):
+            from . import qc
+            self._recheck = qc.recheck_for(self.station) if self.shift_on else []
+        return self._recheck
+
     def qc_due_at(self):
         from . import qc
-        return qc.due_at(self.shift, self.settings, self.t) if self.shift_on else None
+        return qc.due_at(self.shift, self.settings, self.t, self.qc_recheck()) if self.shift_on else None
 
     def qc_due(self):
         d = self.qc_due_at()
@@ -180,9 +187,11 @@ class Screen:
     def qc_late(self):
         """Minutes a due QC check is past its allowance (Rules › QC late after); 0 if it isn't late."""
         from . import qc
-        return qc.late_by(self.shift, self.settings, self.rules, self.t) if self.shift_on else 0
+        return qc.late_by(self.shift, self.settings, self.rules, self.t, self.qc_recheck()) if self.shift_on else 0
 
     def qc_next(self):
+        if self.qc_recheck():
+            return "Re-check due now"
         if not self.settings.get("autoQC"):
             return "Auto QC off"
         if not self.shift_on:
@@ -239,8 +248,11 @@ class Screen:
         if self.qc_due():
             late = self.qc_late()
             first = self.shift.qc_after_co
-            a.append({"sev": "bad" if late else "warn", "go": "qc", "modal": "qc",
-                      "text": ("QC check after the changeover" if first else f"QC check due (every {self.settings.get('qcEvery')} min)")
+            rc = self.qc_recheck()
+            from .engine import fmt_t
+            a.append({"sev": "bad" if late or rc else "warn", "go": "qc", "modal": "qc",
+                      "text": (f"QC re-check due: prove the issue from the failed check at {fmt_t(rc[0].t)} is corrected" if rc
+                               else "QC check after the changeover" if first else f"QC check due (every {self.settings.get('qcEvery')} min)")
                       + (f" · {late} min late: a reason is needed" if late else "")})
         n = len(self.qc_pending())
         if n:
@@ -667,7 +679,7 @@ def qc_log_page(s):
     from .models import QCCheck
     items = qc.items_for(s.machine.stage if s.machine else "s1", s.cfg)
     since = s.t - timedelta(days=3)
-    checks = list(QCCheck.objects.filter(line=s.station, t__gte=since).order_by("-t"))
+    checks = list(QCCheck.objects.filter(line=s.station, t__gte=since).select_related("recheck").prefetch_related("rechecked").order_by("-t"))
     rows = []
     for q in checks:
         p = s.part(q.item)
@@ -680,7 +692,7 @@ def qc_log_page(s):
     if auto:
         auto["pct"] = round(100 * (auto["n"] - auto["fails"]) / auto["n"]) if auto["n"] else 100
     return {"items": items, "rows": rows, "fails": sum(1 for q in checks if not q.passed), "scrap": sum(q.scrap for q in checks), "next": s.qc_next(),
-            "pending": sum(1 for q in checks if q.review == "pending"), "scrapped": sum(q.scrapped for q in checks),
+            "pending": sum(1 for q in checks if q.review == "pending"), "scrapped": sum(q.scrapped for q in checks), "recheck": s.qc_recheck(),
             "auto": auto, "autoQC": s.settings.get("autoQC"), "every": s.settings.get("qcEvery"), "late": s.rules.get("qcLate", 10)}
 
 

@@ -98,7 +98,7 @@ def qc_values(q, labels):
 
 
 def qcs(f):
-    qs = QCCheck.objects.filter(t__gte=f["A"], t__lt=f["B"]).select_related("shift")
+    qs = QCCheck.objects.filter(t__gte=f["A"], t__lt=f["B"]).select_related("shift", "recheck")
     if f["line"]:
         qs = qs.filter(line=f["line"])
     if f["who"]:
@@ -205,6 +205,7 @@ def csv_rows(tab, qs):
 def line_status():
     """Supervisor › Line status: each machine now: running, stopped or in a changeover, who's logged in, the MO and how
     many are made, the speed and today's shift count."""
+    from hmi import qc
     from hmi.engine import shift_stats
     from hmi.models import PpmReading
     from plant.models import MO
@@ -225,7 +226,7 @@ def line_status():
         cards.append({"m": m, "sh": sh, "pill": pill, "mo": mo, "next": nxt, "made": made, "qty": mo.qty if mo else 0,
                       "pct": min(100, round(100 * made / mo.qty)) if mo and mo.qty else None,
                       "ppm": last["ppm"] if fresh else None, "since": last["t"] if last else None, "stale": bool(last) and not fresh,
-                      "who": (sh.user_name or "") if sh else "", "stats": stats})
+                      "who": (sh.user_name or "") if sh else "", "stats": stats, "recheck": qc.recheck_for(m.name)})
     run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running")
     return cards, {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped"),
                    "Changeover": sum(1 for c in cards if c["sh"] and c["sh"].state == "changeover"),
