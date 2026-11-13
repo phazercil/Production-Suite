@@ -31,12 +31,30 @@ TOL_SPECS = [("len", "Length"), ("wid", "Width"), ("ph", "Pleat height"), ("sb",
 EPS = 1e-9
 
 
+def features(cfg=None):
+    """Measurements added in Quality › Tolerances (frame thickness, gasket width…): each part has a value for it in
+    Parts & specs (read from the asset database's Part specs, role = its key), QC checks can measure it, and it has a
+    tolerance like the drawing's own. config["specFeatures"] = [{"key": "x1", "label": "Frame thickness"}]."""
+    from plant.models import PlantSettings
+    cfg = cfg if cfg is not None else PlantSettings.load().config
+    return [f for f in (cfg.get("specFeatures") or []) if isinstance(f, dict) and str(f.get("key", "")).startswith("x") and f.get("label")]
+
+
+def tol_specs(cfg=None):
+    """Every measurement with a tolerance: the drawing's own and the ones added."""
+    return TOL_SPECS + [(f["key"], f["label"]) for f in features(cfg)]
+
+
+def feature_item(f):
+    return {"key": f["key"], "label": f["label"], "type": "measure", "spec": f["key"], "builtin": True, "feature": True}
+
+
 def plant_tols(cfg=None):
     """{spec: {"minus", "plus"}} for the specs Quality › Tolerances sets (the rest follow the part)."""
     from plant.models import PlantSettings
     cfg = cfg if cfg is not None else PlantSettings.load().config
     out = {}
-    for k, _ in TOL_SPECS:
+    for k, _ in tol_specs(cfg):
         t = (cfg.get("qcTol") or {}).get(k)
         if isinstance(t, dict):
             try:
@@ -79,12 +97,15 @@ def items_for(stage, cfg=None):
     if not isinstance(raw, list):
         raw = [{"key": k} for k in DEFAULTS.get(stage, ["scrap"])]
     out = []
+    feats = {f["key"]: f for f in features(cfg)}
     for it in raw:
         if not isinstance(it, dict):
             continue
         k = it.get("key")
         if k in BUILTIN:
             out.append({"key": k, **BUILTIN[k], "builtin": True})
+        elif k in feats:
+            out.append(feature_item(feats[k]))
         elif k and it.get("type") in TYPES:
             out.append({"key": k, "label": it.get("label") or k, "type": it["type"], "min": it.get("min"), "max": it.get("max"), "builtin": False})
     return out

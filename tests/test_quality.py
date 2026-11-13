@@ -620,3 +620,54 @@ class NoGuessedSpecsTests(TestCase):
         from unittest import mock
         with mock.patch.object(engine.integrations, "assets_ready", return_value=True):
             self.assertContains(c.get("/quality/?tab=parts"), "Refresh from the asset database")
+
+
+class AddedMeasurementTests(TestCase):
+    """A measurement added in Tolerances becomes a column in Parts & specs for every filter, a role in Part specs, a
+    QC item, and the page says when the asset database doesn't read it yet."""
+
+    def setUp(self):
+        cache.clear()
+        seed_demo(reset=True)
+        self.lead = engine.Ctx(user=Person.objects.get(pin="4444"))
+        self.c = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(self.c, "4444", "section.quality", "/quality/")["ok"])
+
+    def post(self, data):
+        return self.c.post("/quality/", {**data, "csrfmiddlewaretoken": self.c.cookies["csrftoken"].value})
+
+    def test_add_wire_measure_and_remove(self):
+        from hmi.models import SavedQuery
+        from hmi.snapshot import qdef
+        from plant.models import PartSpec
+        r = self.post({"action": "specFeatureAdd", "label": "Frame thickness", "minus": "0.02", "plus": "0.03"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(qc.features(), [{"key": "x1", "label": "Frame thickness"}])
+        self.assertEqual(qc.plant_tols()["x1"], {"minus": 0.02, "plus": 0.03})
+        self.assertFalse(engine.execute("specFeatureAdd", {"label": "frame thickness"}, self.lead)["ok"])   # no duplicates
+        r = self.c.get("/quality/?tab=parts")
+        self.assertContains(r, "<th>Frame thickness</th>", html=False)
+        self.assertContains(r, "Not connected to the asset database yet")
+        self.assertIn(["x1", "Frame thickness"], qdef()["part_spec"]["roles"])                # a role in the Connector builder
+        # once Part specs reads it, every filter gets its value
+        SavedQuery.objects.create(name="part_spec", sql="SELECT a.v AS len, b.v AS x1 FROM t", saved_by="x")
+        self.assertNotContains(self.c.get("/quality/?tab=parts"), "Not connected to the asset database yet")
+        from unittest import mock
+        rows = {"columns": [], "rows": [{"len": "9.5", "x1": "0.75"}], "ms": 1, "truncated": False}
+        with mock.patch.object(engine.integrations, "assets_ready", return_value=True), \
+                mock.patch.object(engine.integrations, "run_saved", return_value=rows):
+            self.assertTrue(engine.execute("partsImport", {"parts": "ZZ200"}, self.lead)["ok"])
+        self.assertEqual(PartSpec.objects.get(key="ZZ200").extra, {"x1": 0.75})
+        self.assertEqual(engine.spec_for("ZZ200")["x1"], 0.75)
+        # a QC check can measure it, against the part's value and its tolerance
+        self.assertTrue(engine.execute("qcItemAdd", {"stage": "s1", "key": "x1"}, self.lead)["ok"])
+        it = next(i for i in qc.items_for("s1") if i["key"] == "x1")
+        self.assertEqual(qc.judge([it], {"x1": 0.78}, engine.spec_for("ZZ200")), (True, []))
+        self.assertEqual(qc.judge([it], {"x1": 0.79}, engine.spec_for("ZZ200")), (False, ["x1"]))
+        # typed in Parts & specs
+        engine.execute("partsSave", {"rows": [{"k": "ZZ200", "pleats": "", "len": "9.5", "wid": "", "ph": "", "sb": "", "tol": "",
+                                               "x1": "0.8", "rev": "", "media": ""}]}, self.lead)
+        self.assertEqual(PartSpec.objects.get(key="ZZ200").extra, {"x1": 0.8})
+        self.post({"action": "specFeatureDel", "key": "x1"})
+        self.assertEqual(qc.features(), [])
+        self.assertNotIn("x1", [i["key"] for i in qc.items_for("s1")])

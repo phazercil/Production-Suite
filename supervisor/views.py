@@ -84,6 +84,7 @@ def logs(f):
 def _qc_labels():
     from hmi import qc
     lab = {k: v["label"] for k, v in qc.BUILTIN.items()}
+    lab.update({x["key"]: x["label"] for x in qc.features()})
     for items in (PlantSettings.load().config.get("qcItems") or {}).values():
         for it in items if isinstance(items, list) else []:
             if isinstance(it, dict) and it.get("key") and it.get("label"):

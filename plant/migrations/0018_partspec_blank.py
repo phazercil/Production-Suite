@@ -17,4 +17,6 @@ class Migration(migrations.Migration):
         migrations.AddField(model_name="partspec", name="hand",
                             field=models.JSONField(blank=True, default=list,
                                                    help_text="Values typed in Parts & specs (kept when the asset database doesn't have them)")),
+        migrations.AddField(model_name="partspec", name="extra",
+                            field=models.JSONField(blank=True, default=dict, help_text="Measurements added in Quality › Tolerances: {key: inches}")),
     ]

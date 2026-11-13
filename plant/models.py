@@ -191,6 +191,7 @@ class PartSpec(models.Model):
     sb = models.FloatField(null=True, blank=True)
     tol = models.FloatField(null=True, blank=True)
     hand = models.JSONField(default=list, blank=True, help_text="Values typed in Parts & specs (kept when the asset database doesn't have them)")
+    extra = models.JSONField(default=dict, blank=True, help_text="Measurements added in Quality › Tolerances: {key: inches}")
     rev = models.CharField(max_length=20, default="A")
     media = models.CharField(max_length=80, blank=True)
     drawing_url = models.URLField(max_length=2048, blank=True, default="")   # the drawing file (Admin › Connector builder › Drawing file)
@@ -200,7 +201,8 @@ class PartSpec(models.Model):
         db_table = "plant_part_spec"
 
     def as_dict(self):
-        return {"key": self.key, "pleats": self.pleats, "len": self.len, "wid": self.wid, "ph": self.ph, "sb": self.sb,
+        return {**{k: v for k, v in (self.extra or {}).items() if isinstance(k, str) and k.startswith("x")},
+                "key": self.key, "pleats": self.pleats, "len": self.len, "wid": self.wid, "ph": self.ph, "sb": self.sb,
                 "tol": self.tol, "rev": self.rev, "media": self.media, "url": self.drawing_url}
 
 

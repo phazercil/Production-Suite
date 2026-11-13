@@ -1398,7 +1398,16 @@ def pull_drawing(key, ctx=None):
     # typed it in Parts & specs.
     keep = {f: (vals[f] if f in vals else getattr(ps, f) if ps and f in hand else None) for f in SPEC_NUMS}
     media = str(o.get("media") or "").strip()[:80] or (ps.media if ps and "media" in hand else "")
-    PartSpec.objects.update_or_create(key=key, defaults={**keep, "rev": rev, "media": media, "drawing_url": url})
+    from . import qc
+    extra = {}
+    for f in qc.features():   # measurements added in Quality › Tolerances
+        k = f["key"]
+        n = _spec_number(o.get(k))
+        if n is not None:
+            extra[k] = to_inches(n, o.get(k + "_uom") or o.get("uom"), k)
+        elif ps and k in hand and (ps.extra or {}).get(k) is not None:
+            extra[k] = ps.extra[k]
+    PartSpec.objects.update_or_create(key=key, defaults={**keep, "rev": rev, "media": media, "drawing_url": url, "extra": extra})
     missing = [SPEC_LABEL[f] for f in SPEC_NUMS if keep[f] is None]
     return f"Drawing rev {rev or '—'} loaded from the asset database ({fmt_t(ctx.now)})." + (
         f" Not in the asset database (left blank): {', '.join(missing)}." if missing else "")
@@ -2471,10 +2480,29 @@ def parts_save(p, ctx):
             new[f] = v
         new["rev"] = str(r.get("rev") or "").strip()[:20] or ps.rev
         new["media"] = str(r.get("media") or "").strip()[:80]
-        diff = [f for f, v in new.items() if getattr(ps, f) != v]
+        from . import qc
+        ext = dict(ps.extra or {})
+        for x in qc.features():   # measurements added in Quality › Tolerances
+            k = x["key"]
+            if k not in r:
+                continue
+            if str(r.get(k) if r.get(k) is not None else "").strip() == "":
+                new[k] = None
+            else:
+                v = to_number(r.get(k))
+                need(v is not None and v > 0, f"{ps.key}: enter a number above 0 for {x['label'].lower()}, or leave it blank.")
+                new[k] = v
+        diff = [f for f, v in new.items() if (ext.get(f) if f.startswith("x") else getattr(ps, f)) != v]
         if diff:
             for f, v in new.items():
-                setattr(ps, f, v)
+                if f.startswith("x"):
+                    if v is None:
+                        ext.pop(f, None)
+                    else:
+                        ext[f] = v
+                else:
+                    setattr(ps, f, v)
+            ps.extra = ext
             # typed by hand: kept when the asset database doesn't have it (blanked: not known any more)
             ps.hand = sorted((set(ps.hand or []) | {f for f in diff if new[f] not in (None, "")}) - {f for f in diff if new[f] in (None, "")})
             ps.save()
@@ -2539,7 +2567,8 @@ def parts_refresh(p, ctx):
 @cmd("assetUnitsSet", "quality.tolerances")
 def asset_units_set(p, ctx):
     """Which dimensions the asset database keeps in millimetres: converted to inches as they're read."""
-    units = {f: "mm" for f in ("len", "wid", "ph", "sb", "tol") if p.get(f) == "mm"}
+    from . import qc
+    units = {f: "mm" for f in ("len", "wid", "ph", "sb", "tol", *(x["key"] for x in qc.features())) if p.get(f) == "mm"}
     st = settings_obj()
     st.config = {**st.config, "assetUnits": units}
     st.save(update_fields=["config"])
@@ -2877,10 +2906,11 @@ def qc_item_add(p, ctx):
     stage = p.get("stage")
     items = _qc_list(st, stage)
     key = p.get("key") or ""
-    if key in qc.BUILTIN:
+    feats = {f["key"]: f for f in qc.features(st.config)}
+    if key in qc.BUILTIN or key in feats:
         need(all(i["key"] != key for i in items), "That item is already on the list.")
         items.append({"key": key})
-        what = qc.BUILTIN[key]["label"]
+        what = (qc.BUILTIN.get(key) or feats[key])["label"]
     else:
         label = str(p.get("label") or "").strip()[:60]
         need(label, "Name the check.")

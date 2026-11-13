@@ -88,7 +88,8 @@ def groups():
     """Everything the suite can take from a database, with what each is linked to now."""
     from .kadmin import S2K_ROLES
     from .models import SavedQuery
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     saved = {x.name: x for x in SavedQuery.objects.all()}
     out = []
     for m in Machine.objects.filter(stage="s1", active=True).order_by("sort", "id"):
@@ -148,7 +149,8 @@ SLOT_FILTERABLE = {"ppm", "count", "recipe", "run", "run2", "errCode", "errText"
 def query_filterable(name):
     """The inputs of a database query that can each read their own rows. Part specs and the drawing file: a table that
     keeps one value per row with a code saying which it is (e.g. part_attribute: value, with PAID 30 = length)."""
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     return {r[0] for r in QDEF[name]["roles"] if r[0] not in ("newest", "uom")} if QDEF[name].get("perPart") else set()
 
 

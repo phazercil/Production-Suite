@@ -386,7 +386,8 @@ GUESS = {"step": ["step", "instruction", "step_text", "description", "text"], "s
 
 
 def guess_columns(qname, cols):
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     roles = [r[0] for r in QDEF[qname]["roles"]]
     low = [c.lower() for c in cols]
     out = {}
@@ -411,7 +412,8 @@ def build_codata_sql(qname, b, kind=None):
     kind = kind or integrations.kind_of("assets")
     q = lambda n: dbkinds.quote(kind, n)   # noqa: E731 - quoting for that database's dialect
     qt = lambda n: dbkinds.table(kind, n)  # noqa: E731
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     D = QDEF[qname]
     if not b.get("table"):
         raise ValueError("Pick a table.")
@@ -478,7 +480,8 @@ def norm_settings(rows):
 
 def codata_data(s, request, states=None):
     from .models import SavedQuery
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     srv_assets = integrations.assets_ready()
     out = {"assets": srv_assets, "useDb": s.settings.get("useDb")}
     if not srv_assets or not s.can("connections.edit"):
@@ -1063,7 +1066,8 @@ def codata_panel(request, s, name=None, st=None, browse=None):
 
 @action("codata")
 def a_codata(request, s, p):
-    from .snapshot import QDEF
+    from .snapshot import qdef
+    QDEF = qdef()
     deny = _need(request, s, "connections.edit")
     if deny:
         return deny

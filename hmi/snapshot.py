@@ -40,6 +40,17 @@ QDEF = {
 
 
 
+def qdef():
+    """QDEF as it is now: Part specs also reads each measurement added in Quality › Tolerances (role = its key)."""
+    import copy
+    from . import qc
+    d = copy.deepcopy(QDEF)
+    roles = d["part_spec"]["roles"]
+    i = next((n for n, r in enumerate(roles) if r[0] == "uom"), len(roles))
+    d["part_spec"]["roles"] = roles[:i] + [[f["key"], f["label"]] for f in qc.features()] + roles[i:]
+    return d
+
+
 def _influx_info():
     from . import influx
     c = influx.config()
