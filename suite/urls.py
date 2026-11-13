@@ -60,6 +60,7 @@ urlpatterns = [
     path("data/", dk.board, name="data"),
     path("api/data/state", dk.state),
     path("data/r/<str:name>", dk.region),
+    path("data/<str:line>/", dk.board, name="data-line"),
     path("thin/watch", thin.watch),
     # Reports
     path("reports/", reports.board, name="reports"),

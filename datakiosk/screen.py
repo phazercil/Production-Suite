@@ -31,17 +31,23 @@ def dash_src(g, k):
     return f"{g['url'].rstrip('/')}/d/{quote(g['uid'], safe='')}/{quote(g.get('slug') or '_', safe='')}?{urlencode(q)}"
 
 
-def layout():
-    """The page's shape: which lines are on screen (rotation), and which panels each one has."""
+def machine_named(name):
+    """The pleating line /data/<name>/ is about (any letter case), or None."""
+    return Machine.objects.filter(stage="s1", name__iexact=str(name or "").strip()).first()
+
+
+def layout(focus=None):
+    """The page's shape: which lines are on screen (rotation), and which panels each one has. `focus`: one machine
+    only (/data/<name>/), never rotated and never the whole Grafana dashboard."""
     st = PlantSettings.load()
     s = st.settings
     g, k = grafana(s), s.get("kiosk") or {}
     lines = list(Machine.objects.filter(stage="s1", active=True).order_by("sort", "id"))
-    rotate = int(float(k.get("rotate") or 0))
-    show = lines
+    rotate = 0 if focus else int(float(k.get("rotate") or 0))
+    show = [focus] if focus else lines
     if rotate > 0 and len(lines) > 1:
         show = [lines[int(time.time() // rotate) % len(lines)]]
-    dash = bool(g and k.get("layout") == "dashboard")
+    dash = bool(g and k.get("layout") == "dashboard" and not focus)
     if g and not dash:
         panels = [{"title": p.get("title") or "", "panel": p.get("panel")} for p in (k.get("panels") or []) if p.get("panel")]
     else:
@@ -51,7 +57,7 @@ def layout():
              for m in show]
     return {"grafana": bool(g), "dash": dash, "dashSrc": dash_src(g, k) if dash else "", "bands": bands, "any": bool(lines),
             "rotate": rotate if rotate > 0 and len(lines) > 1 else 0, "minCol": 260 if cols > 2 else 340, "demo": st.demo,
-            "planAt": st.plan_at}
+            "planAt": st.plan_at, "focus": focus.name if focus else "", "lines": [m.name for m in lines]}
 
 
 def line_card(name):

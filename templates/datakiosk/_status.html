@@ -1,4 +1,4 @@
-<div class="dk-status" id="dk-status" hx-get="/data/r/status" hx-trigger="suite:changed from:body, suite:config from:body">
+<div class="dk-status" id="dk-status" hx-get="/data/r/status{% if q %}?{{ q }}{% endif %}" hx-trigger="suite:changed from:body, suite:config from:body">
   <span class="conn"><i class="dot ok"></i><span class="when-on">Server connected</span><span class="when-off">Server not answering</span></span>
   <span><i class="dot {% if L.grafana %}ok{% else %}warn{% endif %}"></i>{% if L.grafana %}Grafana panels{% else %}Built-in charts{% endif %}</span>
   {% if L.demo %}<span><i class="dot warn"></i>Demo data</span>{% endif %}

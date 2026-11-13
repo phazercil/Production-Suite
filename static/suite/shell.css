@@ -42,6 +42,8 @@ body.offline .conn .dot{background:var(--bad,#E06C5B)}
 .chartbox .plot{position:relative;width:100%;height:100%}
 .chartbox svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .chartbox .c-grid{stroke:#343C45;stroke-width:1;vector-effect:non-scaling-stroke}
+.chartbox .c-hour{stroke:#3E4752;stroke-width:1;vector-effect:non-scaling-stroke}
+.chartbox .c-half{stroke:#343C45;stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
 .chartbox .c-rated{stroke:#8A939C;stroke-width:1;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
 .chartbox .c-area{fill:rgba(91,155,213,.16)}
 .chartbox .c-line{fill:none;stroke:#5B9BD5;stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
