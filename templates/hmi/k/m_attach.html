@@ -1,0 +1,9 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Pick the MO{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/moAttach"{% endblock %}
+{% block body %}<p class="sub">{% if sh.mo %}{{ sh.line }} is running {{ sh.mo.part }} by filter number ({{ sh.mo.number }}).{% else %}{{ sh.line }} is running without an MO.{% endif %} Pick the MO it's making; no changeover is needed. The filters already made for it are counted to it{% if sh.mo %}, with the QC checks and scrap{% endif %}.</p>
+  <label class="f">MO<input type="text" name="mo" autofocus autocomplete="off" placeholder="Scan or type the MO number" value="{{ mo_pick }}"></label>
+  {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/attach?mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.floor_number }} · {{ m.part }}</button> {% endfor %}</div>{% endif %}
+  <label class="f">Filters already made for it<input type="number" name="qty" min="0" value="{{ made }}"></label>
+  <p class="note">An MO scheduled on another line needs a supervisor (Supervisor button).</p>{% endblock %}
+{% block foot %}<button class="btn go" type="submit">Use this MO</button>{% endblock %}

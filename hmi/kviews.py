@@ -337,14 +337,15 @@ def changeover_modal(request, s):
     if c["step"] == 1:
         mo = s.mo(co.get("oldMo"))
         c.update(mo=mo, moTimer=kscreen.hms((s.t - sh.mo_start).total_seconds()) if sh.mo_start else "0:00:00",
-                 close=bool(mo and mo.produced >= mo.qty))
+                 close=bool(mo and mo.produced - mo.scrap >= mo.qty), endSteps=engine.machine_list("endSteps", sh.line),
+                 logged=engine.run_scrap(sh, mo) if mo else 0)
     elif c["step"] == 2:
         c["queue"] = list(MO.objects.filter(line__name=sh.line, status="OPEN").exclude(pk=co.get("oldMo")).order_by("seq")[:4])
         c["mo_pick"] = request.GET.get("mo") or (str(c["queue"][0].number) if c["queue"] else "")
     else:
         nmo = s.mo(co.get("newMo"))
         p = s.fresh_part(nmo.part if nmo else "")
-        steps = co.get("steps") or [{"text": t} for t in s.cfg.get("coSteps", [])]
+        steps = engine.co_steps(co, sh.line)
         def step(i, st):
             st = dict(st)
             setting, value, unit = str(st.get("setting") or ""), str(st.get("value") if st.get("value") is not None else ""), str(st.get("unit") or "")
@@ -353,7 +354,8 @@ def changeover_modal(request, s):
                       i=i, done=i in (co.get("done") or []), tag=f"{setting} {value}{unit}".strip() if (setting or value) else "",
                       imageOk=str(st.get("image") or "").lower().startswith(("http://", "https://")))
             return st
-        c.update(nmo=nmo, p=p, steps=[step(i, st) for i, st in enumerate(steps)],
+        c.update(nmo=nmo, p=p, steps=[step(i, st) for i, st in enumerate(steps)], inkjet=co.get("inkjet"), ovr=co.get("override"),
+                 oldMo=s.mo(co.get("oldMo")) if co.get("oldMo") else None,
                  settingsRows=co.get("settings") or [], src=co.get("src"), cacheT=co.get("cacheT"),
                  canReload=bool(s.settings.get("useDb")) and engine.integrations.assets_ready(),
                  override=" · ".join(f"{k} {v}" for k, v in (sh.override or {}).items()))
@@ -366,7 +368,7 @@ def m_copass(request, s):
     if not (sh and sh.co and sh.co.get("start") and sh.person_id):
         return thin.refused("There's no changeover under way to pass over.")
     co = sh.co
-    n, done = len(engine.co_steps(co)), len(co.get("done") or [])
+    n, done = len(engine.co_steps(co, sh.line)), len(co.get("done") or [])
     w = engine.log_window(sh, s.t)
     return modal_response(request, "hmi/k/m_copass.html", **ctx_for(s, sh=sh, n=n, done=done, nextShift="the next operator" if w.get("noShift") else "the next shift",
                                                                  newMo=s.mo(co.get("newMo"))))
@@ -738,7 +740,66 @@ def _co_next(request, s, r):
 
 
 ACTIONS["coCancel"] = simple("coCancel", toast=False, close=True)
-ACTIONS["coEnd"] = simple("coEnd", toast=False, then=_co_next)
+@action("coEnd")
+def a_co_end(request, s, p):
+    """End Order: the run's final count and scrap, and every end-of-order item checked; then the changeover opens."""
+    n = len(engine.machine_list("endSteps", s.station))
+    on = set(request.POST.getlist("end"))
+    r = run(request, s, "coEnd", {"qty": p.get("qty", ""), "scrap": p.get("scrap", ""), "close": p.get("close"),
+                                  "checks": [str(i) in on for i in range(n)]})
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.trigger(changeover_modal(request, screen(request)), toast="Order ended. Now the changeover: pick the next MO.", changed=True)
+
+
+ACTIONS["coBack"] = simple("coBack", toast=False, then=_co_next)
+
+
+@modal("como")
+def m_como(request, s):
+    """Supervisor override: change over to an MO that isn't lined up for this line."""
+    if not s.can("runs.nomo"):
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm="floor.override", perm_label=_perm_label("floor.override"),
+                                                                       sup=True, next="como", why="nomo",
+                                                                       people=kscreen.people_for_login("runs.nomo")))
+    if not (s.shift and (s.shift.co or {}).get("step", 0) >= 2):
+        return thin.refused("End the current order first.")
+    return modal_response(request, "hmi/k/m_como.html", **ctx_for(s, sh=s.shift))
+
+
+@action("coPickMo")
+def a_co_pick_mo(request, s, p):
+    r = run(request, s, "coPickMo", {k: p.get(k, "") for k in ("mo", "part", "qty", "why")})
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.trigger(changeover_modal(request, screen(request)), toast=r.get("msg"), changed=True)
+
+
+@modal("attach", login=True)
+def m_attach(request, s):
+    """Running without an MO (or by filter number): pick the MO it's for."""
+    sh = s.shift
+    if not s.shift_on or not sh or sh.co or (sh.mo and sh.mo.source != "floor"):
+        return thin.refused("This line is already running an MO.")
+    from django.db.models import Sum
+    from .models import MoRun
+    if sh.mo:
+        made = sh.mo_count
+    else:   # filters counted this shift that no MO has taken yet
+        made = max(0, sh.count - (MoRun.objects.filter(shift=sh).aggregate(n=Sum("qty"))["n"] or 0))
+    queue = list(MO.objects.filter(line__name=sh.line, status="OPEN").exclude(pk=sh.mo_id).order_by("seq")[:4])
+    pick = request.GET.get("mo") or (str(queue[0].number) if queue else "")
+    return modal_response(request, "hmi/k/m_attach.html", **ctx_for(s, sh=sh, made=made, queue=queue, mo_pick=pick))
+
+
+@action("moAttach")
+def a_mo_attach(request, s, p):
+    r = run(request, s, "moAttach", {"mo": p.get("mo", ""), "qty": p.get("qty", "")})
+    if not r["ok"]:
+        if r.get("login"):
+            return login_needed(request, s, r)
+        return err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg"), close=True, changed=True)
 ACTIONS["coPick"] = simple("coPick", toast=False, then=_co_next)
 
 

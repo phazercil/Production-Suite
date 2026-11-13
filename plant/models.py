@@ -183,12 +183,14 @@ class ExtraBreak(models.Model):
 class PartSpec(models.Model):
     """Drawing specs the QC check measures against. Prefixes like 1MG/2MG share the MG spec."""
     key = models.CharField(max_length=40, unique=True)
-    pleats = models.FloatField()
-    len = models.FloatField()
-    wid = models.FloatField()
-    ph = models.FloatField()
-    sb = models.FloatField()
-    tol = models.FloatField(default=0.06)
+    # a value nobody knows (the asset database doesn't have it and nobody typed it) is blank, never a guess
+    pleats = models.FloatField(null=True, blank=True)
+    len = models.FloatField(null=True, blank=True)
+    wid = models.FloatField(null=True, blank=True)
+    ph = models.FloatField(null=True, blank=True)
+    sb = models.FloatField(null=True, blank=True)
+    tol = models.FloatField(null=True, blank=True)
+    hand = models.JSONField(default=list, blank=True, help_text="Values typed in Parts & specs (kept when the asset database doesn't have them)")
     rev = models.CharField(max_length=20, default="A")
     media = models.CharField(max_length=80, blank=True)
     drawing_url = models.URLField(max_length=2048, blank=True, default="")   # the drawing file (Admin › Connector builder › Drawing file)
@@ -344,6 +346,11 @@ DEFAULT_CONFIG = {
     "coSteps": ["Stop line and lock out", "Remove old media, labels and scrap", "Load new media roll and scan the roll tag",
                 "Set pleat height and pleat count from the drawing", "Adjust side band guides to width", "Check glue temperature and bead",
                 "Run first article and complete a QC check", "Lead operator sign-off"],
+    # End Order: done before a changeover starts, after the order's last filter (each machine can have its own list)
+    "endSteps": ["Last filters counted, labeled and on the skid", "Scrap counted and in the scrap bin", "Leftover media rolls tagged and put away",
+                 "Inkjet message and labels for this order cleared", "Paperwork / MO traveler filled out"],
+    # A changeover between filters with the same base part (AQ1278 to AQ1278C): only the inkjet branding changes
+    "inkjetSteps": ["Change the inkjet branding to the new part number", "Check the first printed filters read correctly"],
     "issueTypes": ["Pleater jam", "Blade / cutter", "Glue system", "Side band applicator", "Electrical / sensor", "Air / pneumatics",
                    "Guarding / safety", "Other"],
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
@@ -360,7 +367,32 @@ DEFAULT_SETTINGS = {
     "kiosk": {"layout": "panels", "range": "now-12h", "cols": 3, "rotate": 0,
               "panels": [{"title": "Pleater speed", "panel": 2}, {"title": "Uptime", "panel": 4}, {"title": "Units", "panel": 6}]},
 }
-DEFAULT_PLANNER = {"coSamePart": False, "coFirst": True}
+# inkjetBases: part number prefixes whose filters share a base part (AQ1278, AQ1278C, AQ1278-T): moving between them
+# only changes the inkjet branding, planned at inkjetMin minutes (0: no changeover time)
+DEFAULT_PLANNER = {"coSamePart": False, "coFirst": True, "inkjetBases": ["AQ"], "inkjetMin": 0}
+
+
+def base_part(part, prefixes):
+    """The base part a filter shares with its branded versions (AQ1278C → AQ1278), for the prefixes given; None
+    when its prefix isn't one of them."""
+    import re as _re
+    p = part_key(part)
+    for pre in prefixes or []:
+        pre = _re.sub(r"[^A-Z]", "", str(pre).upper())
+        if pre:
+            m = _re.match(rf"^({pre}\d+)", p)
+            if m:
+                return m.group(1)
+    return None
+
+
+def inkjet_only(old_part, new_part, prefixes):
+    """True when going from one filter to the other only changes the inkjet branding (same base part, different
+    part number)."""
+    if not old_part or not new_part or part_key(old_part) == part_key(new_part):
+        return False
+    b = base_part(old_part, prefixes)
+    return bool(b) and b == base_part(new_part, prefixes)
 
 
 class PlantSettings(models.Model):

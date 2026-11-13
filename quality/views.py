@@ -24,7 +24,7 @@ PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
 TABS = [("report", "Quality report"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
-           "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts"}
+           "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts"}
 PART_FIELDS = [("pleats", "Pleats/unit", "1"), ("len", "Length", ".001"), ("wid", "Width", ".001"), ("ph", "Pleat ht", ".001"),
                ("sb", "Side band", ".001"), ("tol", "Tol ±", ".001")]
 KINDS = [("", "All problems"), ("qc", "QC checks out of spec"), ("vision", "Machine vision fails"), ("hold", "Quality holds")]

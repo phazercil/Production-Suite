@@ -421,9 +421,12 @@ class Screen:
         if run:
             qs = qs.exclude(pk=run.pk)
         prev = run.part if run else (self.co_mo("oldMo").part if self.shift and (self.shift.co or {}).get("oldMo") and self.co_mo("oldMo") else None)
+        from plant.models import inkjet_only
+        bases = PlantSettings.load().planner.get("inkjetBases") or []
         out = []
         for m in qs:
-            out.append({"m": m, "co": prev is None or part_key(prev) != part_key(m.part), "left": max(0, m.qty - m.produced)})
+            out.append({"m": m, "co": prev is None or part_key(prev) != part_key(m.part), "ink": bool(prev) and inkjet_only(prev, m.part, bases),
+                        "left": max(0, m.qty - (m.produced - m.scrap))})
             prev = m.part
         return out
 
@@ -452,7 +455,7 @@ class Screen:
             h = sh.co.get("handoff") or {}
             new = self.mo(sh.co.get("newMo")) if sh.co.get("newMo") else None
             handoff = {"by": h.get("by") or "", "at": _e.fmt_t(from_ms(h["t"])) if h.get("t") else "", "note": h.get("note") or "",
-                       "done": len(sh.co.get("done") or []), "n": len(_e.co_steps(sh.co)), "new": new}
+                       "done": len(sh.co.get("done") or []), "n": len(_e.co_steps(sh.co, sh.line)), "new": new}
         out = {"on": bool(sh), "unattended": self.unattended, "offerName": offer, "coHandoff": handoff, "sh": sh, "stats": st, "lastPpm": last_ppm, "unit": self.machine.speed_short if self.machine else "P/m", "next": nx[:4], "more": max(0, len(nx) - 4), "first": nx[0] if nx else None,
                "feedWarn": bool(sh and self.feed.get("t") and not self.feed.get("ok", True)), "feedErr": self.feed.get("err", ""),
                "recipe": self.feed.get("recipe", ""), "planAt": self.st.plan_at,

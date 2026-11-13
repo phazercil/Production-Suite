@@ -84,7 +84,7 @@ class SuiteTests(TestCase):
     def test_changeover_flow(self):
         self.login("1111")
         self.assertTrue(self.cmd("coOpen", {}, "Barbara")["ok"])
-        self.assertTrue(self.cmd("coEnd", {"qty": 100, "scrap": 2}, "Barbara")["ok"])
+        self.assertTrue(self.cmd("coEnd", {"checks": [True] * 10, "qty": 100, "scrap": 2}, "Barbara")["ok"])
         r = self.cmd("coPick", {"mo": "306785"}, "Barbara")
         self.assertTrue(r["ok"], r)
         self.assertFalse(self.cmd("coFinish", {}, "Barbara")["ok"])  # steps not done
@@ -220,7 +220,7 @@ class RegressionTests(TestCase):
     def test_running_mo_is_planned_from_now_with_what_is_left(self):
         run = MO.objects.get(number="309215")
         r = compute(load_world())["res"][f"{run.id}__s1"]
-        self.assertEqual(r["qty"], run.qty - run.produced)
+        self.assertEqual(r["qty"], run.qty - (run.produced - run.scrap))   # good filters still to make
         self.assertGreaterEqual(r["start"], ms(now()) - 60_000)
         self.assertEqual(r["coMin"], 0)
 
@@ -296,8 +296,8 @@ class RegressionTests(TestCase):
         self.login("1111")
         self.cmd("coOpen", {})
         for bad in ("abc", "nan", -5):
-            self.assertFalse(self.cmd("coEnd", {"qty": bad})["ok"], bad)
-        self.assertTrue(self.cmd("coEnd", {"qty": 100})["ok"])
+            self.assertFalse(self.cmd("coEnd", {"checks": [True] * 10, "qty": bad})["ok"], bad)
+        self.assertTrue(self.cmd("coEnd", {"checks": [True] * 10, "qty": 100})["ok"])
 
     def test_s2k_import_skips_bad_rows_and_keeps_good_ones(self):
         ctx = engine.Ctx()
@@ -372,7 +372,7 @@ class ReviewerFindingTests(TestCase):
     def test_ending_shift_during_changeover_records_it(self):
         self.post("/api/hmi/login", {"pin": "1111"})
         self.post("/api/hmi/cmd", {"name": "coOpen", "p": {}, "line": "Barbara"})
-        self.post("/api/hmi/cmd", {"name": "coEnd", "p": {"qty": 10}, "line": "Barbara"})
+        self.post("/api/hmi/cmd", {"name": "coEnd", "p": {"checks": [True] * 10, "qty": 10}, "line": "Barbara"})
         # the line stopped 40 minutes ago for the changeover (only the time it's stopped is Changeover downtime)
         ShiftRun.objects.filter(pk=self.sh.pk).update(co={**ShiftRun.objects.get(pk=self.sh.pk).co, "start": ms(now() - timedelta(minutes=40))},
                                                       stop_start=now() - timedelta(minutes=40))

@@ -1,0 +1,12 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Change over to an MO not on the schedule{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/coPickMo"{% endblock %}
+{% block body %}<p class="sub">For an emergency switch the planner called for: type the MO {{ sh.line }} changes over to. If it's scheduled on another line it moves here; if the suite doesn't have it yet, give its filter number and quantity. The Scheduler shows it on {{ sh.line }} once it runs, and the planners are told.</p>
+  <label class="f">MO number<input type="text" name="mo" autofocus autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="Scan or type the MO number"></label>
+  <div class="grid2">
+    <label class="f">Filter number <span class="note">(only if the suite doesn't have this MO)</span><input type="text" name="part" autocomplete="off" autocapitalize="characters" maxlength="40" placeholder="e.g. AQ1278C"></label>
+    <label class="f">Quantity <span class="note">(only if the suite doesn't have this MO)</span><input type="number" name="qty" min="1" inputmode="numeric"></label>
+  </div>
+  <label class="f">Why<input type="text" name="why" maxlength="200" placeholder="e.g. emergency switch called by the planner"></label>
+  <p class="note">{% if S.sup %}Supervisor: {{ S.sup.name }}{% else %}{{ S.actor.name }}{% endif %}</p>{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" hx-get="/kiosk/m/changeover?refresh=1" hx-target="#modal" hx-swap="innerHTML">Back</button><button class="btn go" type="submit">Change over to this MO</button>{% endblock %}

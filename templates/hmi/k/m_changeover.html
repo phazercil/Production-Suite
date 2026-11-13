@@ -1,26 +1,33 @@
 {% extends "hmi/k/m_base.html" %}
 {% block sheet_attrs %}hx-get="/kiosk/m/changeover?refresh=1" hx-trigger="suite:changed from:body" hx-target="#modal" hx-swap="innerHTML"{% endblock %}
-{% block title %}Change over{% endblock %}
+{% block title %}{% if step == 1 %}End order{% else %}Change over{% endif %}{% endblock %}
 {% block form_attrs %}{% endblock %}
 {% block body %}
-  <div class="steps"><span class="{% if step == 1 %}on{% elif step > 1 %}done{% endif %}">1 · End MO</span><span class="{% if step == 2 %}on{% elif step > 2 %}done{% endif %}">2 · Next MO</span><span class="{% if step == 3 %}on{% endif %}">3 · Set up</span></div>
+  <div class="steps"><span class="{% if step == 1 %}on{% elif step > 1 %}done{% endif %}">1 · End order</span><span class="{% if step == 2 %}on{% elif step > 2 %}done{% endif %}">2 · Next MO</span><span class="{% if step == 3 %}on{% endif %}">3 · Set up</span></div>
   {% if handoff %}<div class="panel" style="border-color:var(--accent)"><b>Passed over by {{ handoff.by|default:"the last operator" }}</b>{% if handoff.shift %} ({{ handoff.shift }}){% endif %} at {{ handoff.at }}{% if handoff.note %}<br><span>“{{ handoff.note }}”</span>{% endif %}</div>{% endif %}
   {% if canPass and nearEnd %}<div class="panel" style="border-color:var(--warn)"><b>{{ shiftName|default:"Your shift" }} ends at {{ shiftEnd }}.</b> Not finished? <button type="button" class="btn warn sm" hx-get="/kiosk/m/copass" hx-target="#modal" hx-swap="innerHTML">Pass over</button> hands it to the next shift, with your time and steps kept.</div>{% endif %}
   {% if step == 1 %}
     {% if mo %}<div class="panel"><dl class="kv"><dt>Ending MO</dt><dd>{{ mo.floor_number }} · {{ mo.part }}</dd><dt>MO timer</dt><dd class="num" {% if sh.mo_start %}data-since="{{ sh.mo_start|ms }}"{% endif %}>{{ moTimer }}</dd><dt>Made this run</dt><dd class="num">{{ sh.mo_count|num }}</dd><dt>Total produced</dt><dd class="num">{{ mo.produced|num }} of {{ mo.qty|num }}</dd></dl></div>
-    <div class="grid2"><label class="f">Final count for this run<input type="number" name="qty" value="{{ sh.mo_count }}" autofocus></label><label class="f">Scrap<input type="number" name="scrap" value="0" min="0"></label></div>
+    <h3 class="h2">Closing count</h3>
+    <div class="grid2"><label class="f">Total made this run <span class="note">(every filter, good and scrap)</span><input type="number" name="qty" value="{{ sh.mo_count }}" min="0" autofocus></label>
+      <label class="f">Total scrap this run <span class="note">{% if logged %}({{ logged|num }} already logged in QC checks){% else %}(0 if none){% endif %}</span><input type="number" name="scrap" value="{{ logged }}" min="0"></label></div>
     <label class="chk"><input type="hidden" name="close:b" value="0"><input type="checkbox" name="close:b" value="1" {% if close %}checked{% endif %}> Close this MO (order complete)</label>
+    {% if endSteps %}<h3 class="h2">Before the changeover</h3><p class="note">Check off every item to end the order.</p>
+    <div style="display:flex;flex-direction:column;gap:6px">{% for t in endSteps %}<label class="chk cstep"><input type="checkbox" name="end" value="{{ forloop.counter0 }}"> <span class="num note">{{ forloop.counter }}</span> {{ t }}</label>{% endfor %}</div>{% endif %}
     {% else %}<p>No MO is running. Go on to pick the next one.</p>{% endif %}
   {% elif step == 2 %}
     <div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div>
     <label class="f">Scan next MO<input type="text" name="mo" autofocus placeholder="Scan or type MO number" value="{{ mo_pick }}"></label>
     {% if queue %}<div class="note">From the {{ sh.line }} schedule: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/changeover?refresh=1&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.floor_number }} · {{ m.part }}</button> {% endfor %}</div>
     {% else %}<p class="note">Nothing else scheduled on this line. Scan an MO, or a supervisor can run it by filter number.</p>{% endif %}
-    <div><button type="button" class="btn {% if queue %}ghost{% else %}warn{% endif %} sm" hx-get="/kiosk/m/nomo" hx-target="#modal" hx-swap="innerHTML">No MO? Run by filter number - Supervisor</button></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button type="button" class="btn {% if queue %}ghost{% else %}warn{% endif %} sm" hx-get="/kiosk/m/como" hx-target="#modal" hx-swap="innerHTML">Not on the schedule? Type the MO - Supervisor</button><button type="button" class="btn ghost sm" hx-get="/kiosk/m/nomo" hx-target="#modal" hx-swap="innerHTML">No MO? Run by filter number - Supervisor</button></div>
   {% else %}
-    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.floor_number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats }} pleats/unit · drawing rev {{ p.rev }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
+    {% if inkjet %}<div class="panel" style="border-color:var(--ok)"><b>Inkjet change only.</b> {{ nmo.part }} has the same base part as {{ oldMo.part }}, so only the inkjet branding changes. Keep the line running; any time it stops still counts as changeover downtime.</div>{% endif %}
+    {% if ovr %}<div class="panel" style="border-color:var(--warn)"><b>Supervisor override</b> by {{ ovr.by }}: {{ ovr.why }}{% if ovr.from %} · moved from {{ ovr.from }}{% endif %}. The Scheduler moves this MO to {{ sh.line }} once it runs.</div>{% endif %}
+    <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.floor_number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats|default_if_none:"—" }} pleats/unit · drawing rev {{ p.rev|default:"—" }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
     {% if co.loading %}<div class="panel empty">Loading steps for this part from the database…</div>{% else %}
-      {% if src == "db" %}<p class="note">Steps and settings from the database for {{ p.key }} on {{ sh.line }}.</p>
+      {% if src == "inkjet" %}<p class="note">The inkjet checklist for {{ sh.line }}.</p>
+      {% elif src == "db" %}<p class="note">Steps and settings from the database for {{ p.key }} on {{ sh.line }}.</p>
       {% elif src == "cache" %}<p class="note" style="color:var(--warn)">Database not reachable. Showing the steps saved for this part{% if cacheT %} at {{ cacheT|clock }}{% endif %}.</p>
       {% elif src == "admin-offline" %}<p class="note" style="color:var(--warn)">Database not reachable and nothing saved for this part. Showing the standard checklist.</p>
       {% elif src == "admin-empty" %}<p class="note" style="color:var(--warn)">No database steps for {{ p.key }} on {{ sh.line }}. Showing the standard checklist.</p>{% endif %}
@@ -36,7 +43,7 @@
   </tbody></table></div></div>{% endif %}
 {% endblock %}
 {% block foot %}
-  {% if step == 1 %}<button type="button" class="btn ghost" hx-post="/kiosk/do/coCancel">Cancel</button><button class="btn go" hx-post="/kiosk/do/coEnd" hx-include="closest form">End MO and start changeover</button>
+  {% if step == 1 %}<button type="button" class="btn ghost" hx-post="/kiosk/do/coCancel">Cancel</button><button class="btn go" hx-post="/kiosk/do/coEnd" hx-include="closest form">{% if mo %}End order{% else %}Start changeover{% endif %}</button>
   {% elif step == 2 %}{% if canPass %}<button type="button" class="btn {% if nearEnd %}warn{% else %}ghost{% endif %}" hx-get="/kiosk/m/copass" hx-target="#modal" hx-swap="innerHTML">Pass over</button>{% endif %}<button class="btn go" hx-post="/kiosk/do/coPick" hx-include="closest form">Use this MO</button>
-  {% else %}{% if canPass %}<button type="button" class="btn {% if nearEnd %}warn{% else %}ghost{% endif %}" hx-get="/kiosk/m/copass" hx-target="#modal" hx-swap="innerHTML">Pass over</button>{% endif %}<button class="btn go" hx-post="/kiosk/do/coFinish">Start running</button>{% endif %}
+  {% else %}<button type="button" class="btn ghost" hx-post="/kiosk/do/coBack" title="Pick the next MO again (or fix the filter number)">‹ Back</button>{% if canPass %}<button type="button" class="btn {% if nearEnd %}warn{% else %}ghost{% endif %}" hx-get="/kiosk/m/copass" hx-target="#modal" hx-swap="innerHTML">Pass over</button>{% endif %}<button class="btn go" hx-post="/kiosk/do/coFinish">Start running</button>{% endif %}
 {% endblock %}

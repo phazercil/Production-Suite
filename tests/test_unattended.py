@@ -178,7 +178,7 @@ class ChangeoverPassOverTests(TestCase):
         self.tick(day)
         run("startShift", {"mo": mos[0].number, "safety": safety}, lee, 1)
         run("coOpen", {}, lee, 5)
-        run("coEnd", {"qty": 10, "scrap": 0}, lee, 10)                     # 13:30 the changeover starts
+        run("coEnd", {"checks": [True] * 10, "qty": 10, "scrap": 0}, lee, 10)                     # 13:30 the changeover starts
         run("coPick", {"mo": mos[1].number}, lee, 12)
         run("coStep", {"i": 0, "checked": True}, lee, 15)
         run("coStep", {"i": 1, "checked": True}, lee, 20)
@@ -215,7 +215,7 @@ class ChangeoverPassOverTests(TestCase):
         safety = [True] * len(engine.config()["safety"])
         ctx = lambda m: engine.Ctx(user=self.op, t=day + timedelta(minutes=m))  # noqa: E731
         self.tick(day)
-        for name, p, m in (("startShift", {"mo": mo.number, "safety": safety}, 1), ("coOpen", {}, 2), ("coEnd", {"qty": 5, "scrap": 0}, 3)):
+        for name, p, m in (("startShift", {"mo": mo.number, "safety": safety}, 1), ("coOpen", {}, 2), ("coEnd", {"checks": [True] * 10, "qty": 5, "scrap": 0}, 3)):
             self.assertTrue(engine.execute(name, {"line": self.m.name, **p}, ctx(m))["ok"])
         r = engine.execute("endShift", {"line": self.m.name, "issues": "Old die off"}, ctx(20))
         self.assertTrue(r["ok"], r)

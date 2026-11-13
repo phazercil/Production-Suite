@@ -41,7 +41,7 @@ class ChangeoverLiveTests(TestCase):
     def test_rate_keeps_showing_and_only_stops_are_changeover(self):
         self.tick(0)
         self.assertTrue(self.cmd("coOpen", {}, 1)["ok"])
-        self.assertTrue(self.cmd("coEnd", {"qty": 10}, 1)["ok"])
+        self.assertTrue(self.cmd("coEnd", {"checks": [True] * 10, "qty": 10}, 1)["ok"])
         before = ShiftRun.objects.get(pk=self.sh.pk).count
         for i in range(1, 4):
             self.tick(i)                                             # still running: running out the last parts
@@ -65,7 +65,7 @@ class ChangeoverLiveTests(TestCase):
         for i in range(1, 4):
             self.tick(i, ppm=0)                                       # stopped before Change MO was pressed
         self.assertTrue(self.cmd("coOpen", {}, 4)["ok"])
-        self.assertTrue(self.cmd("coEnd", {"qty": 10}, 4)["ok"])
+        self.assertTrue(self.cmd("coEnd", {"checks": [True] * 10, "qty": 10}, 4)["ok"])
         for i in range(4, 9):
             self.tick(i, ppm=0)
         sh = ShiftRun.objects.get(pk=self.sh.pk)
@@ -83,7 +83,7 @@ class ChangeoverLiveTests(TestCase):
     def test_no_downtime_when_the_line_never_stops(self):
         self.tick(0)
         self.cmd("coOpen", {}, 1)
-        self.cmd("coEnd", {"qty": 10}, 1)
+        self.cmd("coEnd", {"checks": [True] * 10, "qty": 10}, 1)
         for i in range(1, 6):
             self.tick(i)
         self.assertEqual(self.co_downs(), [])

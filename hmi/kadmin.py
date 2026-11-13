@@ -30,7 +30,11 @@ LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick fr
                       "When the prompt appears is set in Rules.")],
          "checklists": [("safety", "QC and safety checklist", "Every item must be checked before the line can start."),
                         ("pm", "Shift PM checklist", "Recorded at start of shift; not required to start."),
-                        ("coSteps", "Changeover steps", "Shown in order during a changeover. All must be checked before running.")],
+                        ("endSteps", "End-of-order checklist", "Checked off with the final count when an order ends (End order), before the changeover starts."),
+                        ("coSteps", "Changeover steps", "Shown in order during a changeover. All must be checked before running. Steps from the "
+                                                        "asset database (Changeover data) come first when it has them for the part."),
+                        ("inkjetSteps", "Inkjet-only changeover", "Used instead of the changeover steps when the next filter has the same base "
+                                                                  "part (AQ1278 → AQ1278C; set in Scheduler › Lines & Shifts): only the inkjet branding changes.")],
          "maintenance": [("issueTypes", "Issue types", "Choices on a maintenance ticket."),
                          ("equipment", "Other equipment", "Listed after the machines when someone opens a ticket.")]}
 FEED_LABEL = [("db", "Database table"), ("http", "Read from URL"), ("push", "Pushed to server"), ("influx", "InfluxDB query"),
@@ -40,7 +44,7 @@ S2K_ROLES = [("mo", "MO number", True), ("item", "Item / part number", True), ("
 # (which line runs an MO is set in the Scheduler, not taken from S2K)
 # Commands a field or button can run as they are (the engine checks the person and every value)
 PASSTHROUGH = {"listAdd", "listDel", "listMove", "listSet", "lineAdd", "lineSet", "lineDel", "shiftAdd", "shiftSet", "shiftDel", "breakAdd",
-               "breakSet", "breakDel", "tagSysAdd", "tagSysDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
+               "breakSet", "breakDel", "listReset", "tagSysAdd", "tagSysDel", "varAdd", "varSet", "varBreak", "varDel", "partAdd", "partSet", "partDel", "ruleSet", "settingSet", "configReset", "dataReset", "testAll",
                "s2kPull", "peoplePull", "paycomImport", "networkFirewallSync", "srcDelete", "alertContactDelete", "updCancel", "updGoBack",
                "updFolder", "updWhen", "permRole", "permPerson", "permReset", "qcItemAdd", "qcItemDel", "qcItemMove"}
 _tables_cache = {}
@@ -79,7 +83,18 @@ def columns_of(t, table):
 def tab_data(s, tab, request):
     cfg = s.cfg
     if tab in LISTS:
-        out = {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
+        out = {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab] if k not in engine.PER_MACHINE]}
+        if tab == "checklists":   # each machine can have its own end-of-order, changeover and inkjet checklists
+            from .kviews import page_option
+            names = [m.name for m in Machine.objects.filter(stage="s1").order_by("sort", "id")]
+            lm = page_option(request, "listm", None, "")
+            lm = lm if lm in names else ""
+            own = cfg.get("machineLists") or {}
+            out.update(machines=names, listm=lm, perMachine=[{"k": k, "title": t, "help": h, "m": lm,
+                                                              "items": engine.machine_list(k, lm, cfg),
+                                                              "own": bool(lm and (own.get(k) or {}).get(lm))}
+                                                             for k, t, h in LISTS[tab] if k in engine.PER_MACHINE])
+            out["pmw"] = {"lists": out["perMachine"]}
         if tab == "reasons":   # earlier shifts' stops still without a reason: here, not on the operator screens
             from .kviews import downtime_rows
             out["older"] = downtime_rows(s, s.older_reasons())

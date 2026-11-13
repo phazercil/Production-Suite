@@ -22,7 +22,7 @@
     <div class="hd"><span class="eyebrow">{% if R.sh.state == "changeover" %}Changeover{% else %}Current order{% endif %}</span>{% if R.mo %}<span class="from">from S2K</span>{% endif %}<span class="grow"></span><span class="pill {{ R.pill.0 }}">{{ R.pill.1|upper }}</span></div>
     {% if R.mo %}
     <div class="mo"><b>MO {{ R.mo.floor_number }}</b><span>Part {{ R.mo.part }}</span></div>
-    <div class="desc">{{ R.p.media }} · {{ R.p.pleats }} pleats/unit · {{ R.p.len|floatformat:2 }}″ × {{ R.p.wid|floatformat:2 }}″ · drawing rev {{ R.p.rev }} {% include "hmi/k/_open_drawing.html" with p=R.p %}{% if R.p.estimated %} · <span style="color:var(--warn)">estimated specs</span>{% endif %}</div>
+    <div class="desc">{{ R.p.media }} · {{ R.p.pleats|default_if_none:"—" }} pleats/unit · {{ R.p.len|floatformat:2|default:"—" }}″ × {{ R.p.wid|floatformat:2|default:"—" }}″ · drawing rev {{ R.p.rev }} {% include "hmi/k/_open_drawing.html" with p=R.p %}{% if R.p.estimated %} · <span style="color:var(--warn)">not in Parts &amp; specs</span>{% endif %}</div>
     <div class="prog"><div class="lbl"><span>Good parts</span><b class="num">{{ R.good|num }} <small>/ {{ R.mo.qty|num }}</small></b></div><div class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ R.pct|floatformat:0 }}" aria-label="MO progress"><i style="width:{{ R.pct|floatformat:1 }}%"></i></div></div>
     <div class="metrics">
       <div class="metric"><span>Rate (pcs/min)</span><b class="num">{{ R.rate }} <small>{{ R.lastPpm }} {{ R.unit|default:"P/m" }}</small></b></div>
@@ -49,14 +49,18 @@
     {% include "hmi/k/_tooling.html" with groups=R.nextCo.tool.groups tool=R.nextCo.tool %}</div>
   {% elif R.on %}<div class="note">No changeover planned in the next 24 hours.</div>{% endif %}
   {% for x in R.next %}{% if not R.nextCo or x.m.pk != R.nextCo.m.pk %}<div class="job"><div class="t"><b>MO {{ x.m.floor_number }}</b><span>#{{ forloop.counter }}</span></div><div class="p">{{ x.m.part }} · {{ x.left|num }} pcs</div>
-    {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>{% endif %}
+    {% if x.m.plan_start %}<div class="w">Planned {{ x.m.plan_start|plan:S.t }}{% if x.m.plan_end %} – {{ x.m.plan_end|plan:S.t }}{% endif %}</div>{% endif %}{% if x.ink %}<div class="co">{% icon "co" %}Inkjet change only</div>{% elif x.co %}<div class="co">{% icon "co" %}Changeover required</div>{% endif %}</div>{% endif %}
   {% empty %}<div class="empty">Nothing else is planned for this line. The scheduler adds runs here.</div>{% endfor %}
   {% if R.more %}<div class="small">+{{ R.more }} more on the <a href="{{ base }}/schedule/" style="color:var(--accent)">schedule</a></div>{% endif %}
   <div class="reports"><div class="row"><span class="eyebrow">Shift reports</span><span class="small">last 24 hours</span></div>
     {% for r in R.reports %}<div class="rep {% if r.bad %}bad{% endif %}"><div class="m"><b>{{ r.kind }}</b> · {{ r.t|plan:S.t }}{% if r.by %} · {{ r.by }}{% endif %}{% if r.status %} · <span class="pill {% if r.bad %}warn{% else %}ok{% endif %}">{{ r.status }}</span>{% endif %}</div><div class="x">{{ r.text|truncatechars:160 }}</div></div>
     {% empty %}<div class="note">Nothing reported on {{ station }} in the last day.</div>{% endfor %}</div>
   <div class="spacer"></div>
-  {% if R.on and not R.unattended %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.state == "changeover" %}Continue changeover{% else %}Start changeover{% endif %}</button>{% endif %}
+  {% if R.on and not R.unattended %}
+    {% if R.sh.co and R.sh.co.step >= 2 %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.co.newMo %}Continue changeover{% else %}Start changeover{% endif %}</button>
+    {% elif R.sh.mo and R.sh.mo.source != "floor" %}<button class="btn warn bigbtn" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}End order</button>
+    {% else %}<div class="row" style="gap:8px"><button class="btn primary bigbtn grow" hx-get="/kiosk/m/attach" hx-target="#modal" hx-swap="innerHTML">Pick MO</button><button class="btn warn bigbtn grow" hx-get="/kiosk/m/changeover" hx-target="#modal" hx-swap="innerHTML">{% icon "co" %}{% if R.sh.mo %}End order{% else %}Start changeover{% endif %}</button></div>{% endif %}
+  {% endif %}
 </aside></div>
 <div class="actions">
   <button class="act {% if R.qcDue %}due{% endif %}" hx-get="/kiosk/m/qc" hx-target="#modal" hx-swap="innerHTML">{% icon "qc" %}<span>QC check</span></button>
