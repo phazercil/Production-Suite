@@ -92,7 +92,7 @@ def report(f):
         return specs[k]
 
     rows, by_what, by_part, by_issue = [], Counter(), Counter(), Counter()
-    checks = QCCheck.objects.filter(t__gte=f["A"], t__lt=f["B"])
+    checks = QCCheck.objects.filter(t__gte=f["A"], t__lt=f["B"]).select_related("recheck")
     vision = AutoQC.objects.filter(t__gte=f["A"], t__lt=f["B"])
     holds = Downtime.objects.filter(start_time__gte=f["A"], start_time__lt=f["B"], reason__icontains="quality")
     if f["line"]:
@@ -123,7 +123,7 @@ def report(f):
                 by_issue[q.issue] += q.scrapped or 0
             rows.append({"t": q.t, "line": q.line, "kind": "QC check", "mo": q.mo, "item": q.item, "who": q.by, "detail": detail,
                          "scrap": q.scrap, "status": q.review or "", "reviewedBy": q.reviewed_by, "scrapped": q.scrapped,
-                         "issue": q.issue, "issueNote": q.issue_note, "late": q.late_reason, "shift": q.shift_id,
+                         "issue": q.issue, "issueNote": q.issue_note, "recheck": q.recheck_status(), "late": q.late_reason, "shift": q.shift_id,
                          "edit": f"/supervisor/edit/qc/{q.pk}/", "processOut": f"/supervisor/processout/{q.pk}/"})
     if f["kind"] in ("", "vision"):
         for a in vision.filter(passed=False).order_by("-t")[:MAX_ROWS]:

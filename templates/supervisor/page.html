@@ -15,6 +15,7 @@
         <dt>Speed</dt><dd>{% if c.ppm is not None %}<b class="big">{{ c.ppm }}</b> {{ c.m.speed_short }} <span class="note">of {{ c.m.ppm|floatformat:0 }}</span>{% elif c.stale %}<span class="warn">No reading since {{ c.since|clock }}</span>{% else %}<span class="muted">No readings</span>{% endif %}</dd>
         <dt>MO</dt><dd>{% if c.mo %}{{ c.mo.number }} · {{ c.mo.part }}{% elif c.next %}<span class="warn">Setting up</span> {{ c.next.number }} · {{ c.next.part }}{% else %}<span class="muted">None</span>{% endif %}</dd>
         {% if c.mo %}<dt>Qty</dt><dd><b class="big">{{ c.made|num }}</b> of {{ c.qty|num }}{% if c.pct is not None %}<div class="hbar" style="margin:4px 0 0;grid-template-columns:1fr auto"><i style="width:{{ c.pct }}%"></i><span class="n">{{ c.pct }}%</span></div>{% endif %}</dd>{% endif %}
+        {% if c.recheck %}<dt>QC</dt><dd><span class="pill warn">Re-check due</span> <span class="note">after the failed check at {{ c.recheck.0.t|clock }}</span></dd>{% endif %}
         {% if c.sh %}<dt>This shift</dt><dd>{{ c.sh.count|num }} made{% if c.stats %} · {{ c.stats.uptime }}% up · {{ c.stats.down }} min down{% endif %}</dd>{% endif %}
       </dl>
       {% if c.sh %}<a class="note" href="/supervisor/log/{{ c.sh.pk }}/?back=tab%3Dstatus">Shift report ›</a>{% endif %}</div>
@@ -53,7 +54,7 @@
       <td>{% if q.passed %}<span class="pill ok">Pass</span>{% else %}<span class="pill bad">Fail</span>{% endif %}{% if q.late_reason %}<div class="note">Late: {{ q.late_reason }}</div>{% endif %}</td>
       <td class="vals">{% for v in q.vals %}<span class="{% if v.bad %}bad{% endif %}">{{ v.k }} <b>{{ v.v }}</b></span>{% endfor %}</td>
       <td class="n">{{ q.scrap }}{% if q.scrapped %}<div class="note">{{ q.scrapped }} taken off</div>{% endif %}</td>
-      <td>{% if q.issue %}<span class="pill bad">Processed out</span><div class="note">{{ q.scrapped }} · {{ q.issue }}{% if q.issue_note %}: {{ q.issue_note|truncatechars:60 }}{% endif %}</div>{% elif q.review %}<span class="pill {% if q.review == 'approved' %}ok{% elif q.review == 'pending' %}warn{% else %}bad{% endif %}">{{ q.review|capfirst }}</span>{% endif %}{% if q.reviewed_by %}<div class="note">{{ q.reviewed_by }}</div>{% endif %}</td>
+      <td>{% if q.issue %}<span class="pill bad">Processed out</span><div class="note">{{ q.scrapped }} · {{ q.issue }}{% if q.issue_note %}: {{ q.issue_note|truncatechars:60 }}{% endif %}</div>{% elif q.review %}<span class="pill {% if q.review == 'approved' %}ok{% elif q.review == 'pending' %}warn{% else %}bad{% endif %}">{{ q.review|capfirst }}</span>{% endif %}{% if q.reviewed_by %}<div class="note">{{ q.reviewed_by }}</div>{% endif %}{% include "quality/_recheck.html" with rs=q.recheck_status %}</td>
       <td class="nw">{% if not q.passed %}<a class="btn go po" href="/supervisor/processout/{{ q.pk }}/?back={{ backq }}">{% if q.issue %}Change process out{% else %}Process out{% endif %}</a> {% endif %}{% if q.shift_id %}<a href="/supervisor/log/{{ q.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/qc/{{ q.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="9" class="empty">No QC checks for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "down" %}

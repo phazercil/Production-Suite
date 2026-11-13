@@ -465,3 +465,104 @@ class LineStatusTests(TestCase):
         self.assertContains(r, f"/supervisor/log/{sh.pk}/")
         self.assertIn("Running", r.context["totals"])
         self.assertContains(c.get("/supervisor/?tab=logs"), "Shift logs")
+
+
+class RecheckTests(TestCase):
+    """Once a failed QC check is disapproved or processed out (its scrap counted), a re-check is due on the line right
+    away, to prove the issue is corrected."""
+
+    def setUp(self):
+        from unittest import mock
+        no_planned_time(self)
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)   # no shift change mid-test
+        p.start()
+        self.addCleanup(p.stop)
+        seed_demo(reset=True)
+        st = PlantSettings.load()
+        st.settings = {**st.settings, "autoQC": False}   # due even with QC reminders off
+        st.save()
+        self.sh = ShiftRun.objects.filter(line="Barbara", active=True).select_related("mo").first()
+        self.lead = engine.Ctx(user=Person.objects.get(pin="4444"), line="Barbara")
+        self.op = engine.Ctx(user=Person.objects.get(pin="1111"), line="Barbara")
+        sp = engine.spec_for(self.sh.mo.part)
+        self.good = {"len": sp["len"], "wid": sp["wid"], "ph": sp["ph"], "sbl": sp["sb"], "sbr": sp["sb"], "glue": "Pass", "cut": "Pass",
+                     "scrap": "0", "lateReason": "fixing the glue gun"}
+        self.bad = {**self.good, "len": sp["len"] + 1}
+        self.q = QCCheck.objects.create(shift=self.sh, t=timezone.now() - timedelta(minutes=5), line="Barbara", mo=self.sh.mo.number,
+                                        item=self.sh.mo.part, by="J. Ortiz", passed=False, review="pending", fails=["len"])
+
+    def due(self):
+        self.sh.refresh_from_db()
+        return qc.due_at(self.sh, PlantSettings.load().settings, timezone.now())
+
+    def process_out(self, q=None, qty=4):
+        r = engine.execute("qcProcessOut", {"id": (q or self.q).pk, "qty": qty, "issue": "Bad cut"}, self.lead)
+        self.assertTrue(r["ok"], r)
+        return r
+
+    def test_due_right_after_the_scrap_is_counted(self):
+        self.assertIsNone(self.due())                                    # waiting for review: nothing due yet
+        r = self.process_out()
+        self.assertIn("re-check is due", r["msg"])
+        self.q.refresh_from_db()
+        self.assertIsNotNone(self.q.recheck_due)
+        self.assertEqual(self.due(), self.q.recheck_due)                 # due now, even with QC reminders off
+        self.assertEqual(self.q.recheck_status()["state"], "due")
+        first = self.q.recheck_due
+        self.process_out(qty=6)                                          # changing the count doesn't move it
+        self.q.refresh_from_db()
+        self.assertEqual(self.q.recheck_due, first)
+
+    def test_approved_needs_no_recheck(self):
+        r = engine.execute("qcReview", {"id": self.q.pk, "decision": "approved"}, self.lead)
+        self.assertTrue(r["ok"], r)
+        self.q.refresh_from_db()
+        self.assertIsNone(self.q.recheck_due)
+        self.assertIsNone(self.due())
+
+    def test_passing_recheck_proves_it_corrected(self):
+        self.process_out()
+        r = engine.execute("qcSave", self.good, self.op)
+        self.assertTrue(r["ok"], r)
+        self.assertIn("re-check passed", r["msg"])
+        new = QCCheck.objects.latest("id")
+        self.q.refresh_from_db()
+        self.assertEqual(self.q.recheck_id, new.pk)
+        self.assertEqual(self.q.recheck_status()["state"], "passed")
+        self.assertIsNone(self.due())                                    # back to normal (reminders off)
+        self.assertIn("QC re-check on Barbara", AuditLog.objects.latest("id").what)
+
+    def test_failing_recheck_goes_round_again(self):
+        self.process_out()
+        engine.execute("qcSave", self.bad, self.op)
+        again = QCCheck.objects.latest("id")
+        self.q.refresh_from_db()
+        self.assertEqual(self.q.recheck_status()["state"], "failed")
+        self.assertEqual(again.review, "pending")
+        self.assertIsNone(self.due())                                    # its review comes first
+        self.process_out(again)
+        again.refresh_from_db()
+        self.assertEqual(self.due(), again.recheck_due)                  # then another re-check
+        engine.execute("qcSave", self.good, self.op)
+        again.refresh_from_db()
+        self.assertEqual(again.recheck_status()["state"], "passed")
+
+    def test_shown_on_kiosk_supervisor_and_quality(self):
+        self.process_out()
+        k = Client(HTTP_HX_REQUEST="true")
+        k.post("/kiosk/do/station", {"line": "Barbara"})
+        k.post("/kiosk/do/login", {"pin": "1111"})
+        self.assertContains(k.get("/kiosk/v/qc-log"), "Re-check now")
+        self.assertContains(k.get("/kiosk/v/qc-log"), "RE-CHECK DUE")
+        self.assertContains(k.get("/kiosk/m/qc"), "Fix the issue first")
+        c = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(c, "4444")["ok"])
+        self.assertContains(c.get("/supervisor/?tab=status"), "Re-check due")
+        self.assertContains(c.get("/supervisor/?tab=qc"), "RE-CHECK DUE")
+        engine.execute("qcSave", self.good, self.op)
+        self.assertNotContains(c.get("/supervisor/?tab=status"), "Re-check due")
+        self.assertContains(c.get("/supervisor/?tab=qc"), "RE-CHECK PASSED")
+        q = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(q, "4444", "section.quality", "/quality/")["ok"])
+        self.assertContains(q.get("/quality/"), "RE-CHECK PASSED")
+        self.assertContains(k.get("/kiosk/v/qc-log"), "re-check after")

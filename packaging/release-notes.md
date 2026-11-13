@@ -1,3 +1,10 @@
+## What's new in 1.9.2
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **QC re-check after a failed check:** as soon as a failed QC check is disapproved or processed out (its scrap taken off the count), a QC check is due on that line right away, even with QC reminders off. Once the issue is fixed, the operator does the re-check: the Run screen alert and the QC Log say **QC re-check due**, and the QC check screen says it's the re-check after the failed check. The next check saved on the line is the re-check: if it passes, the failed check shows **Re-check passed** with the time; if it fails, it goes to a supervisor again, and disapproving it makes another re-check due. A failed check that's approved needs no re-check.
+- The re-check (due, passed or failed) shows on the failed check in the kiosk QC Log, Supervisor › QC checks and the shift report, Process Out and the Quality report. Supervisor › Line status shows **Re-check due** on a line still waiting for one, and a re-check that fails again sends a notice.
+
 ## What's new in 1.9.1
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
