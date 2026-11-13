@@ -196,8 +196,15 @@ def co_piece(sh, end, ended, note=""):
     if not (sh.state == "changeover" and co and co.get("start")):
         return
     s0 = from_ms(co["start"])
-    if end > s0:
-        add_down(sh, s0, end, "Changeover")
+    if end > s0 and not PpmReading.objects.filter(shift=sh, t__gt=s0, t__lte=end).exists():
+        # no machine data during it (a line without a feed, or the feed was down): the changeover time itself
+        add_down(sh, max(s0, sh.stop_start or s0), end, "Changeover")
+        sh.stop_start = None if ended == "finished" else end
+    elif sh.stop_start and end > sh.stop_start:
+        # the line's stop going on now is Changeover downtime (only the time it's stopped, not the whole changeover;
+        # the minute counter logs the stops that already ended)
+        add_down(sh, sh.stop_start, end, "Changeover")
+        sh.stop_start, sh.stop_what = (None if ended == "finished" else end), ""   # a changeover going on: so does its stop
     steps = co_steps(co)
     done = set(co.get("done") or [])
     mine = sorted(int(i) for i, d in (co.get("doneBy") or {}).items()
@@ -222,8 +229,9 @@ def close_log(sh, end, why="window", note=""):
     if sh.mo and sh.person_id:
         MoRun.objects.create(shift=sh, line=sh.line, mo=sh.mo.number, item=sh.mo.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
                              end_time=end)
-    close_stop(sh, end)
-    co_piece(sh, end, CO_ENDED.get(why, why), note)
+    if sh.state != "changeover":
+        close_stop(sh, end)
+    co_piece(sh, end, CO_ENDED.get(why, why), note)   # (a stop during a changeover is Changeover downtime)
     st = shift_stats(sh)
     sh.active, sh.end, sh.state = False, end, "idle"
     sh.uptime, sh.down_mins = st["uptime"], st["down"]
@@ -464,16 +472,18 @@ def tick(machine, sample, t):
         return
     ls.gap = 0
     ls.save(update_fields=["last_tick", "gap"])
+    # A changeover doesn't stop the machine's record: its speed, run signal and parts are kept as they are, and only
+    # the time it's actually stopped during a changeover is Changeover downtime (not the whole changeover).
     co = sh.state == "changeover"
     r = rules()
-    ppm = 0 if co else max(0, round(ppm_raw))
+    ppm = max(0, round(ppm_raw))
     planned = any(a < t <= b for a, b, _ in planned_for_tick(sh, t))
     signal = sample.get("run")
     main_runs = signal if isinstance(signal, bool) else ppm > r["stopPpm"]
     # two machines running together (a second run signal): the line runs only while both do
     second = sample.get("run2")
     second_runs = second if isinstance(second, bool) else True
-    running = main_runs and second_runs and not co
+    running = main_runs and second_runs
     stopped = [n for n, ok in ((machine.name, main_runs), (sample.get("run2Name") or "Second machine", second_runs)) if not ok]
     recipe = str(sample.get("recipe") or "")[:80]
     reading = PpmReading.objects.create(machine=machine, line=machine.name, shift=sh, t=t, ppm=ppm, planned=planned, run=running,
@@ -487,10 +497,10 @@ def tick(machine, sample, t):
         pass   # no counter value this minute: nothing counted, never a guess from speed
     elif cnt is not None and cnt >= 0:
         c = int(cnt)
-        if not co and sh.last_count is not None and c >= sh.last_count:
+        if sh.last_count is not None and c >= sh.last_count:
             units = c - sh.last_count
         sh.last_count = c
-    elif not co:
+    else:
         sh.acc += ppm
         per = pleats_for(sh)
         units = int(sh.acc // per) if per > 0 else 0
@@ -502,21 +512,24 @@ def tick(machine, sample, t):
         if sh.mo:
             MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + units)
             sh.mo_count += units
-    if not co:
-        if not running:
-            if not sh.stop_start:
-                sh.stop_start = t - timedelta(minutes=1)
-                sh.stop_what = " and ".join(stopped)[:120]
-            elif stopped and sh.stop_what != " and ".join(stopped)[:120]:
-                sh.stop_what = " and ".join(dict.fromkeys(sh.stop_what.split(" and ") + stopped))[:120]
-            sh.state = "stopped"
-        else:
-            if sh.stop_start:
-                end = t - timedelta(minutes=1)  # the last stopped minute
-                if (end - sh.stop_start).total_seconds() / 60 >= r["minDown"]:
-                    add_down(sh, sh.stop_start, end)
-                sh.stop_start = None
-                sh.stop_what = ""
+    if not running:
+        if not sh.stop_start:
+            sh.stop_start = t - timedelta(minutes=1)
+            sh.stop_what = " and ".join(stopped)[:120]
+        elif stopped and sh.stop_what != " and ".join(stopped)[:120]:
+            sh.stop_what = " and ".join(dict.fromkeys(sh.stop_what.split(" and ") + stopped))[:120]
+        if not co:
+            sh.state = "stopped"   # (a line in a changeover stays in its changeover)
+    else:
+        if sh.stop_start:
+            end = t - timedelta(minutes=1)  # the last stopped minute
+            if co:
+                add_down(sh, sh.stop_start, end, "Changeover")   # stopped during the changeover
+            elif (end - sh.stop_start).total_seconds() / 60 >= r["minDown"]:
+                add_down(sh, sh.stop_start, end)
+            sh.stop_start = None
+            sh.stop_what = ""
+        if not co:
             sh.state = "running"
             if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
                 sh.qc_due_at = t - timedelta(minutes=1)
@@ -762,7 +775,7 @@ def co_end(p, ctx):
         MoRun.objects.create(shift=sh, line=sh.line, mo=mo.number, item=mo.part, qty=q, scrap=sc, start_time=sh.mo_start or sh.start,
                              end_time=ctx.now)
         event("mo_end", {"mo": mo.number, "qty": q, "scrap": sc, "closed": mo.status == "CLOSE"})
-    close_stop(sh, ctx.now)
+    # a stop under way goes on as part of the changeover: when it ends it's Changeover downtime, from when it began
     sh.mo, sh.state, sh.override = None, "changeover", None
     co.update({"start": ms(ctx.now), "step": 2, "first": ms(ctx.now), "id": uuid.uuid4().hex, "doneBy": {}, "pieces": []})
     sh.co = co

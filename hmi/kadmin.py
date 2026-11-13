@@ -79,7 +79,13 @@ def columns_of(t, table):
 def tab_data(s, tab, request):
     cfg = s.cfg
     if tab in LISTS:
-        return {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
+        out = {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
+        if tab == "reasons":   # earlier shifts' stops still without a reason: here, not on the operator screens
+            from .kviews import downtime_rows
+            out["older"] = downtime_rows(s, s.older_reasons())
+            for i, x in enumerate(out["older"]):
+                x["letter"] = chr(65 + i % 26)
+        return out
     if tab == "machines":
         from plant import units
         base = request.build_absolute_uri("/station/")

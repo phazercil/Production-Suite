@@ -142,14 +142,18 @@ class Screen:
 
     # ------------------------------------------------------------ the rules that drive prompts and badges
     def need_reason(self):
-        """Stops still waiting for a reason: an operator's are their own shift's; a shift lead or admin sees every
-        shift's on this line."""
-        qs = Downtime.objects.filter(reason__isnull=True, line=self.station)
-        if not self.is_lead:
-            if not self.shift:
-                return []
-            qs = qs.filter(shift=self.shift)
-        return list(qs.order_by("start_time"))
+        """Stops still waiting for a reason on the operator screens: this line's current shift only, whoever is
+        logged in. Earlier shifts' are on the Admin page (older_reasons)."""
+        if not self.shift:
+            return []
+        return list(Downtime.objects.filter(reason__isnull=True, line=self.station, shift=self.shift).order_by("start_time"))
+
+    def older_reasons(self):
+        """Admin › Downtime reasons: every line's stops still without a reason from shifts that are over (or with
+        no shift), the ones the operator screens no longer show."""
+        from .models import ShiftRun
+        live = ShiftRun.objects.filter(active=True).values("pk")
+        return list(Downtime.objects.filter(reason__isnull=True).exclude(shift__in=live).order_by("line", "start_time"))
 
     def unexplained_mins(self):
         return sum(d.minutes or 0 for d in self.need_reason())
@@ -686,8 +690,7 @@ def downtime_page(s):
     from .kviews import downtime_rows
     sh = s.shift
     mine = list(Downtime.objects.filter(shift=sh).order_by("start_time")) if sh else []
-    # earlier shifts' stops still without a reason: shift leads and admins only (operators see their own shift's)
-    older = [d for d in s.need_reason() if not sh or d.shift_id != sh.pk] if s.is_lead else []
+    older = []   # earlier shifts' stops still without a reason are on the Admin page (Downtime reasons)
     by = Counter()
     for d in mine:
         by[d.reason or "Not entered"] += d.minutes or 0

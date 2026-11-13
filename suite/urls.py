@@ -74,7 +74,8 @@ urlpatterns = [
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
     path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),
-    path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),   # the Labor Budget alone (no other sections), e.g. for the office
+    path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),
+    path("packaging/", sections.soon, {"key": "packaging"}, name="packaging-section"),   # (coming later)   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),
     path("api/labor/history", labor.history),

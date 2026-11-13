@@ -1,5 +1,5 @@
 # The sections of the suite, in the top bar (key, address, name)
-MODES = [("operator", "/operator/", "Operator Kiosk"), ("scheduler", "/scheduler/", "Scheduler"), ("data", "/data/", "Data Kiosk"),
+MODES = [("operator", "/operator/", "Operator Kiosk"), ("packaging", "/packaging/", "Packaging Kiosk"), ("scheduler", "/scheduler/", "Scheduler"), ("data", "/data/", "Data Kiosk"),
          ("reports", "/reports/", "Reports"), ("labor", "/labor/", "Labor Budget"), ("supervisor", "/supervisor/", "Supervisor"),
          ("quality", "/quality/", "Quality"),
          ("maintenance", "/maintenance/", "Maintenance"), ("admin", "/admin/", "Admin")]
