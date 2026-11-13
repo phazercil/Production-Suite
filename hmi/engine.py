@@ -2441,14 +2441,23 @@ def _db_fields(group, f):
     return prefix, what, out
 
 
-def _db_test(group, f):
+def _records_db():
     from django.db import connections
+    db = connections.settings.get("default", {})
+    return (db.get("HOST", ""), str(db.get("PORT", "")), str(db.get("NAME", ""))) if "mysql" in db.get("ENGINE", "") else None
 
+
+def _db_bad(group, f):
+    """Why this database login can never be used (it isn't saved); None if it can be saved."""
+    from plant.dbcheck import precheck
+    _, what, v = _db_fields(group, f)
+    return precheck(v["host"], v["port"], v["name"], v["user"], what, records=_records_db(), internet=v["internet"])
+
+
+def _db_test(group, f):
     from plant.dbcheck import test_read_only
     prefix, what, v = _db_fields(group, f)
-    db = connections.settings.get("default", {})
-    records = (db.get("HOST", ""), str(db.get("PORT", "")), str(db.get("NAME", ""))) if "mysql" in db.get("ENGINE", "") else None
-    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=records, internet=v["internet"],
+    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=_records_db(), internet=v["internet"],
                                            kind=v["kind"])
 
 
@@ -2507,15 +2516,21 @@ def conn_save(p, ctx):
     from plant.liveconfig import TEXT_RE
     group, f = p.get("group"), p.get("fields") if isinstance(p.get("fields"), dict) else {}
     if group in ("assets", "s2k", "machines"):
-        prefix, what, v, r = _db_test(group, f)
-        need(r["ok"], r["msg"])
+        # saved even when the server doesn't answer yet (it can be fixed on the database side and tested later);
+        # only a login that could never be used is refused
+        prefix, what, v = _db_fields(group, f)
+        need(not _db_bad(group, f), _db_bad(group, f))
+        _, _, _, r = _db_test(group, f)
+        from plant.dbkinds import KINDS
+        kind = r.get("kind") or (v["kind"] if v["kind"] in KINDS else "mysql")
         liveconfig.save({f"{prefix}_HOST": v["host"], f"{prefix}_PORT": v["port"], f"{prefix}_NAME": v["name"],
                          f"{prefix}_USER": v["user"], f"{prefix}_PASSWORD": v["password"], f"{prefix}_INTERNET": "1" if v["internet"] else None,
-                         f"{prefix}_KIND": r.get("kind") or "mysql"})
-        integrations.set_conn(group, True, f"{r.get('tables', 0)} tables (read-only)")
-        from plant.dbkinds import KINDS
-        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']} ({KINDS[r.get('kind') or 'mysql']['label']})"
-                   + (" (outside the plant network, allowed by this login)" if v["internet"] else ""))
+                         f"{prefix}_KIND": kind})
+        integrations.set_conn(group, r["ok"], f"{r.get('tables', 0)} tables (read-only)" if r["ok"] else r["msg"])
+        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']} ({KINDS[kind]['label']})"
+                   + (" (outside the plant network, allowed by this login)" if v["internet"] else "") + ("" if r["ok"] else " — not connecting yet"))
+        if not r["ok"]:
+            return {"msg": f"{what} saved, but it isn't connecting yet: {r['msg']}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": f"{what} saved. {r['msg']}" + (" Note: this login is allowed to change data; a read-only login is safer." if r.get("writable") else ""),
                 "data": liveconfig.info()}
     if group == "s2kapi":
@@ -2555,18 +2570,21 @@ def conn_save(p, ctx):
         from . import influx
         c = _influx_fields(f)
         try:
-            r = influx.test(c)
+            r = {"ok": True, "msg": influx.test(c)["msg"]}
         except influx.InfluxError as e:
-            raise Need(f"Not saved: {e}")
+            r = {"ok": False, "msg": str(e)}
         liveconfig.save({"INFLUX_URL": c["url"], "INFLUX_VERSION": c["version"], "INFLUX_ORG": c["org"], "INFLUX_TOKEN": c["token"],
                          "INFLUX_USER": c["user"], "INFLUX_DB": c["db"], "INFLUX_WRITE_BUCKET": c["out"]})
-        integrations.set_conn("influx", True, r["msg"])
+        integrations.set_conn("influx", r["ok"], r["msg"])
         PlantSettings.bump()
         st = settings_obj()
         if (st.conn.get("influxOut") or {}).get("bucket") != c["out"]:
             st.conn["influxOut"] = {"bucket": c["out"]}  # a new bucket starts from the last 7 days again
             st.save(update_fields=["conn"])
-        audit(ctx, f"InfluxDB connection set to {c['url']}" + (f", writing suite records to {c['out']}" if c["out"] else ""))
+        audit(ctx, f"InfluxDB connection set to {c['url']}" + (f", writing suite records to {c['out']}" if c["out"] else "")
+                   + ("" if r["ok"] else " — not connecting yet"))
+        if not r["ok"]:
+            return {"msg": f"InfluxDB saved, but it isn't connecting yet: {r['msg']}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": f"InfluxDB saved. {r['msg']}." + (f" Suite records will be copied to {c['out']} every minute." if c["out"] else ""),
                 "data": liveconfig.info()}
     if group == "github":
@@ -2577,12 +2595,15 @@ def conn_save(p, ctx):
         need(ghupdates.REPO_RE.match(repo), "The repository should look like owner/name, e.g. phazercil/Production-Suite.")
         need(token or saved["hasToken"], "Paste a GitHub token that can read the repository.")
         need(not token or re.match(r"^[A-Za-z0-9_]{20,255}$", token), "That doesn't look like a GitHub token (they start with github_pat_ or ghp_).")
-        try:   # only save a login that works
+        err = ""
+        try:
             ghupdates.check({"repo": repo, "token": token or dj_settings.SUITE.get("GITHUB_UPDATES_TOKEN", ""), "daily": False})
         except ghupdates.GHError as e:
-            raise Need(f"Not saved: {e}")
+            err = str(e)
         liveconfig.save({"GITHUB_UPDATES_REPO": repo, "GITHUB_UPDATES_CHECK": "1" if f.get("daily") else None, **({"GITHUB_UPDATES_TOKEN": token} if token else {})})
-        audit(ctx, f"Updates from GitHub set up ({repo}{', checked daily' if f.get('daily') else ''})")
+        audit(ctx, f"Updates from GitHub set up ({repo}{', checked daily' if f.get('daily') else ''})" + (" — not working yet" if err else ""))
+        if err:
+            return {"msg": f"Updates from GitHub saved, but it isn't working yet: {err}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": "Updates from GitHub saved. The token works.", "data": liveconfig.info()}
     if group == "feed":
         key = str(f.get("key") or "").strip() or liveconfig.new_feed_key()

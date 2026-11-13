@@ -10,8 +10,10 @@ ERRORS = {
           "and that the firewall on the database server allows port {port}.",
     2005: "That server name couldn't be found on the network. Check the spelling, or use its IP address.",
     2013: "The connection to MariaDB dropped. Check the address and port.",
-    1129: "That database server has blocked this server's address after too many failed connections. On the database "
-          "server, run: mariadb-admin flush-hosts (or the SQL FLUSH HOSTS), then test again.",
+    1129: "The database server turned this server away before signing in. Either it has blocked this server's address "
+          "after too many failed connections (on the database server run: mariadb-admin flush-hosts, or the SQL FLUSH HOSTS), "
+          "or the user isn't allowed to connect from this server's address (on the database server: "
+          "GRANT SELECT ON <database>.* TO '<user>'@'<this server's address>'), then test again.",
     1040: "That database server has too many connections open right now. Try again in a minute.",
 }
 # MariaDB sends "host is blocked" (1129) with the wrong packet sequence number (MDEV-21252), so PyMySQL reports
@@ -35,7 +37,7 @@ def driver():
 
 def explain(e, port):
     code = e.args[0] if getattr(e, "args", None) and isinstance(e.args[0], int) else None
-    if code is None and BLOCKED_SEQ in str(e):
+    if code not in ERRORS and "Packet sequence number wrong" in str(e):
         code = 1129
     msg = ERRORS.get(code)
     detail = e.args[1] if getattr(e, "args", None) and len(e.args) > 1 else str(e)
@@ -54,22 +56,31 @@ def check_fields(host, port, name, user):
     return None
 
 
-def test_read_only(host, port, name, user, password, what, nets=None, records=None, internet=False, kind="auto"):
-    """Sign in read-only and read the table list. Nothing is created or changed.
-    Returns {"ok", "msg", "tables", "writable"}; records = (host, port, name) of the suite's own database."""
+def precheck(host, port, name, user, what, nets=None, records=None, internet=False):
+    """What makes a login unusable whether or not the server answers: badly typed fields, an address outside the
+    plant network that wasn't allowed, or the suite's own records database. None if it may be saved."""
     from plant.netsafety import NotPrivate, check_host
     bad = check_fields(host, port, name, user)
     if bad:
-        return {"ok": False, "msg": bad}
+        return bad
     if not internet:
         try:
             check_host(host, what, nets)
         except NotPrivate as e:
-            return {"ok": False, "msg": f"{e} If this database really is outside the plant (a cloud or other site's server), "
-                                       "tick \"This database is outside the plant network\"."}
+            return (f"{e} If this database really is outside the plant (a cloud or other site's server), "
+                    "tick \"This database is outside the plant network\".")
     if records and (str(host).lower(), str(port), str(name).lower()) == tuple(str(x).lower() for x in records):
-        return {"ok": False, "msg": f"That is the suite's own records database. {what} must be a different database; "
-                                    "the suite creates its tables only in its own database."}
+        return (f"That is the suite's own records database. {what} must be a different database; "
+                "the suite creates its tables only in its own database.")
+    return None
+
+
+def test_read_only(host, port, name, user, password, what, nets=None, records=None, internet=False, kind="auto"):
+    """Sign in read-only and read the table list. Nothing is created or changed.
+    Returns {"ok", "msg", "tables", "writable"}; records = (host, port, name) of the suite's own database."""
+    bad = precheck(host, port, name, user, what, nets, records, internet)
+    if bad:
+        return {"ok": False, "msg": bad}
     from plant import dbkinds
     if kind not in dbkinds.KINDS:   # "auto": a standard port says which kind of database it is
         kind = next((k for k, v in dbkinds.KINDS.items() if v["port"] == int(port)), kind)

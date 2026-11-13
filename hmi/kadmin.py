@@ -694,7 +694,8 @@ def a_conn_save(request, s, p):
     f.pop("password", None), f.pop("token", None)
     if not r["ok"]:
         return accounts_panel(request, s, g, f, {"ok": False, "text": "Not saved. " + r["error"]})
-    return thin.trigger(accounts_panel(request, s, g, None, {"ok": True, "text": r.get("msg", "Saved")}, key=r.get("key") if g == "feed" else None),
+    warn = bool((r.get("data") or {}).get("warn"))
+    return thin.trigger(accounts_panel(request, s, g, None, {"ok": not warn, "text": r.get("msg", "Saved")}, key=r.get("key") if g == "feed" else None),
                         changed=True)
 
 
