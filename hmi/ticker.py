@@ -248,8 +248,8 @@ def timed_pulls(state, t):
             from plant import ghupdates
             ghupdates.daily(t)
         run("github", github_check)
-    # Copy the suite's records to InfluxDB (Admin > Connections > InfluxDB), once a minute
-    if not state.get("influx") or (t - state["influx"]).total_seconds() >= 60:
+    # Copy the suite's records to InfluxDB (Admin > Connections > InfluxDB), every influxEvery minutes (1 by default)
+    if not state.get("influx") or (t - state["influx"]).total_seconds() >= 60 * max(1, float(s.get("influxEvery") or 1)):
         state["influx"] = t
         try:
             from . import influx

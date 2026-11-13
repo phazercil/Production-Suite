@@ -17,6 +17,10 @@ class Run2Tests(TestCase):
         self.sh = ShiftRun.objects.get(line="Barbara", active=True)
         self.t = timezone.now().replace(second=0, microsecond=0) + timedelta(minutes=2)
         engine._planned_cache.clear()
+        from unittest import mock
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)   # whatever the time of day: no shift change mid-test
+        p.start()
+        self.addCleanup(p.stop)
 
     def tick(self, i, run=True, run2=True):
         engine.tick(self.m, {"ppm": 190, "run": run, "run2": run2, "run2Name": "Folder"}, self.t + timedelta(minutes=i))

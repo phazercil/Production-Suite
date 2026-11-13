@@ -64,6 +64,9 @@ class SuiteTests(TestCase):
         self.assertIn("not trained", r["error"])
 
     def test_shift_counts_and_detects_stops(self):
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)   # whatever the time of day: no shift change mid-test
+        p.start()
+        self.addCleanup(p.stop)
         self.login("2222")
         r = self.cmd("startShift", {"line": "Salvatore", "mo": "306855", "safety": [True] * 5})
         self.assertTrue(r["ok"], r)
@@ -338,6 +341,9 @@ class ReviewerFindingTests(TestCase):
         self.post("/api/hmi/login", {"pin": "9999"})
 
     def test_dead_feed_is_not_downtime(self):
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)   # no shift change mid-test, whatever the hour
+        p.start()
+        self.addCleanup(p.stop)
         t = now().replace(second=0, microsecond=0)
         engine.tick(self.bar, {"ppm": 190}, t)
         for i in range(1, 4):
@@ -350,6 +356,9 @@ class ReviewerFindingTests(TestCase):
         self.assertEqual(rows[0].minutes, 3)
 
     def test_min_downtime_rule_is_exact(self):
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)   # no shift change mid-test, whatever the hour
+        p.start()
+        self.addCleanup(p.stop)
         t = now().replace(second=0, microsecond=0)
         engine.tick(self.bar, {"ppm": 190}, t)
         engine.tick(self.bar, {"ppm": 0}, t + timedelta(minutes=1))           # one stopped minute, minDown=2
@@ -364,7 +373,9 @@ class ReviewerFindingTests(TestCase):
         self.post("/api/hmi/login", {"pin": "1111"})
         self.post("/api/hmi/cmd", {"name": "coOpen", "p": {}, "line": "Barbara"})
         self.post("/api/hmi/cmd", {"name": "coEnd", "p": {"qty": 10}, "line": "Barbara"})
-        ShiftRun.objects.filter(pk=self.sh.pk).update(co={**ShiftRun.objects.get(pk=self.sh.pk).co, "start": ms(now() - timedelta(minutes=40))})
+        # the line stopped 40 minutes ago for the changeover (only the time it's stopped is Changeover downtime)
+        ShiftRun.objects.filter(pk=self.sh.pk).update(co={**ShiftRun.objects.get(pk=self.sh.pk).co, "start": ms(now() - timedelta(minutes=40))},
+                                                      stop_start=now() - timedelta(minutes=40))
         r = self.post("/api/hmi/cmd", {"name": "endShift", "p": {"issues": "glue pot slow"}, "line": "Barbara"}).json()
         self.assertTrue(r["ok"], r)
         d = Downtime.objects.get(shift=self.sh, reason="Changeover")

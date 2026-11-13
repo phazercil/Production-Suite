@@ -20,8 +20,10 @@ from plant.util import Catalog
 
 from .plan import _num
 
-STAGE_LABEL = {"s1": "Stage 1", "eb": "Stage 2", "ac": "Stage 3", "gb": "Glue Bead"}
-SUITE_STAGES = set(STAGE_LABEL.values())
+STAGE_LABEL = {"s1": "Stage 1", "eb": "Stage 2", "ac": "Stage 3", "gb": "Glue Bead", "pk": "Packaging Only"}
+# The plan's "Packaging Only" lines are crew-only: a suite Packaging machine shows as one, but a plan line of that
+# stage isn't a production line the suite is missing, and isn't made into a machine.
+SUITE_STAGES = set(STAGE_LABEL.values()) - {"Packaging Only"}
 MAX_SHIFTS = 3
 PALETTE = ["#2563eb", "#059669", "#7c3aed", "#d97706", "#dc2626", "#0891b2"]
 
@@ -160,7 +162,7 @@ def merge(data, view=None):
     return data, notes
 
 
-STAGE_CODE = {v: k for k, v in STAGE_LABEL.items()}
+STAGE_CODE = {v: k for k, v in STAGE_LABEL.items() if v in SUITE_STAGES}
 
 
 def master_on():

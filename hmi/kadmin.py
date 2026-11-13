@@ -79,7 +79,13 @@ def columns_of(t, table):
 def tab_data(s, tab, request):
     cfg = s.cfg
     if tab in LISTS:
-        return {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
+        out = {"lists": [{"k": k, "title": t, "help": h, "items": cfg.get(k, [])} for k, t, h in LISTS[tab]]}
+        if tab == "reasons":   # earlier shifts' stops still without a reason: here, not on the operator screens
+            from .kviews import downtime_rows
+            out["older"] = downtime_rows(s, s.older_reasons())
+            for i, x in enumerate(out["older"]):
+                x["letter"] = chr(65 + i % 26)
+        return out
     if tab == "machines":
         from plant import units
         base = request.build_absolute_uri("/station/")
@@ -214,7 +220,19 @@ def connections_data(s, request):
               (integrations.s2k_api_url() if integrations.s2k_api_ready() else "") if st.get("s2kSource") == "api" else st.get("s2kUrl", "")),
              ("people", "People & training list", st.get("peopleUrl", "")), ("webhook", "Copy records to another system", st.get("webhook", ""))]
     conn = s.st.conn or {}
-    status = [{"k": k, "label": lbl, "addr": addr, "c": conn.get(k)} for k, lbl, addr in rows]
+    # How often each connection is read: (setting, lowest, what 0 means) for the ones that pull on a timer, else a note
+    every = {"s2k": ("s2kEvery", 0, "0 = only with Pull MOs now"), "people": ("peopleEvery", 0, "0 = only by hand"),
+             "paycom": ("paycom.every", 15, "at least 15; turn automatic on in Paycom below"),
+             "assets": ("assetsEvery", 0, "how old a part's drawing may get before it's read again (0 = every time)"),
+             "influxOut": ("influxEvery", 1, "how often new records are copied")}
+    fixed = {"store": "always", "machines": "every minute, with each line", "grafana": f"screens refresh every {g.get('refresh') or '30s'}",
+             "webhook": "as records are made", "influx": "when a line reads it"}
+    vals = {"s2kEvery": st.get("s2kEvery", 0), "peopleEvery": st.get("peopleEvery", 0), "paycom.every": pc.get("every", 60),
+            "assetsEvery": st.get("assetsEvery", 1), "influxEvery": st.get("influxEvery", 1)}
+    status = [{"k": k, "label": lbl, "addr": addr, "c": conn.get(k),
+               "every": {"key": every[k][0], "min": every[k][1], "help": every[k][2], "v": vals[every[k][0]]} if k in every else None,
+               "fixed": fixed.get(k) or ("every minute (each minute is counted)" if k.startswith("feed:") else "")}
+              for k, lbl, addr in rows]
     out = {"status": status, "srv": srv, "g": g, "kiosk": st.get("kiosk") or {}, "pc": pc, "st": st,
            "panelsText": "\n".join(f"{x.get('title')} = {x.get('panel')}" for x in (st.get("kiosk") or {}).get("panels", [])),
            "queries": grafana_queries(s, srv)}

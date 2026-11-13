@@ -13,6 +13,7 @@ STAGES = [
     ("eb", "Stage 2 · End Bands"),
     ("ac", "Arts & Crafts"),
     ("gb", "Glue Bead"),
+    ("pk", "Packaging"),
 ]
 STAGE_ORDER = [s for s, _ in STAGES]
 SPEED_MODES = {
@@ -20,6 +21,7 @@ SPEED_MODES = {
     "eb": [("sheet", "Cost sheet Stage 2 rate"), ("mask", "Mask qty × 30 (3rd/4th bander)"), ("fixed", "Fixed filters/hr")],
     "ac": [("sheet", "Cost sheet Stage 3 rate"), ("fixed", "Fixed filters/hr")],
     "gb": [("fixed", "Fixed filters/hr")],
+    "pk": [("fixed", "Fixed filters/hr")],
 }
 FEED_TYPES = [("demo", "Demo replay"), ("http", "Read from URL"), ("push", "Pushed to server"), ("influx", "InfluxDB query"),
               ("db", "Database table"), ("none", "Not connected")]
@@ -277,6 +279,16 @@ class MO(models.Model):
     process = models.CharField(max_length=12, blank=True)
     mfg = models.CharField(max_length=12, default="MFGOUT")
     source = models.CharField(max_length=10, default="manual")  # s2k | import | manual | floor | demo
+    # S2K: one MO per stage (1MG4062 pleating, 2MG4062 end bands, MG4062 packaging), and a revision on the number
+    # each time units are posted (306556 → 306556-001). The stage MOs of one order hang off the order MO (parent),
+    # the one the Scheduler shows; see plant/mofamily.py.
+    base = models.CharField(max_length=40, blank=True, db_index=True, help_text="MO number without the revision (306556)")
+    rev = models.IntegerField(default=0, help_text="S2K revision: 306556-005 is 5")
+    remaining = models.IntegerField(null=True, blank=True, help_text="Still to make, as S2K last said")
+    stage = models.CharField(max_length=2, blank=True, help_text="The stage this MO is for (s1 = 1MG…, eb = 2MG…, pk = the finished part)")
+    parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="stage_mos",
+                               help_text="The order this stage MO belongs to")
+    stage_qty = models.JSONField(default=dict, blank=True, help_text='Order MOs: what each stage makes, e.g. {"s1": 400, "eb": 400, "pk": 200}')
     added = models.DateField(auto_now_add=True)
     example = models.BooleanField(default=False)
     # Stage 1 queue, written by the scheduler
@@ -294,6 +306,28 @@ class MO(models.Model):
 
     def __str__(self):
         return f"MO {self.number} · {self.part}"
+
+    @property
+    def s2k_number(self):
+        """The number as S2K shows it now, with its latest revision (306556-005). MO.number stays as first seen, so
+        records that name it keep matching."""
+        if self.rev and self.base.isdigit():
+            return f"{self.base}-{self.rev:03d}"
+        return self.number
+
+    def stage_number(self, stage):
+        """The S2K MO number for one stage of this order (what's posted against there): its stage MO, else its own."""
+        if self.stage == stage or not self.pk:
+            return self.s2k_number
+        for c in self.stage_mos.all():
+            if c.stage == stage:
+                return c.s2k_number
+        return self.s2k_number
+
+    @property
+    def floor_number(self):
+        """The MO number a pleater posts against: the order's Stage 1 MO (1MG…) when it has one."""
+        return self.stage_number("s1")
 
 
 def part_key(item):
@@ -319,7 +353,7 @@ DEFAULT_CONFIG = {
               "photoDays": 365, "qcLate": 10},
 }
 DEFAULT_SETTINGS = {
-    "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "webhook": "", "useDb": False,
+    "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "assetsEvery": 1, "influxEvery": 1, "webhook": "", "useDb": False,
     "grafana": {"on": False, "url": "", "uid": "", "slug": "pleat-lines", "org": 1, "ppm": 2, "uptime": 4, "count": 6, "refresh": "10s",
                 "lineVar": "line"},
     "paycom": {"auto": False, "every": 60, "dept": "", "position": "", "pinFrom": "code", "last": None, "msg": ""},

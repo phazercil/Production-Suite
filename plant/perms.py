@@ -52,6 +52,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("section.supervisor", "Open Supervisor", "The Supervisor section.", LEAD),
         ("section.quality", "Open Quality", "The Quality section: the quality report and the tolerances.", LEAD),
         ("section.maintenance", "Open Maintenance", "The Maintenance section.", SUP),
+        ("section.packaging", "Open Packaging Kiosk", "The Packaging Kiosk (coming in a later update).", ["operator", "maintenance", "lead", "admin"]),
     ]),
 ) for k, l, h, r in items)
 

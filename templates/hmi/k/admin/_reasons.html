@@ -1,1 +1,7 @@
 {% include "hmi/k/admin/_lists.html" %}
+<div class="panel" style="margin-top:14px"><h2 class="h2">Earlier shifts' stops without a reason{% if A.older %} <span class="pill warn">{{ A.older|length }}</span>{% endif %}</h2>
+  <p class="sub">Stops from shifts that are over and still have no reason. The operator screens only ask about the shift running now, so earlier ones are filled in here.</p>
+  {% if A.older %}<div class="tblwrap" style="margin-top:8px"><table class="xl"><thead><tr><th></th><th>Time</th><th>Min</th><th>Line</th><th>MO</th><th>Machine errors</th><th>Reason</th><th>Notes</th></tr></thead><tbody>
+  {% for x in A.older %}{% include "hmi/k/_down_row.html" %}{% endfor %}</tbody></table></div>
+  {% else %}<p class="note" style="margin-top:8px">Every earlier stop has a reason.</p>{% endif %}
+</div>

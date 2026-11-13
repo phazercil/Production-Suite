@@ -128,5 +128,7 @@ class DowntimeScopeTests(TestCase):
         c.post("/kiosk/do/logout", HTTP_X_CSRFTOKEN=tok)
         c.post("/kiosk/do/login", {"pin": "9999"}, HTTP_X_CSRFTOKEN=tok)
         r = c.get("/kiosk/v/downtime").content.decode()
-        self.assertIn("Earlier shifts", r)
+        self.assertNotIn("Earlier shifts", r)                     # an admin on the operator screens: this shift too
+        r = c.get("/kiosk/v/admin?tab=reasons").content.decode()
+        self.assertIn("Earlier shifts", r)                        # earlier shifts' are on the Admin page
         self.assertIn(">33<", r)
