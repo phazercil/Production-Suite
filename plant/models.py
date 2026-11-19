@@ -180,6 +180,22 @@ class ExtraBreak(models.Model):
         return self.until or self.day
 
 
+class FilterModel3D(models.Model):
+    """A filter in the 3D Pleated Filter Viewer's part library (Quality › 3D viewer): the viewer's own document for
+    it (its settings, info sheet, flags and customer inkjets), kept as the viewer writes it."""
+    pid = models.CharField(max_length=120, unique=True, help_text="The viewer's id for the part (its part number, cleaned)")
+    part = models.CharField(max_length=120, db_index=True)
+    data = models.JSONField(default=dict)
+    updated = models.DateTimeField(auto_now=True)
+    by = models.CharField(max_length=80, blank=True)
+
+    class Meta:
+        ordering = ["part"]
+
+    def __str__(self):
+        return self.part
+
+
 class PartSpec(models.Model):
     """Drawing specs the QC check measures against. Prefixes like 1MG/2MG share the MG spec."""
     key = models.CharField(max_length=40, unique=True)

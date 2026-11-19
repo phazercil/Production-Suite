@@ -1,14 +1,18 @@
 {% extends "base.html" %}{% load static suite %}
-{% block title %}Quality · {% if f.tab == "tol" %}Tolerances{% elif f.tab == "checks" %}QC checks{% elif f.tab == "parts" %}Parts & specs{% else %}Report{% endif %}{% endblock %}
+{% block title %}Quality · {% if f.tab == "tol" %}Tolerances{% elif f.tab == "checks" %}QC checks{% elif f.tab == "parts" %}Parts & specs{% elif f.tab == "viewer" %}3D viewer{% else %}Report{% endif %}{% endblock %}
 {% block body_class %}scroll{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
 {% block content %}<div class="sv">
-  <div class="sv-head"><h1>Quality</h1><span class="muted">{% if f.tab == "tol" %}How far each measurement may be from the drawing, for every filter{% elif f.tab == "checks" %}What each stage's QC check asks{% elif f.tab == "parts" %}Each part's drawing specs, and importing them from the asset database{% else %}QC checks out of spec, machine vision fails and quality holds from the floor{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  <div class="sv-head"><h1>Quality</h1><span class="muted">{% if f.tab == "tol" %}How far each measurement may be from the drawing, for every filter{% elif f.tab == "checks" %}What each stage's QC check asks{% elif f.tab == "parts" %}Each part's drawing specs, and importing them from the asset database{% elif f.tab == "viewer" %}The Pleated Filter 3D Viewer and its part library{% if not canTol %} · view only: saving needs Quality settings{% endif %}{% else %}QC checks out of spec, machine vision fails and quality holds from the floor{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
   <nav class="sv-tabs" aria-label="Quality">{% for k, label in tabs %}<a href="?{{ tabq|get:k }}" {% if f.tab == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
 
-{% if f.tab == "checks" %}
+{% if f.tab == "viewer" %}
+  <div class="row" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span class="muted">Each filter is kept in the suite's database. {% if fvDb %}The asset database's <b>3D filter data</b> updates a filter's dimensions when it's opened.{% else %}To keep them up to date from another database later, set up <b>3D filter data</b> in Admin › Connector builder; until then they stay as saved here.{% endif %} {{ fvCount }} filter{{ fvCount|pluralize }} in the library.</span><span class="grow" style="flex:1"></span>
+    {% if canTol and fvDb %}<form method="post" action="/quality/viewer/refresh-all/" style="margin:0">{% csrf_token %}<button class="btn" type="submit">Refresh from the asset database</button></form>{% endif %}</div>
+  <div class="card" style="padding:0;overflow:hidden"><iframe src="/quality/viewer/app/" title="Pleated Filter 3D Viewer" style="display:block;width:100%;height:calc(100vh - 210px);min-height:560px;border:0" allow="fullscreen; clipboard-write"></iframe></div>
+{% elif f.tab == "checks" %}
   <p class="muted">What each stage's QC check asks. Measurements are checked against the part's drawing with the tolerances on the Tolerances tab; your own checks are pass / fail, or a number with an allowed range. A check is due right after a changeover, as soon as the machine runs, then on the QC interval; one saved more than {{ qcLate }} minutes late needs a reason. A check out of spec waits for a supervisor to approve, disapprove or Process Out.</p>
   {% if not canTol %}<div class="flash">Changing these needs the <b>Quality settings</b> permission (Admin › Permissions).</div>{% endif %}
   <div class="sv-grid">{% for st in stages %}<div class="card"><h2>{{ st.label }} <span class="muted">· {{ st.items|length }} item{{ st.items|length|pluralize }}</span></h2>

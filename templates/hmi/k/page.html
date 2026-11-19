@@ -2,6 +2,7 @@
 {% block title %}Operator Kiosk{% endblock %}
 {% block body_attrs %}data-watch="/thin/watch?scope=kiosk" data-every="2000" data-now="{{ now_ms }}" data-ping="/api/hmi/ping"{% endblock %}
 {% block head %}{% if lock %}<meta name="station-lock" content="{{ lock }}">{% endif %}<link rel="stylesheet" href="{% static 'hmi/kiosk.css' %}">{% endblock %}
+{% block fsfloat %}{% endblock %}{# the kiosk has it in its left rail #}
 {% block content %}
 <div class="mbody">
 <div class="app">

@@ -52,19 +52,19 @@ class InboundTests(TestCase):
         csp = r["Content-Security-Policy"]
         self.assertIn("default-src 'self'", csp)
         self.assertIn("connect-src 'self'", csp)
-        self.assertIn("frame-src 'none'", csp)
+        self.assertIn("frame-src 'self';", csp)   # only the suite's own pages (the 3D viewer)
 
     def test_grafana_frames_allowed_only_for_a_private_grafana(self):
         st = PlantSettings.load()
         st.settings["grafana"].update({"on": True, "url": "http://192.168.100.20:3000"})
         st.save()
-        self.assertIn("frame-src http://192.168.100.20:3000", Client().get("/data/")["Content-Security-Policy"])
+        self.assertIn("frame-src 'self' http://192.168.100.20:3000;", Client().get("/data/")["Content-Security-Policy"])
         st.settings["grafana"]["url"] = "http://10.9.9.9:3000"  # private, but not the plant network
         st.save()
-        self.assertIn("frame-src 'none'", Client().get("/data/")["Content-Security-Policy"])
+        self.assertIn("frame-src 'self';", Client().get("/data/")["Content-Security-Policy"])
         st.settings["grafana"]["url"] = "http://8.8.8.8:3000"
         st.save()
-        self.assertIn("frame-src 'none'", Client().get("/data/")["Content-Security-Policy"])
+        self.assertIn("frame-src 'self';", Client().get("/data/")["Content-Security-Policy"])
 
 
 class OutboundTests(TestCase):

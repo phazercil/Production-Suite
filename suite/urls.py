@@ -8,6 +8,7 @@ from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
 from scheduler import views as sch
+from quality import viewer as fviewer
 from quality import views as quality
 from supervisor import views as supervisor
 from suite import sections, thin
@@ -72,6 +73,13 @@ urlpatterns = [
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
     path("quality/", quality.page, name="quality"),
+    path("quality/viewer/app/", fviewer.app, name="filter-viewer"),
+    path("api/quality/fv/parts", fviewer.parts),
+    path("api/quality/fv/parts/set", fviewer.part_set),
+    path("api/quality/fv/parts/delete", fviewer.part_delete),
+    path("api/quality/fv/running", fviewer.running),
+    path("api/quality/fv/refresh", fviewer.refresh),
+    path("quality/viewer/refresh-all/", fviewer.refresh_all),
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
     path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),

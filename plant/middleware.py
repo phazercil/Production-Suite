@@ -100,6 +100,8 @@ class SecurityHeadersMiddleware:
                     frame = "'none'"
         except Exception:
             frame = "'none'"
+        # frames: the suite's own pages (the 3D viewer in Quality and the kiosk's 3D Model) and Grafana when set up
+        frame = "'self'" + ("" if frame == "'none'" else " " + frame)
         resp.setdefault("Content-Security-Policy",
                         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
                         f"font-src 'self'; connect-src 'self'; frame-src {frame}; frame-ancestors 'self'; "
