@@ -19,11 +19,16 @@
     {% for k, href, label in suite_modes %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
+  <button type="button" class="suite-fs" data-fullscreen hidden title="Full screen (Esc leaves it)" aria-label="Full screen">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg><span>Full screen</span></button>
 </header>
+{% else %}<button type="button" class="suite-fs float" data-fullscreen hidden title="Full screen (Esc leaves it)" aria-label="Full screen">
+  <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg></button>
 {% endif %}
 <div class="mode">{% block content %}{% endblock %}</div>
 <div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>
 <script src="{% static 'suite/rev.js' %}" data-rev="{{ suite_revision }}" defer></script>
+<script src="{% static 'suite/fullscreen.js' %}" defer></script>
 {% if thin %}<div id="modal" class="modal" hidden role="dialog" aria-modal="true"></div>
 <script src="{% static 'vendor/htmx/htmx.min.js' %}"></script>
 <script src="{% static 'suite/thin.js' %}"></script>{% endif %}

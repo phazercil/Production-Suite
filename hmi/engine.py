@@ -1090,6 +1090,51 @@ def co_finish(p, ctx):
     return {"msg": f"Running MO {m.number} · {m.part}"}
 
 
+@cmd("coForceEnd", "floor.override")
+def co_force_end(p, ctx):
+    """A supervisor ends a changeover nobody finished (left open, the operator gone): its time so far is kept as
+    changeover (with who force-ended it and why), unchecked steps are skipped, and the line goes on. With an MO picked
+    for it and "run" set, the line runs that MO; otherwise it's left without an MO (Pick MO at the kiosk)."""
+    sh = shift_of(p, ctx)
+    need(sh.co, f"There's no changeover open on {sh.line}.")
+    why = re.sub(r"\s+", " ", str(p.get("why") or "")).strip()[:200]
+    need(why, "Say why it's being ended (e.g. operator left without finishing it).")
+    co = sh.co
+    note = f"Force-ended by {ctx.by}: {why}"
+    if co.get("step", 1) < 2 or sh.state != "changeover":   # only opened: the order wasn't ended, nothing to keep
+        sh.co = None
+        sh.save(update_fields=["co"])
+        audit(ctx, f"{sh.line}: changeover closed before it started (order not ended). {why}")
+        return {"msg": f"Closed the changeover on {sh.line}; the order it was on keeps running."}
+    steps = co_steps(co, sh.line)
+    skipped = len(steps) - len(set(co.get("done") or []))
+    new = MO.objects.filter(pk=co.get("newMo"), status="OPEN").first() if co.get("newMo") else None
+    run = bool(p.get("run", True)) and new and not running_elsewhere(new, sh.machine)
+    co_piece(sh, ctx.now, "force-ended", note=note)
+    made = int((sh.co or {}).get("made") or 0)
+    if run:
+        if not new.line_id:
+            new.line, new.seq = sh.machine, 0
+            new.save(update_fields=["line", "seq"])
+        sh.mo, sh.mo_start, sh.mo_count = new, ctx.now, made
+        sh.qc_after_co, sh.qc_due_at = True, None
+    else:
+        sh.mo, sh.mo_start, sh.mo_count = None, ctx.now, 0
+    sh.state = "stopped" if sh.stop_start else "running"
+    sh.co = None
+    sh.save()
+    what = f"running MO {new.number} ({new.part})" if run else "with no MO (Pick MO at the kiosk)"
+    audit(ctx, f"{sh.line}: changeover force-ended by {ctx.by}, {what}" + (f", {skipped} step{'s' if skipped != 1 else ''} not checked" if skipped else "")
+               + f". {why}")
+    notify(f"{ctx.by} force-ended the changeover on {sh.line}: {why}. The line is {what}.", "schedule", lines=[sh.line])
+    if run:
+        event("mo_start", {"line": sh.line, "mo": new.number, "item": new.part, "steps_from": "force-ended"})
+        from scheduler.engine import place_on_line
+        if place_on_line(new, sh.machine, ctx.now):
+            refresh_schedule("an MO started on another line than planned")
+    return {"msg": f"Changeover on {sh.line} ended. The line is {what}."}
+
+
 def _qc_values(sh, p):
     """The stage's QC items (Quality › QC checks), the values submitted for them, and the part's spec."""
     from . import qc

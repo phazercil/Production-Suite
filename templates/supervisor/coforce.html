@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Force end changeover · {{ sh.line }}{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv sv-narrow">
+  <div class="sv-head"><a class="btn ghost" href="{{ back }}">‹ Back</a><a class="btn ghost" href="/supervisor/log/{{ sh.pk }}/">Shift report</a><span class="grow"></span><span class="who">{{ me.name }}</span></div>
+  <h1>Force end changeover · {{ sh.line }}</h1>
+  <p class="muted">{% if since %}Open since {{ since|clock }} ({{ since|timesince }}){% endif %}{% if sh.user_name %} · {{ sh.user_name }} logged in{% else %} · nobody logged in{% endif %}</p>
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  <div class="card"><h2>Where it got to</h2>
+    <p>Ended order: <b>{% if old %}{{ old.number }} · {{ old.part }}{% else %}none{% endif %}</b><br>
+      Next MO: <b>{% if new %}{{ new.number }} · {{ new.part }}{% else %}not picked yet{% endif %}</b>{% if co.inkjet %} · inkjet change only{% endif %}</p>
+    {% if steps and new %}<ol class="note" style="margin:8px 0 0 18px">{% for s in steps %}<li>{% if s.done %}✓{% else %}<b class="warn">not checked</b>{% endif %} {{ s.text }}</li>{% endfor %}</ol>{% endif %}
+    {% if pieces %}<p class="note">Worked by: {% for x in pieces %}{{ x.by|default:"—" }} ({{ x.mins }} min){% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  </div>
+  <form method="post" class="card sv-form">{% csrf_token %}
+    <h2>End it</h2>
+    <p class="muted">The time it was open stays on the record as changeover, with your name and the reason. Steps not checked are skipped.</p>
+    {% if new %}<fieldset style="grid-column:1/-1;border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:6px"><legend class="muted" style="margin-bottom:4px">Then</legend>
+      <label class="chk"><input type="radio" name="run" value="1" checked {% if not can %}disabled{% endif %}> {{ sh.line }} runs MO {{ new.number }} · {{ new.part }} (a QC check is due when it runs)</label>
+      <label class="chk"><input type="radio" name="run" value="0" {% if not can %}disabled{% endif %}> Leave {{ sh.line }} without an MO (the operator picks one with Pick MO)</label></fieldset>
+    {% else %}<input type="hidden" name="run" value="0"><p class="note">No next MO was picked, so {{ sh.line }} is left without an MO; the operator picks one with <b>Pick MO</b> at the kiosk.</p>{% endif %}
+    <label class="fld" style="grid-column:1/-1"><span>Why</span><input type="text" name="why" maxlength="200" required value="{{ why }}" placeholder="e.g. operator left without finishing it" {% if not can %}disabled{% endif %} autofocus></label>
+    {% if can %}<div class="row"><button class="btn go" type="submit">Force end the changeover</button></div>
+    {% else %}<p class="muted">Ending someone else's changeover needs the <b>Supervisor override</b> permission (Admin › Permissions).</p>{% endif %}
+  </form>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

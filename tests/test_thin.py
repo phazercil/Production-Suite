@@ -54,6 +54,11 @@ class DataKioskTests(TestCase):
         self.assertEqual(Client().get("/data/r/live?line=Nope").status_code, 404)
         self.assertEqual(Client().get("/data/r/nope").status_code, 404)
 
+    def test_full_screen_button(self):
+        self.assertContains(Client().get("/data/"), 'class="suite-fs" data-fullscreen')                 # in the top bar
+        self.assertContains(Client().get("/data/?view=1"), 'class="suite-fs float" data-fullscreen')    # the corner, no bar
+        self.assertContains(Client().get("/data/"), "suite/fullscreen.js")
+
     def test_one_machine_and_view_only_link(self):
         r = Client().get("/data/salvatore/")                    # any letter case
         self.assertContains(r, 'id="live-salvatore"')

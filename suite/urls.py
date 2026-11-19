@@ -75,6 +75,7 @@ urlpatterns = [
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
     path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),
+    path("supervisor/coend/<int:pk>/", supervisor.co_force_end, name="supervisor-coend"),
     path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),
     path("packaging/", sections.soon, {"key": "packaging"}, name="packaging-section"),   # (coming later)   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),

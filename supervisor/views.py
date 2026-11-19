@@ -222,12 +222,18 @@ def line_status():
         nxt = None
         if sh and sh.state == "changeover" and (sh.co or {}).get("newMo"):
             nxt = MO.objects.filter(pk=sh.co["newMo"]).first()
+        co_since = None
+        if sh and sh.co and sh.co.get("step", 1) >= 2:
+            from plant.util import from_ms
+            co_since = from_ms(sh.co.get("first") or sh.co.get("start")) if (sh.co.get("first") or sh.co.get("start")) else None
         stats = shift_stats(sh) if sh else None
         made = max(0, mo.produced - mo.scrap) if mo else 0
         cards.append({"m": m, "sh": sh, "pill": pill, "mo": mo, "next": nxt, "made": made, "qty": mo.qty if mo else 0,
                       "pct": min(100, round(100 * made / mo.qty)) if mo and mo.qty else None,
                       "ppm": last["ppm"] if fresh else None, "since": last["t"] if last else None, "stale": bool(last) and not fresh,
-                      "who": (sh.user_name or "") if sh else "", "stats": stats, "recheck": qc.recheck_for(m.name)})
+                      "who": (sh.user_name or "") if sh else "", "stats": stats, "recheck": qc.recheck_for(m.name),
+                      "co": bool(sh and sh.co and sh.co.get("step", 1) >= 2), "coSince": co_since,
+                      "coMin": round((now - co_since).total_seconds() / 60) if co_since else None})
     run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running")
     return cards, {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped"),
                    "Changeover": sum(1 for c in cards if c["sh"] and c["sh"].state == "changeover"),
@@ -410,6 +416,41 @@ def edit(request, kind, pk):
         "can": can, "err": err, "msg": request.GET.get("msg", "")[:200], "back": back, "sh": sh,
         "canDelete": not (kind == "log" and x.active), "split": kind == "downtime",
         "edits": HistoryEdit.objects.filter(kind=kind, obj_id=x.pk)[:50]})
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def co_force_end(request, pk):
+    """Force-end a changeover nobody finished, from Supervisor › Line status. Needs "Supervisor override"."""
+    from hmi import engine
+    from plant.util import from_ms
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    sh = ShiftRun.objects.select_related("mo").filter(pk=pk, active=True).first()
+    back = "/supervisor/?tab=status"
+    if not sh or not sh.co:
+        return HttpResponseRedirect(f"{back}&{urlencode({'msg': 'That changeover has already ended.'})}")
+    can = perms.can(me, "floor.override")
+    err = ""
+    if request.method == "POST":
+        r = engine.execute("coForceEnd", {"line": sh.line, "why": request.POST.get("why"), "run": request.POST.get("run") == "1"},
+                           engine.Ctx(user=me, line=sh.line))
+        if r.get("ok"):
+            return HttpResponseRedirect(f"{back}&{urlencode({'msg': r.get('msg', 'Changeover ended.')})}")
+        err = r.get("error") or "That didn't save."
+    from plant.models import MO
+    co = sh.co
+    steps = engine.co_steps(co, sh.line)
+    done = set(co.get("done") or [])
+    start = co.get("first") or co.get("start")
+    return render(request, "supervisor/coforce.html", {
+        "mode": "supervisor", "me": me, "sh": sh, "co": co, "can": can, "err": err, "back": back,
+        "old": MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None,
+        "new": MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None,
+        "steps": [{"text": s.get("text", ""), "done": i in done} for i, s in enumerate(steps)],
+        "since": from_ms(start) if start else None, "why": request.POST.get("why", "") if err else "",
+        "pieces": co.get("pieces") or []})
 
 
 @ensure_csrf_cookie

@@ -212,3 +212,65 @@ class FloorSwitchTests(TestCase):
         st.planner = {**st.planner, "inkjetMin": 5}
         st.save()
         self.assertEqual(compute(load_world())["res"][f"{b.id}__s1"]["coMin"], 5)
+
+
+class ForceEndTests(TestCase):
+    """A supervisor ends a changeover nobody finished."""
+
+    def setUp(self):
+        no_planned_time(self)
+        p = mock.patch.object(engine, "roll_over", side_effect=lambda sh, t: sh)
+        p.start()
+        self.addCleanup(p.stop)
+        cache.clear()
+        seed_demo(reset=True)
+        self.sh = ShiftRun.objects.filter(line="Barbara", active=True).select_related("mo").first()
+        self.lead = engine.Ctx(user=Person.objects.get(pin="4444"), line="Barbara")
+        self.op = engine.Ctx(user=Person.objects.get(pin="1111"), line="Barbara")
+        engine.execute("coOpen", {}, self.op)
+        r = engine.execute("coEnd", {"qty": self.sh.mo_count, "checks": ALL}, self.op)
+        self.assertTrue(r["ok"], r)
+        self.next = MO.objects.filter(status="OPEN", line__name="Barbara").exclude(pk=self.sh.mo_id).first()
+
+    def test_operator_cannot_and_a_reason_is_needed(self):
+        self.assertFalse(engine.execute("coForceEnd", {"why": "x"}, self.op)["ok"])
+        self.assertIn("Say why", engine.execute("coForceEnd", {}, self.lead)["error"])
+
+    def test_force_end_runs_the_picked_mo(self):
+        from hmi.models import ChangeoverPiece
+        self.assertTrue(engine.execute("coPick", {"mo": self.next.number}, self.op)["ok"])   # steps never checked off
+        r = engine.execute("coForceEnd", {"why": "operator went home", "run": True}, self.lead)
+        self.assertTrue(r["ok"], r)
+        sh = ShiftRun.objects.get(pk=self.sh.pk)
+        self.assertEqual((sh.co, sh.mo_id, sh.state in ("running", "stopped"), sh.qc_after_co), (None, self.next.pk, True, True))
+        piece = ChangeoverPiece.objects.filter(line="Barbara").latest("id")
+        self.assertEqual(piece.ended, "force-ended")
+        self.assertIn("Force-ended by S. Lead: operator went home", piece.note)
+        self.assertIn("changeover force-ended", AuditLog.objects.latest("id").what)
+
+    def test_force_end_without_an_mo(self):
+        r = engine.execute("coForceEnd", {"why": "left open"}, self.lead)
+        self.assertTrue(r["ok"], r)
+        sh = ShiftRun.objects.get(pk=self.sh.pk)
+        self.assertEqual((sh.co, sh.mo_id), (None, None))
+        self.assertIn("with no MO", r["msg"])
+
+    def test_from_supervisor_line_status_and_kiosk(self):
+        from .test_quality import sup_login
+        c = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(c, "4444")["ok"])
+        self.assertContains(c.get("/supervisor/?tab=status"), f"/supervisor/coend/{self.sh.pk}/")
+        page = c.get(f"/supervisor/coend/{self.sh.pk}/")
+        self.assertContains(page, "Force end the changeover")
+        r = c.post(f"/supervisor/coend/{self.sh.pk}/", {"why": "operator left", "run": "0", "csrfmiddlewaretoken": c.cookies["csrftoken"].value})
+        self.assertEqual(r.status_code, 302)
+        self.assertIsNone(ShiftRun.objects.get(pk=self.sh.pk).co)
+        self.assertNotContains(c.get("/supervisor/?tab=status"), f"/supervisor/coend/{self.sh.pk}/")
+        # the kiosk: a supervisor's PIN first
+        engine.execute("coOpen", {}, self.op)
+        engine.execute("coEnd", {"checks": ALL}, self.op)
+        k = Client(HTTP_HX_REQUEST="true")
+        k.post("/kiosk/do/station", {"line": "Barbara"})
+        k.post("/kiosk/do/login", {"pin": "1111"})
+        self.assertContains(k.get("/kiosk/m/changeover"), "Force end - Supervisor")
+        self.assertContains(k.get("/kiosk/m/coforce"), "Force-ending a changeover needs a supervisor")

@@ -696,7 +696,7 @@ def a_sup_start(request, s, p):
         return err_in_modal(err)
     request.session["sup"] = {"id": u.pk, "until": now().timestamp() + SUP_MINUTES * 60}
     engine.audit(engine.Ctx(user=u), f"Supervisor override on {s.station or 'a screen'}" + (f" (logged in: {s.me.name})" if s.me else ""))
-    if p.get("next") in ("nomo",):   # the override was for one thing: go straight on to it
+    if p.get("next") in ("nomo", "como", "coforce"):   # the override was for one thing: go straight on to it
         resp = MODALS[p["next"]][0](request, screen(request))
         return thin.trigger(resp, toast=f"Supervisor override: {u.name}", changed=True)
     return thin.done(toast=f"Supervisor override: {u.name}. It ends after {SUP_MINUTES} minutes without a tap.", close=True)
@@ -765,6 +765,28 @@ def m_como(request, s):
     if not (s.shift and (s.shift.co or {}).get("step", 0) >= 2):
         return thin.refused("End the current order first.")
     return modal_response(request, "hmi/k/m_como.html", **ctx_for(s, sh=s.shift))
+
+
+@modal("coforce")
+def m_coforce(request, s):
+    """A supervisor force-ends the changeover on this screen's line (nobody finished it)."""
+    if not s.can("floor.override"):
+        return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, perm="floor.override", perm_label=_perm_label("floor.override"),
+                                                                       sup=True, next="coforce", why="coforce",
+                                                                       people=kscreen.people_for_login("floor.override")))
+    sh = s.shift
+    if not (sh and sh.co and sh.co.get("step", 1) >= 2):
+        return thin.refused("There's no changeover to end.")
+    new = s.mo(sh.co.get("newMo")) if sh.co.get("newMo") else None
+    return modal_response(request, "hmi/k/m_coforce.html", **ctx_for(s, sh=sh, new=new))
+
+
+@action("coForceEnd")
+def a_co_force_end(request, s, p):
+    r = run(request, s, "coForceEnd", {"why": p.get("why", ""), "run": p.get("run") == "1"})
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.done(toast=r.get("msg"), close=True, changed=True)
 
 
 @action("coPickMo")

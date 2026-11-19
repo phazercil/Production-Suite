@@ -15,6 +15,7 @@
         <dt>Speed</dt><dd>{% if c.ppm is not None %}<b class="big">{{ c.ppm }}</b> {{ c.m.speed_short }} <span class="note">of {{ c.m.ppm|floatformat:0 }}</span>{% elif c.stale %}<span class="warn">No reading since {{ c.since|clock }}</span>{% else %}<span class="muted">No readings</span>{% endif %}</dd>
         <dt>MO</dt><dd>{% if c.mo %}{{ c.mo.number }} · {{ c.mo.part }}{% elif c.next %}<span class="warn">Setting up</span> {{ c.next.number }} · {{ c.next.part }}{% else %}<span class="muted">None</span>{% endif %}</dd>
         {% if c.mo %}<dt>Qty</dt><dd><b class="big">{{ c.made|num }}</b> of {{ c.qty|num }}{% if c.pct is not None %}<div class="hbar" style="margin:4px 0 0;grid-template-columns:1fr auto"><i style="width:{{ c.pct }}%"></i><span class="n">{{ c.pct }}%</span></div>{% endif %}</dd>{% endif %}
+        {% if c.co %}<dt>Changeover</dt><dd>{% if c.coSince %}since {{ c.coSince|clock }} <span class="note">({{ c.coMin }} min)</span>{% else %}open{% endif %} <a class="btn ghost sm" href="/supervisor/coend/{{ c.sh.pk }}/">Force end</a></dd>{% endif %}
         {% if c.recheck %}<dt>QC</dt><dd><span class="pill warn">Re-check due</span> <span class="note">after the failed check at {{ c.recheck.0.t|clock }}</span></dd>{% endif %}
         {% if c.sh %}<dt>This shift</dt><dd>{{ c.sh.count|num }} made{% if c.stats %} · {{ c.stats.uptime }}% up · {{ c.stats.down }} min down{% endif %}</dd>{% endif %}
       </dl>
