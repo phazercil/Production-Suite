@@ -279,3 +279,14 @@ td input[type=text]{width:140px}
 .mo-nums .sc b{color:var(--bad)}
 .mo-pace{font-size:11.5px;margin-top:3px} .mo-pace.ahead{color:var(--ok)} .mo-pace.behind{color:var(--bad)}
 .kpi.ok b{color:var(--ok)}
+
+/* day scale: each day's first hour carries its date */
+.tick.dstart{border-left:2px solid var(--line-2,#3a4552)}
+.tick.dstart{overflow:visible;z-index:2}
+.tick.dstart .big{font-size:12px}
+.tick .dlab{display:block;font:600 11px var(--f-mono);color:var(--fg);white-space:nowrap;background:var(--surface);padding-right:6px;width:max-content}
+.tick.today .dlab{color:var(--accent,#5B9BD5)}
+.ghost-line.box.placed{background:color-mix(in srgb,var(--accent) 40%,transparent);animation:ghostPulse 1s ease-in-out infinite alternate}
+.ghost-line.placed span{display:none}
+@keyframes ghostPulse{from{opacity:.55}to{opacity:.9}}
+@media (prefers-reduced-motion:reduce){.ghost-line.box.placed{animation:none}}

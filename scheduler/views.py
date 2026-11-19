@@ -87,7 +87,7 @@ def state(request):
     st = PlantSettings.load()
     a, b = request.GET.get("from"), request.GET.get("to")
     work, hist = {}, []
-    if a and b and a.isdigit() and b.isdigit() and 0 < int(a) < int(b) and int(b) - int(a) <= 62 * 86_400_000:
+    if a and b and a.isdigit() and b.isdigit() and 0 < int(a) < int(b) and int(b) - int(a) <= 400 * 86_400_000:
         a, b = int(a), int(b)
         for m in world["cfg"]["machines"]:
             work[m["id"]] = sch["cal"].between(m, a, b)
