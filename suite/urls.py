@@ -77,6 +77,7 @@ urlpatterns = [
     path("api/quality/fv/parts", fviewer.parts),
     path("api/quality/fv/parts/set", fviewer.part_set),
     path("api/quality/fv/parts/delete", fviewer.part_delete),
+    path("api/quality/fv/parts/flat", fviewer.part_flat),
     path("api/quality/fv/running", fviewer.running),
     path("api/quality/fv/refresh", fviewer.refresh),
     path("quality/viewer/refresh-all/", fviewer.refresh_all),

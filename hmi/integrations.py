@@ -159,6 +159,62 @@ def paycom_fields():
 DB_NAMES = {"assets": "The asset database", "s2k": "The S2K database", "machines": "The machine data database"}
 
 
+# The 3D viewer's part library (Quality › 3D viewer) as a read-only table for the Connector builder: queries built from
+# it start with this tag and run against an in-memory copy of the library's flat rows, never an outside database.
+VIEWER_TAG = "/* suite: 3D viewer part library */\n"
+VIEWER_TABLE = "filter_parts"
+_vcache = {"k": None, "conn": None}
+_vlock = __import__("threading").Lock()
+
+
+def viewer_columns():
+    from .snapshot import fv_columns
+    return ["part_number"] + [c["db"] for c in fv_columns()]
+
+
+def _viewer_conn():
+    import sqlite3
+    from django.db.models import Count, Max
+    from plant.models import FilterModel3D
+    a = FilterModel3D.objects.aggregate(n=Count("id"), t=Max("updated"))
+    k = (a["n"], a["t"])
+    if _vcache["k"] != k:
+        cols = viewer_columns()
+        conn = sqlite3.connect(":memory:", check_same_thread=False)
+        conn.execute(f"CREATE TABLE {VIEWER_TABLE} (" + ", ".join(f'"{c}"' for c in cols) + ")")
+        rows = [[x.part] + [x.flat.get(c) for c in cols[1:]] for x in FilterModel3D.objects.all().only("part", "flat")]
+        conn.executemany(f"INSERT INTO {VIEWER_TABLE} VALUES (" + ",".join("?" * len(cols)) + ")", rows)
+        conn.execute("PRAGMA query_only = ON")
+        old, _vcache["conn"], _vcache["k"] = _vcache["conn"], conn, k
+        if old:
+            old.close()
+    return _vcache["conn"]
+
+
+def viewer_run(sql, params, limit=500):
+    sql = check_select(sql.replace(VIEWER_TAG, "", 1), "the 3D viewer part library")
+    names = PARAM.findall(sql)
+    q = PARAM.sub("?", sql)
+    t0 = time.time()
+    with _vlock:
+        c = _viewer_conn().execute(q, [str((params or {}).get(n, "")) for n in names])
+        cols = [d[0] for d in c.description or []]
+        rows = c.fetchmany(limit + 1)
+    out = [dict(zip(cols, r)) for r in rows[:limit]]
+    return {"columns": cols, "rows": out, "ms": round((time.time() - t0) * 1000), "truncated": len(rows) > limit}
+
+
+def is_viewer_sql(sql):
+    return str(sql or "").startswith(VIEWER_TAG)
+
+
+def query_ready(*names):
+    """A changeover/part query can run: it's wired to the 3D viewer part library, or the asset database is set up."""
+    from .models import SavedQuery
+    qs = list(SavedQuery.objects.filter(name__in=names).values_list("sql", flat=True))
+    return any(is_viewer_sql(s) for s in qs) or (bool(qs) and assets_ready())
+
+
 def assets_ready():
     liveconfig.refresh()
     return "assets" in connections.databases
@@ -258,6 +314,8 @@ def check_select(sql, what="the asset database"):
 
 def kind_of(db):
     """mysql, mssql or postgres: what kind of database the alias is (Admin › Connections detects it)."""
+    if db == "viewer":
+        return "sqlite"   # quoting and LIMIT as the other kinds' defaults (SQLite reads `names` and 'text')
     liveconfig.refresh()
     return (connections.settings.get(db) or {}).get("SUITE_KIND") or "mysql"
 
@@ -270,6 +328,8 @@ def quoters(db):
 
 
 def run_saved(sql, params, limit=500, db="assets"):
+    if db == "viewer" or is_viewer_sql(sql):
+        return viewer_run(sql, params, limit)
     sql = check_select(sql, DB_NAMES.get(db, "that database").replace("The ", "the "))
     conn = _db(db)
     names = PARAM.findall(sql)
@@ -285,6 +345,8 @@ def run_saved(sql, params, limit=500, db="assets"):
 
 def schema(db="assets"):
     from plant import dbkinds
+    if db == "viewer":
+        return {"database": "3D viewer part library", "tables": [{"name": VIEWER_TABLE, "columns": [{"name": c, "type": "text"} for c in viewer_columns()]}]}
     conn = _db(db)
     name = conn.settings_dict["NAME"]
     sql, params = dbkinds.schema_sql(kind_of(db))

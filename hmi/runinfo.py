@@ -72,7 +72,7 @@ def tooling(part, machine, line_code="", t=None, use_db=True):
     if not key:
         return {"src": "none", "groups": []}
     cache = ToolingCache.objects.filter(part=key, machine=machine).first()
-    if not (use_db and integrations.assets_ready()):
+    if not (use_db and (integrations.assets_ready() or integrations.query_ready("part_tooling"))):
         if cache:
             return {"src": "stale", "groups": cache.groups, "t": cache.t, "why": "off"}
         return {"src": "off", "groups": []}

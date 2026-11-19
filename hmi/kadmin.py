@@ -65,7 +65,9 @@ def tables(db):
         return hit[1]
     try:
         integrations.liveconfig.refresh()
-        if db not in integrations.connections.databases:
+        if db == "viewer":
+            out = {"err": "", "tables": integrations.schema(db)["tables"], "ready": True}
+        elif db not in integrations.connections.databases:
             out = {"err": "", "tables": [], "ready": False}
         else:
             out = {"err": "", "tables": integrations.schema(db)["tables"], "ready": True}
@@ -171,7 +173,7 @@ def tab_data(s, tab, request):
     if tab == "connections":
         return connections_data(s, request)
     if tab == "connector":
-        return connector_data(s, focus=request.GET.get("focus", ""))
+        return connector_data(s, focus=request.GET.get("focus", ""), request=request)
     if tab == "permissions":
         return permissions_data(s, request)
     if tab == "codata":
@@ -561,21 +563,39 @@ def _need(request, s, perm):
     return login_needed(request, s, {"perm": perm})
 
 
-def connector_data(s, focus="", edit=None, msg=None):
-    """Every data need (the boxes on the right) and every source card (on the left: a table, the columns picked from
-    it and the rows it keeps)."""
+def connector_data(s, focus="", edit=None, msg=None, request=None):
+    """The data needs of one page of the builder (the boxes on the right: Machines, MOs & schedule, Filter dimensions,
+    Changeover & tooling) and the source cards they can use (on the left: a table, the columns picked from it and the
+    rows it keeps): the cards wired to this page's boxes, and cards no box uses yet."""
     from . import connector
+    from .kviews import page_option
     dbs = connector.ready_dbs()
     gs = connector.groups()
     cards = connector.link_cards(gs) if dbs else []
-    return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "groups": gs, "sum": connector.summary(gs),
-            "sources": [connector.card(c, gs) for c in cards if c.db in dbs],
+    keys = [k for k, _ in connector.PAGES]
+    page = page_option(request, "cpage", set(keys), "machines") if request else "machines"
+    fg = next((g for g in gs if g["key"] == focus), None)
+    if fg:   # a box asked for by name ("Still needed"): its page
+        page = connector.page_of(fg)
+        if request:
+            request.session["k.cpage"] = page
+    mine = [g for g in gs if connector.page_of(g) == page]
+    used_here = {g.get("src") for g in mine}
+    used = {g.get("src") for g in gs}
+    pages = []
+    for k, label in connector.PAGES:
+        pg = [g for g in gs if connector.page_of(g) == k]
+        done = sum(1 for g in pg if g["status"] in ("done", "other", "custom"))
+        pages.append({"key": k, "label": label, "on": k == page, "done": done, "total": len(pg)})
+    return {"dbs": [(d, connector.DB_LABEL[d]) for d in dbs], "allDbs": connector.DB_LABEL, "groups": mine, "sum": connector.summary(gs),
+            "pages": pages, "page": page, "here": [g["key"] for g in mine],
+            "sources": [connector.card(c, gs) for c in cards if c.db in dbs and (c.pk in used_here or c.pk not in used)],
             "tables": {d: [x["name"] for x in tables(d).get("tables", [])] for d in dbs}, "focus": focus,
             "edit": int(edit) if str(edit or "").isdigit() else None, "msg": msg}
 
 
 def _connector_page(request, s, edit=None, msg=None):
-    return render_panel(request, "hmi/k/admin/_connector.html", C=connector_data(s, edit=edit, msg=msg), tabCan=True, S=s)
+    return render_panel(request, "hmi/k/admin/_connector.html", C=connector_data(s, edit=edit, msg=msg, request=request), tabCan=True, S=s)
 
 
 @action("connectorSave")
@@ -608,7 +628,8 @@ def a_connector_save(request, s, p):
     if not r["ok"]:   # keep what was wired, so it can be fixed and saved again (still unsaved: refreshes leave it alone)
         g = {**g, "saved": g["state"], "state": {"src": int(p["src"]) if str(p.get("src", "")).isdigit() else None, "db": p.get("db", ""),
                             "table": p.get("table", ""), "map": mp, "where": where, "run2Name": p.get("run2Name", "")}}
-    C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key}
+    C = {"groups": gs, "sum": connector.summary(gs), "allDbs": connector.DB_LABEL, "focus": key,
+         "here": [x["key"] for x in gs if connector.page_of(x) == connector.page_of(g)]}
     html = render_to_string("hmi/k/admin/_cgroup.html", {"g": g, "C": C, "msg": msg, "tabCan": True, "S": s}, request=request)
     html += render_to_string("hmi/k/admin/_csum.html", {"C": C, "oob": True}, request=request)
     return HttpResponse(html)
