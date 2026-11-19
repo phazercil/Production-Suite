@@ -67,6 +67,6 @@ body.offline .conn .dot{background:var(--bad,#E06C5B)}
 .suite-fs svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .suite-fs .fs-out,.suite-fs.on .fs-in{display:none}
 .suite-fs.on .fs-out{display:inline}
-.suite-fs.float{position:fixed;left:10px;bottom:10px;top:auto;transform:none;z-index:50;background:rgba(0,0,0,.35);opacity:.35}
+.suite-fs.float{position:fixed;left:auto;right:10px;bottom:26px;top:auto;transform:none;z-index:50;background:rgba(0,0,0,.35);opacity:.35}
 .suite-fs.float:hover,.suite-fs.float:focus-visible{opacity:1}
 .suite-fs[hidden]{display:none}

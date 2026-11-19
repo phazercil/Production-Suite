@@ -549,8 +549,9 @@ def _dt_hm(hhmm):
     return datetime(2000, 1, 1, int(hhmm[:2]), int(hhmm[3:5]))
 
 
-def schedule_page(s, view="timeline", status="OPEN", sort=None):
-    """Schedule page: today's timeline (positions in pixels), this month's due dates, and the MO list."""
+def schedule_page(s, view="timeline", status="OPEN", sort=None, week=0):
+    """Schedule page, for this screen's line only: today's timeline (positions in pixels), the week's runs day by day,
+    and the MO list of the week (what runs on the line this week, or next week with week=1)."""
     from datetime import date, timedelta as td
 
     from plant.util import is_lunch, shift_windows, sod_ms
@@ -582,7 +583,7 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
         from plant.util import extra_breaks
         extras = extra_breaks(_local_ms(ds), _local_ms(end))
         lanes = []
-        for m in s.active_lines:
+        for m in ([s.machine] if s.machine else s.active_lines):
             blocks = []
             sh = ShiftRun.objects.filter(machine=m, active=True).select_related("mo").first()
             for b in line_blocks(s, m, sh, t_ms):
@@ -614,17 +615,38 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
             lanes.append({"m": m, "blocks": blocks, "breaks": lane_breaks})
         out["gantt"] = {"total": total, "LW": LW, "SW": SW, "head": head, "days": days, "lanes": lanes,
                         "now": round(X(t_ms)) if ds < t_ms < end else None, "scrollTo": max(0, round(X(t_ms)) - 320) if ds < t_ms < end else 0}
-    else:
-        today = s.t.astimezone().date() if False else _local_ms(t_ms).date()
-        first = date(today.year, today.month, 1)
-        start = first - td(days=(first.weekday() + 1) % 7)
-        days = [start + td(days=i) for i in range(42)]
-        due = {}
-        for mo in MO.objects.filter(status="OPEN", due__gte=days[0], due__lte=days[-1], parent__isnull=True).select_related("line"):
-            due.setdefault(mo.due, []).append(mo)
-        out["cal"] = [{"d": d, "out": d.month != today.month, "today": d == today, "mos": due.get(d, [])[:3], "more": max(0, len(due.get(d, [])) - 3)}
-                      for d in days]
+    # the week (Monday to Sunday) on this line: each day's runs and changeovers, and the MOs in it
+    from datetime import datetime as _dt
+
+    from django.utils import timezone as _tz
+    today = _local_ms(t_ms).date()
+    monday = today - td(days=today.weekday()) + td(days=7 * week)
+    wk0 = ms(_tz.make_aware(_dt.combine(monday, _dt.min.time())))
+    wk1 = ms(_tz.make_aware(_dt.combine(monday + td(days=7), _dt.min.time())))
+    m = s.machine
+    sh = ShiftRun.objects.filter(machine=m, active=True).select_related("mo").first() if m else None
+    blocks = [b for b in (line_blocks(s, m, sh, t_ms) if m else []) if b["start"] < wk1 and b["end"] > wk0]
+    days = []
+    for i in range(7):
+        d = monday + td(days=i)
+        d0 = ms(_tz.make_aware(_dt.combine(d, _dt.min.time())))
+        d1 = d0 + 86_400_000
+        items = []
+        for b in blocks:
+            if b["start"] < d1 and b["end"] > d0:
+                items.append({**b, "from": clock(_local_ms(b["start"])) if b["start"] >= d0 else "cont.",
+                              "to": clock(_local_ms(b["end"])) if b["end"] <= d1 else "next day"})
+        days.append({"d": d, "today": d == today, "past": d < today, "items": items})
+    out.update(week=week, weekDays=days, weekLabel=f"{monday:%b} {monday.day} – {(monday + td(days=6)):%b} {(monday + td(days=6)).day}",
+               line=m.name if m else "", lineColor=m.color if m else "")
+    ids = {b["m"].pk for b in blocks if b["kind"] == "mo"}
+    if m:   # what ran on the line this week and has been closed since
+        from .models import MoRun
+        ran = set(MoRun.objects.filter(line=m.name, end_time__gt=_local_ms(wk0), start_time__lt=_local_ms(wk1)).values_list("mo", flat=True))
+        ids |= set(MO.objects.filter(number__in=ran).values_list("pk", flat=True))
     base = MO.objects.select_related("line").filter(parent__isnull=True)   # an S2K order's stage MOs show with their order
+    if m:
+        base = base.filter(pk__in=ids)   # this line's MOs this week only
     rows = list(base if status == "ALL" else base.filter(status=status))
     keys = {"added": lambda m: m.added or date.min, "mo": lambda m: m.number, "due": lambda m: m.due or date.max, "qty": lambda m: m.qty,
             "item": lambda m: m.part, "produced": lambda m: m.produced,
@@ -633,7 +655,13 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None):
         rows.sort(key=keys[sort.lstrip("-")], reverse=sort.startswith("-"))
     today = _local_ms(t_ms).date()
     out["rows"] = [{"m": m, "late": m.status == "OPEN" and m.due and m.due < today, "final": m.produced - m.scrap} for m in rows]
-    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Line")]
+    starts = {b["m"].pk: b["start"] for b in reversed(blocks) if b["kind"] == "mo"}
+    for r in out["rows"]:
+        st = starts.get(r["m"].pk)
+        r["when"] = plan_label(_local_ms(st), _local_ms(t_ms)) if st else ""
+    if not sort:   # in run order
+        out["rows"].sort(key=lambda r: starts.get(r["m"].pk, 0))
+    out["cols"] = [("added", "Added to sheet"), ("mo", "MO No."), ("due", "Due date"), ("qty", "Make qty"), ("item", "Item"), ("produced", "Produced qty"), ("scrap", "Scrap qty"), ("final", "Final qty"), ("status", "Open/Close"), ("line", "Runs")]
     return out
 
 

@@ -194,8 +194,9 @@ def view_data(s, page, request):
         return {"R": s.run_screen()}
     if page == "schedule":
         sort = page_option(request, "sort", None, "")
-        return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "calendar"}, "timeline"),
-                                           page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort)}
+        return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "week"}, "timeline"),
+                                           page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort,
+                                           int(page_option(request, "week", {"0", "1"}, "0")))}
     if page == "part-info":
         P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
         return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}
