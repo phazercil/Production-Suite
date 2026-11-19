@@ -782,9 +782,9 @@ def maintenance_page(s, show="open"):
         order = {"High": 0, "Medium": 1, "Low": 2}
         rows.sort(key=lambda r: (order.get(r["t"].priority, 1), r["t"].t))
     return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
-            "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status="In progress").count(),
+            "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status__in=("Reviewed", "In progress", "Waiting on parts")).count(),
                        "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
-            "canWork": s.can("tickets.work")}
+            "canWork": s.can("tickets.work"), "statuses": Ticket.STATUSES}
 
 
 def status_page(s):

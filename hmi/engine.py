@@ -1314,7 +1314,7 @@ def ticket_status(p, ctx):
     need(t.status != "Closed", "That request is already completed.")
     note = str(p.get("note") or "").strip()
     need(len(note) <= 4000, "Keep the repair note under 4,000 characters.")
-    t.status = "In progress" if t.status == "Open" and not p.get("close") else "Closed"
+    t.status = "In progress" if t.status != "In progress" and not p.get("close") else "Closed"
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save()
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
@@ -1334,7 +1334,7 @@ def ticket_note(p, ctx):
     need(text, "Write the repair note first.")
     need(len(text) <= 4000, "Keep the repair note under 4,000 characters.")
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, text=text)
-    if t.status == "Open":
+    if t.status in ("Open", "Reviewed"):
         t.status = "In progress"
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save(update_fields=["status", "updated", "updated_by"])

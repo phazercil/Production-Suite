@@ -11,6 +11,7 @@ from scheduler import views as sch
 from quality import viewer as fviewer
 from quality import views as quality
 from supervisor import views as supervisor
+from maintenance import views as maintenance
 from suite import sections, thin
 
 urlpatterns = [
@@ -85,7 +86,8 @@ urlpatterns = [
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
     path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),
     path("supervisor/coend/<int:pk>/", supervisor.co_force_end, name="supervisor-coend"),
-    path("maintenance/", sections.soon, {"key": "maintenance"}, name="maintenance-section"),
+    path("maintenance/", maintenance.page, name="maintenance-section"),
+    path("maintenance/do/<str:name>", maintenance.do, name="maintenance-do"),
     path("packaging/", sections.soon, {"key": "packaging"}, name="packaging-section"),   # (coming later)   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),
