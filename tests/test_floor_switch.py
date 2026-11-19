@@ -260,12 +260,15 @@ class ForceEndTests(TestCase):
         c = Client(enforce_csrf_checks=True)
         self.assertTrue(sup_login(c, "4444")["ok"])
         self.assertContains(c.get("/supervisor/?tab=status"), f"/supervisor/coend/{self.sh.pk}/")
+        self.assertContains(c.get("/supervisor/?tab=co"), "Changeovers open now")                   # on every tab
+        self.assertContains(c.get("/supervisor/?tab=co"), "Force end changeover")
         page = c.get(f"/supervisor/coend/{self.sh.pk}/")
         self.assertContains(page, "Force end the changeover")
         r = c.post(f"/supervisor/coend/{self.sh.pk}/", {"why": "operator left", "run": "0", "csrfmiddlewaretoken": c.cookies["csrftoken"].value})
         self.assertEqual(r.status_code, 302)
         self.assertIsNone(ShiftRun.objects.get(pk=self.sh.pk).co)
         self.assertNotContains(c.get("/supervisor/?tab=status"), f"/supervisor/coend/{self.sh.pk}/")
+        self.assertNotContains(c.get("/supervisor/?tab=co"), "Changeovers open now")
         # the kiosk: a supervisor's PIN first
         engine.execute("coOpen", {}, self.op)
         engine.execute("coEnd", {"checks": ALL}, self.op)

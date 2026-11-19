@@ -240,6 +240,22 @@ def line_status():
                    "Made this shift": sum(c["sh"].count for c in cards if c["sh"])}
 
 
+def open_changeovers():
+    """Every line with a changeover open now (the order ended), longest-open first: for the Force end buttons."""
+    from plant.util import from_ms
+    now = timezone.now()
+    out = []
+    for sh in ShiftRun.objects.filter(active=True, co__isnull=False).select_related("machine"):
+        co = sh.co or {}
+        if co.get("step", 1) < 2:
+            continue
+        t = co.get("first") or co.get("start")
+        since = from_ms(t) if t else None
+        out.append({"sh": sh, "since": since, "min": round((now - since).total_seconds() / 60) if since else None,
+                    "who": sh.user_name or "", "picked": bool(co.get("newMo"))})
+    return sorted(out, key=lambda x: x["since"] or now)
+
+
 @ensure_csrf_cookie
 @require_GET
 def page(request):
@@ -250,7 +266,7 @@ def page(request):
     if f["tab"] == "status":
         cards, totals = line_status()
         return render(request, "supervisor/page.html", {
-            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "cards": cards, "totals": totals, "now": timezone.now(),
+            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "cards": cards, "totals": totals, "now": timezone.now(), "openCo": open_changeovers(),
             "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS}, "nobody": NOBODY, "msg": request.GET.get("msg", "")[:200]})
     qs, totals = LISTS[f["tab"]](f)
     if request.GET.get("csv") == "1":
@@ -276,7 +292,7 @@ def page(request):
             q.vals = qc_values(q, labels)
     lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
     return render(request, "supervisor/page.html", {
-        "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": rows, "n": n, "totals": totals, "lines": lines,
+        "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": rows, "n": n, "totals": totals, "lines": lines, "openCo": open_changeovers(),
         "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
         "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,
         "next": _query(f, page=f["page"] + 1) if first + PER_PAGE < n else None,
