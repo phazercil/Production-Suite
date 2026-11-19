@@ -138,7 +138,7 @@ class NoMoTests(TestCase):
     def to_step2(self):
         lead = engine.Ctx(user=Person.objects.get(pin="9999"), line="Barbara")
         self.assertTrue(engine.execute("coOpen", {}, lead)["ok"])
-        self.assertTrue(engine.execute("coEnd", {"qty": 10}, lead)["ok"])
+        self.assertTrue(engine.execute("coEnd", {"checks": [True] * 10, "qty": 10}, lead)["ok"])
 
     def test_operator_needs_a_supervisor(self):
         self.to_step2()
@@ -181,7 +181,10 @@ class NoMoTests(TestCase):
         self.assertIn("letters and numbers", engine.execute("coPickPart", {"part": "MG<4062>", "why": "x"}, lead)["error"])
         self.assertIn("whole number", engine.execute("coPickPart", {"part": "MG4062HP", "qty": "1.5", "why": "x"}, lead)["error"])
         r = engine.execute("coPickPart", {"part": "ZZ9999", "why": "new part"}, lead)
-        self.assertIn("specs are estimated", r["msg"])
+        self.assertIn("isn't in the cost sheet, Parts & specs or the asset database", r["error"])   # a filter number typed wrong
+        self.assertFalse(MO.objects.filter(source="floor").exists())
+        r = engine.execute("coPickPart", {"part": "MG4062HP", "why": "S2K down"}, lead)
+        self.assertTrue(r["ok"], r)
         self.assertEqual(MO.objects.get(source="floor").qty, 0)
 
 
@@ -251,7 +254,7 @@ class ProcessOutTests(TestCase):
         self.sh.refresh_from_db()
         self.assertEqual((self.q.review, self.q.scrapped, self.q.issue, self.q.issue_note, self.q.reviewed_by),
                          ("disapproved", 12, "Glue skip / poor bond", "Skips on the left side band", "S. Lead"))
-        self.assertEqual((self.sh.count, self.sh.mo_count), (488, 288))                    # off the count
+        self.assertEqual((self.sh.count, self.sh.mo_count), (488, 300))                    # off the count
         self.post(url, {"qty": "10", "issue": "Bad cut"})                                     # changed: the count follows
         self.sh.refresh_from_db()
         self.assertEqual(self.sh.count, 490)
@@ -315,7 +318,7 @@ class FreshDimensionTests(TestCase):
 
     def save_check(self, length, asset_len):
         from unittest import mock
-        sp = engine.spec_for(self.sh.mo.part)
+        sp = self.spec = getattr(self, "spec", None) or engine.spec_for(self.sh.mo.part)   # the other values as first on file
         good = {"len": length, "wid": sp["wid"], "ph": sp["ph"], "sbl": sp["sb"], "sbr": sp["sb"], "glue": "Pass", "cut": "Pass", "scrap": "0",
                 "lateReason": "x"}
         rows = {"columns": [], "rows": [{"len": asset_len}], "ms": 1, "truncated": False}
@@ -566,3 +569,105 @@ class RecheckTests(TestCase):
         self.assertTrue(sup_login(q, "4444", "section.quality", "/quality/")["ok"])
         self.assertContains(q.get("/quality/"), "RE-CHECK PASSED")
         self.assertContains(k.get("/kiosk/v/qc-log"), "re-check after")
+
+
+
+class NoGuessedSpecsTests(TestCase):
+    """What the asset database doesn't have is left blank, never guessed; values typed in Parts & specs are kept; Refresh
+    re-reads every part."""
+
+    def setUp(self):
+        from hmi.models import SavedQuery
+        cache.clear()
+        seed_demo(reset=True)
+        SavedQuery.objects.create(name="part_spec", sql="SELECT 1 FROM part_attribute", saved_by="x")
+        self.ctx = engine.Ctx(user=Person.objects.get(pin="4444"))
+
+    def pull(self, row, keys=("ZZ100",), cmd="partsImport"):
+        from unittest import mock
+        rows = {"columns": [], "rows": [row], "ms": 1, "truncated": False}
+        with mock.patch.object(engine.integrations, "assets_ready", return_value=True), \
+                mock.patch.object(engine.integrations, "run_saved", return_value=rows):
+            return engine.execute(cmd, {"parts": "\n".join(keys)}, self.ctx)
+
+    def test_unknown_values_are_blank_and_typed_ones_kept(self):
+        from plant.models import PartSpec
+        r = self.pull({"len": "9.5", "wid": "8.0", "rev": "B"})
+        self.assertTrue(r["ok"], r)
+        ps = PartSpec.objects.get(key="ZZ100")
+        self.assertEqual((ps.len, ps.wid, ps.ph, ps.sb, ps.tol, ps.pleats), (9.5, 8.0, None, None, None, None))   # no guesses
+        self.assertIsNone(engine.spec_for("ZZ100")["ph"])
+        engine.execute("partsSave", {"rows": [{"k": "ZZ100", "pleats": "30", "len": "9.5", "wid": "8.0", "ph": "1.1", "sb": "",
+                                               "tol": "", "rev": "B", "media": ""}]}, self.ctx)
+        ps.refresh_from_db()
+        self.assertEqual((ps.ph, sorted(ps.hand)), (1.1, ["ph", "pleats"]))
+        self.pull({"len": "9.6"})                                                             # the database still has no pleat height
+        ps.refresh_from_db()
+        self.assertEqual((ps.len, ps.ph, ps.pleats, ps.wid), (9.6, 1.1, 30, None))           # typed values stay; unknown ones blank
+        self.assertIsNone(engine.part_spec("NOTLISTED")["len"])                              # a part not listed: nothing made up
+
+    def test_refresh_reads_every_part_again(self):
+        from plant.models import PartSpec
+        self.pull({"len": "9.5"})
+        n = PartSpec.objects.count()
+        r = self.pull({"len": "9.7"}, keys=(), cmd="partsRefresh")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("Refreshed from the asset database", r["msg"])
+        self.assertEqual(PartSpec.objects.get(key="ZZ100").len, 9.7)
+        self.assertGreaterEqual(PartSpec.objects.count(), n)
+        c = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(c, "4444", "section.quality", "/quality/")["ok"])
+        from unittest import mock
+        with mock.patch.object(engine.integrations, "assets_ready", return_value=True):
+            self.assertContains(c.get("/quality/?tab=parts"), "Refresh from the asset database")
+
+
+class AddedMeasurementTests(TestCase):
+    """A measurement added in Tolerances becomes a column in Parts & specs for every filter, a role in Part specs, a
+    QC item, and the page says when the asset database doesn't read it yet."""
+
+    def setUp(self):
+        cache.clear()
+        seed_demo(reset=True)
+        self.lead = engine.Ctx(user=Person.objects.get(pin="4444"))
+        self.c = Client(enforce_csrf_checks=True)
+        self.assertTrue(sup_login(self.c, "4444", "section.quality", "/quality/")["ok"])
+
+    def post(self, data):
+        return self.c.post("/quality/", {**data, "csrfmiddlewaretoken": self.c.cookies["csrftoken"].value})
+
+    def test_add_wire_measure_and_remove(self):
+        from hmi.models import SavedQuery
+        from hmi.snapshot import qdef
+        from plant.models import PartSpec
+        r = self.post({"action": "specFeatureAdd", "label": "Frame thickness", "minus": "0.02", "plus": "0.03"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(qc.features(), [{"key": "x1", "label": "Frame thickness"}])
+        self.assertEqual(qc.plant_tols()["x1"], {"minus": 0.02, "plus": 0.03})
+        self.assertFalse(engine.execute("specFeatureAdd", {"label": "frame thickness"}, self.lead)["ok"])   # no duplicates
+        r = self.c.get("/quality/?tab=parts")
+        self.assertContains(r, "<th>Frame thickness</th>", html=False)
+        self.assertContains(r, "Not connected to the asset database yet")
+        self.assertIn(["x1", "Frame thickness"], qdef()["part_spec"]["roles"])                # a role in the Connector builder
+        # once Part specs reads it, every filter gets its value
+        SavedQuery.objects.create(name="part_spec", sql="SELECT a.v AS len, b.v AS x1 FROM t", saved_by="x")
+        self.assertNotContains(self.c.get("/quality/?tab=parts"), "Not connected to the asset database yet")
+        from unittest import mock
+        rows = {"columns": [], "rows": [{"len": "9.5", "x1": "0.75"}], "ms": 1, "truncated": False}
+        with mock.patch.object(engine.integrations, "assets_ready", return_value=True), \
+                mock.patch.object(engine.integrations, "run_saved", return_value=rows):
+            self.assertTrue(engine.execute("partsImport", {"parts": "ZZ200"}, self.lead)["ok"])
+        self.assertEqual(PartSpec.objects.get(key="ZZ200").extra, {"x1": 0.75})
+        self.assertEqual(engine.spec_for("ZZ200")["x1"], 0.75)
+        # a QC check can measure it, against the part's value and its tolerance
+        self.assertTrue(engine.execute("qcItemAdd", {"stage": "s1", "key": "x1"}, self.lead)["ok"])
+        it = next(i for i in qc.items_for("s1") if i["key"] == "x1")
+        self.assertEqual(qc.judge([it], {"x1": 0.78}, engine.spec_for("ZZ200")), (True, []))
+        self.assertEqual(qc.judge([it], {"x1": 0.79}, engine.spec_for("ZZ200")), (False, ["x1"]))
+        # typed in Parts & specs
+        engine.execute("partsSave", {"rows": [{"k": "ZZ200", "pleats": "", "len": "9.5", "wid": "", "ph": "", "sb": "", "tol": "",
+                                               "x1": "0.8", "rev": "", "media": ""}]}, self.lead)
+        self.assertEqual(PartSpec.objects.get(key="ZZ200").extra, {"x1": 0.8})
+        self.post({"action": "specFeatureDel", "key": "x1"})
+        self.assertEqual(qc.features(), [])
+        self.assertNotIn("x1", [i["key"] for i in qc.items_for("s1")])

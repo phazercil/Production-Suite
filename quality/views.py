@@ -24,7 +24,8 @@ PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
 TABS = [("report", "Quality report"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
-           "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts"}
+           "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
+           "specFeatureAdd": "tol", "specFeatureDel": "tol"}
 PART_FIELDS = [("pleats", "Pleats/unit", "1"), ("len", "Length", ".001"), ("wid", "Width", ".001"), ("ph", "Pleat ht", ".001"),
                ("sb", "Side band", ".001"), ("tol", "Tol ±", ".001")]
 KINDS = [("", "All problems"), ("qc", "QC checks out of spec"), ("vision", "Machine vision fails"), ("hold", "Quality holds")]
@@ -70,6 +71,7 @@ def _query(f, **change):
 
 def _labels():
     lab = {k: v["label"] for k, v in qc.BUILTIN.items()}
+    lab.update({x["key"]: x["label"] for x in qc.features()})
     for items in (PlantSettings.load().config.get("qcItems") or {}).values():
         for it in items if isinstance(items, list) else []:
             if isinstance(it, dict) and it.get("key") and it.get("label"):
@@ -106,12 +108,13 @@ def report(f):
     vagg = vision.aggregate(n=Count("id"), fail=Count("id", filter=Q(passed=False)))
     hold_min = holds.aggregate(m=Sum("minutes"))["m"] or 0
     if f["kind"] in ("", "qc"):
+        feats = {x["key"]: qc.feature_item(x) for x in qc.features()}
         for q in checks.filter(passed=False).select_related("shift").order_by("-t")[:MAX_ROWS]:
             sp = spec(q.item)
             vals = q.values or {k: getattr(q, k) for k in ("len", "wid", "ph", "sbl", "sbr", "glue", "cut") if getattr(q, k) not in (None, "")}
             detail = []
             for k in q.fails or []:
-                v, it = vals.get(k), qc.BUILTIN.get(k)
+                v, it = vals.get(k), qc.BUILTIN.get(k) or feats.get(k)
                 note = ""
                 if it and it["type"] == "measure" and isinstance(v, (int, float)) and sp.get(it["spec"]) is not None:
                     t = sp[it["spec"]]
@@ -169,8 +172,18 @@ def csv_rows(rows):
 
 def tol_rows(cfg=None):
     t = qc.plant_tols(cfg)
-    return [{"k": k, "label": label, "minus": t[k]["minus"] if k in t else "", "plus": t[k]["plus"] if k in t else "", "set": k in t}
-            for k, label in qc.TOL_SPECS]
+    return [{"k": k, "label": label, "minus": t[k]["minus"] if k in t else "", "plus": t[k]["plus"] if k in t else "", "set": k in t,
+             "added": k.startswith("x")}
+            for k, label in qc.tol_specs(cfg)]
+
+
+def unwired_features(cfg=None):
+    """Measurements added in Tolerances that the asset database connection doesn't read yet (Part specs in the
+    Connector builder has no column for them)."""
+    import re
+    from hmi.models import SavedQuery
+    sql = getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""
+    return [x for x in qc.features(cfg) if not re.search(rf"\bAS\s+[`\"\[]?{x['key']}\b", sql, re.I)]
 
 
 @ensure_csrf_cookie
@@ -188,7 +201,7 @@ def page(request):
         a = a if a in ACTIONS else "qcTolSet"
         p = {k: request.POST.get(k) for k in request.POST if k not in ("csrfmiddlewaretoken", "action")}
         if a == "partsSave":   # the whole table: one list per column, in row order
-            cols = {f: request.POST.getlist(f) for f in ["k", *(x[0] for x in PART_FIELDS), "rev", "media"]}
+            cols = {f: request.POST.getlist(f) for f in ["k", *(x[0] for x in PART_FIELDS), *(x["key"] for x in qc.features()), "rev", "media"]}
             p = {"rows": [{f: (v[i] if i < len(v) else "") for f, v in cols.items()} for i in range(len(cols["k"]))]}
         r = engine.execute(a, p, engine.Ctx(user=me))
         if r.get("ok"):
@@ -202,7 +215,8 @@ def page(request):
         from plant.models import STAGES
         cfg = PlantSettings.load().config
         ctx["stages"] = [{"k": k, "label": lbl, "items": qc.items_for(k, cfg),
-                          "free": [(b, d["label"]) for b, d in qc.BUILTIN.items() if b not in {i["key"] for i in qc.items_for(k, cfg)}]}
+                          "free": [(b, d["label"]) for b, d in list(qc.BUILTIN.items()) + [(x["key"], x) for x in qc.features(cfg)]
+                                   if b not in {i["key"] for i in qc.items_for(k, cfg)}]}
                          for k, lbl in STAGES]
         ctx["types"], ctx["qcLate"] = qc.TYPES, (cfg.get("rules") or {}).get("qcLate", 10)
         ctx["issues"] = "\n".join(x for x in cfg.get("qualityIssues") or [] if x != "Other")
@@ -217,14 +231,19 @@ def page(request):
         if q:
             parts = parts.filter(key__icontains=q)
         n = parts.count()
-        ctx.update(parts=[{"p": x, "vals": [(f, lbl, st, getattr(x, f)) for f, lbl, st in PART_FIELDS]} for x in parts[:500]], nParts=n, q=q,
-                   fields=PART_FIELDS, units=cfg.get("assetUnits") or {}, unitSpecs=[(k, lbl) for k, lbl in qc.TOL_SPECS] + [("tol", "Tolerance")],
+        fields = PART_FIELDS + [(x["key"], x["label"], ".001") for x in qc.features(cfg)]   # measurements added in Tolerances
+        ctx.update(parts=[{"p": x, "vals": [(f, lbl, st, getattr(x, f) if not f.startswith("x") else (x.extra or {}).get(f)) for f, lbl, st in fields]}
+                          for x in parts[:500]], nParts=n, q=q,
+                   fields=fields, units=cfg.get("assetUnits") or {}, unitSpecs=[(k, lbl) for k, lbl in qc.tol_specs(cfg)] + [("tol", "Tolerance")],
+                   unwired=unwired_features(cfg), assetsReady=integrations.assets_ready(),
                    canImport=integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
                    uomWired="AS uom" in (getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""),
                    pasted=request.POST.get("parts", "") if err else "")
         return render(request, "quality/page.html", ctx)
     if f["tab"] == "tol":
+        from hmi import integrations
         ctx["tols"] = tol_rows()
+        ctx.update(unwired=unwired_features(), assetsReady=integrations.assets_ready())
         if err:   # what was typed, so it can be fixed
             for t in ctx["tols"]:
                 t["minus"], t["plus"] = request.POST.get(f"{t['k']}_minus", ""), request.POST.get(f"{t['k']}_plus", "")

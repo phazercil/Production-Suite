@@ -1,7 +1,8 @@
-<div class="row"><h1 class="h1 grow">Schedule</h1>
-  <div class="seg"><button class="{% if P.view == 'timeline' %}on{% endif %}" hx-get="/kiosk/v/schedule?view=timeline" hx-target="#view">Timeline</button><button class="{% if P.view == 'calendar' %}on{% endif %}" hx-get="/kiosk/v/schedule?view=calendar" hx-target="#view">Calendar</button></div>
+<div class="row"><h1 class="h1 grow">Schedule{% if P.line %} · {{ P.line }}{% endif %}</h1>
+  <div class="seg"><button class="{% if P.view == 'timeline' %}on{% endif %}" hx-get="/kiosk/v/schedule?view=timeline" hx-target="#view">Today</button><button class="{% if P.view == 'week' %}on{% endif %}" hx-get="/kiosk/v/schedule?view=week" hx-target="#view">Week</button></div>
+  <div class="seg"><button class="{% if P.week == 0 %}on{% endif %}" hx-get="/kiosk/v/schedule?week=0" hx-target="#view">This week</button><button class="{% if P.week == 1 %}on{% endif %}" hx-get="/kiosk/v/schedule?week=1" hx-target="#view">Next week</button></div>
   {% if S.perms.lists_edit %}<button class="btn" hx-get="/kiosk/m/extraBreak" hx-target="#modal" hx-swap="innerHTML">Schedule a break</button>{% endif %}
-  <a class="btn ghost" href="/scheduler/">Plan in the Scheduler</a></div>
+  {% if not lock %}<a class="btn ghost" href="/scheduler/">Plan in the Scheduler</a>{% endif %}</div>
 <p class="sub">Run order and times come from the Scheduler. The running MO uses its live progress. <span class="fin inline"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 1v14" stroke="currentColor" stroke-width="1.6"/><path d="M3 2h12v8H3z" fill="#fff"/><path d="M3 2h3v2H3zM9 2h3v2H9zM6 4h3v2H6zM12 4h3v2h-3zM3 6h3v2H3zM9 6h3v2H9zM6 8h3v2H6zM12 8h3v2h-3z" fill="#111"/></svg>time</span> = estimated finish. Lunch says whether each line keeps running (relief cover, set per line in the Scheduler's Lines &amp; Shifts) or stops.</p>
 {% if P.view == "timeline" %}{% with g=P.gantt %}
 <div class="gantt" data-keep-scroll="gantt" data-scroll-to="{{ g.scrollTo }}"><div class="inner" style="width:{{ g.total }}px">
@@ -23,12 +24,15 @@
     <td>{% if S.perms.lists_edit %}<button class="btn sm ghost danger" hx-post="/kiosk/do/extraBreakDel" hx-vals='{"id": "{{ e.x.id }}"}' hx-confirm="Cancel {{ e.x.label }} at {{ e.from }}? Operators are told.">Cancel</button>{% endif %}</td></tr>{% endfor %}
   </tbody></table></div></div>{% endif %}
 {% else %}
-<div class="cal"><div class="dh">Sun</div><div class="dh">Mon</div><div class="dh">Tue</div><div class="dh">Wed</div><div class="dh">Thu</div><div class="dh">Fri</div><div class="dh">Sat</div>
-  {% for c in P.cal %}<div class="cell {% if c.out %}out{% endif %} {% if c.today %}today{% endif %}"><span class="d">{{ c.d.day }}</span>{% for x in c.mos %}<span class="chip" style="background:{% if x.line %}{{ x.line.color }}{% else %}#6c7076{% endif %}" title="MO {{ x.floor_number }} · {{ x.part }} · {{ x.qty }}">{{ x.part }}</span>{% endfor %}{% if c.more %}<span class="d">+{{ c.more }} more</span>{% endif %}</div>{% endfor %}</div>
+<div class="row"><h2 class="h2 grow">{{ P.weekLabel }}</h2><span class="note">{{ P.line }}'s runs from the Scheduler</span></div>
+<div class="wk">{% for d in P.weekDays %}<div class="wday {% if d.today %}today{% endif %} {% if d.past %}past{% endif %}"><div class="wdh">{{ d.d|date:"D n/j" }}</div>
+  {% for b in d.items %}{% if b.kind == "co" %}<div class="wco {% if b.live %}live{% endif %}">Changeover{% if b.live %} now{% else %} ~{{ b.mins }} min{% endif %} <span class="note">{{ b.from }}</span></div>
+  {% else %}<div class="wmo {% if b.running %}run{% endif %}" style="border-left-color:{{ P.lineColor|default:'var(--accent)' }}"><b>{{ b.m.part }}</b><span>MO {{ b.m.floor_number }} · {{ b.m.qty|num }}</span><span class="note">{{ b.from }} – {{ b.to }}{% if b.running %} · running{% endif %}</span></div>{% endif %}
+  {% empty %}<span class="note">Nothing planned</span>{% endfor %}</div>{% endfor %}</div>
 {% endif %}
-<div class="row"><h2 class="h2 grow">MO list</h2><div class="seg">{% for f, label in "OPEN:Open,CLOSE:Closed,ALL:All"|pairs %}<button class="{% if P.status == f %}on{% endif %}" hx-get="/kiosk/v/schedule?status={{ f }}" hx-target="#view">{{ label }}</button>{% endfor %}</div></div>
+<div class="row"><h2 class="h2 grow">MO list{% if P.line %} · {{ P.line }}, {{ P.weekLabel }}{% endif %}</h2><div class="seg">{% for f, label in "OPEN:Open,CLOSE:Closed,ALL:All"|pairs %}<button class="{% if P.status == f %}on{% endif %}" hx-get="/kiosk/v/schedule?status={{ f }}" hx-target="#view">{{ label }}</button>{% endfor %}</div></div>
 <div class="tblwrap"><table class="xl"><thead><tr>{% for k, l in P.cols %}<th><a class="thsort" hx-get="/kiosk/v/schedule?sort={% if P.sort == k %}-{% endif %}{{ k }}" hx-target="#view">{{ l }}{% if P.sort == k %} ▲{% elif P.sort|slice:"1:" == k %} ▼{% endif %}</a></th>{% endfor %}</tr></thead><tbody>
-{% for r in P.rows %}<tr><td>{{ r.m.added|date:"n/j/Y" }}</td><td>{{ r.m.floor_number }}</td><td>{{ r.m.due|date:"n/j/Y" }}</td><td>{{ r.m.qty }}</td><td class="{% if r.late %}late{% endif %}">{{ r.m.part }}</td><td>{{ r.m.produced }}</td><td>{{ r.m.scrap }}</td><td class="final">{{ r.final }}</td><td>{{ r.m.status }}</td><td>{% if r.m.line %}{{ r.m.line.name }}{% else %}—{% endif %}</td></tr>
-{% empty %}<tr><td colspan="12">No MOs match.</td></tr>{% endfor %}
+{% for r in P.rows %}<tr><td>{{ r.m.added|date:"n/j/Y" }}</td><td>{{ r.m.floor_number }}</td><td>{{ r.m.due|date:"n/j/Y" }}</td><td>{{ r.m.qty }}</td><td class="{% if r.late %}late{% endif %}">{{ r.m.part }}</td><td>{{ r.m.produced }}</td><td>{{ r.m.scrap }}</td><td class="final">{{ r.final }}</td><td>{{ r.m.status }}</td><td>{{ r.when|default:"—" }}</td></tr>
+{% empty %}<tr><td colspan="12">{% if P.line %}No MOs on {{ P.line }} {% if P.week %}next{% else %}this{% endif %} week{% if P.status != "ALL" %} ({% if P.status == "OPEN" %}open{% else %}closed{% endif %}){% endif %}.{% else %}No MOs match.{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>
 <p class="note">Red item = past due. Yellow item = hot order. Final qty = produced − scrap.</p>

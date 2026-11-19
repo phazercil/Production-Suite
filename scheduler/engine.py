@@ -16,7 +16,7 @@ import math
 
 from django.db import transaction
 
-from plant.models import MO, STAGE_ORDER, Machine, PlantSettings, Shift
+from plant.models import MO, STAGE_ORDER, Machine, PlantSettings, Shift, inkjet_only
 from plant.schedule import book
 from plant.util import DAY, HOUR, MIN, Catalog, add_days_ms, at_local_minutes, from_ms, hm, is_lunch, local, ms, now, sod_ms
 
@@ -59,6 +59,7 @@ def load_world(jobs_override=None):
         kids = {c.stage: c for c in mo.stage_mos.all() if c.stage}
         mos[mo.id] = {"id": mo.id, "mo": mo.s2k_number, "part": mo.part, "qty": mo.qty, "due": ms_from_date(mo.due), "pleats": mo.pleats,
                       "ops": mo.ops or {"s1": True}, "itemUid": mo.item_uid, "status": mo.status, "produced": mo.produced,
+                      "scrapped": mo.scrap, "net": max(0, mo.produced - mo.scrap),
                       "example": mo.example, "stageQty": dict(mo.stage_qty or {}),
                       "stageMos": {**{st: {"mo": c.s2k_number, "part": c.part, "left": c.remaining} for st, c in kids.items()},
                                    **({mo.stage: {"mo": mo.s2k_number, "part": mo.part, "left": mo.remaining}} if mo.stage else {})}}
@@ -70,9 +71,11 @@ def load_world(jobs_override=None):
                         if j.split_mode else None}
                 for j in Job.objects.all()}
     from hmi.models import ShiftRun  # local import: hmi depends on scheduler
-    running = {r["mo_id"]: r["machine_id"] for r in ShiftRun.objects.filter(active=True, mo__isnull=False, machine__isnull=False).values("mo_id", "machine_id")}
+    live = list(ShiftRun.objects.filter(active=True, mo__isnull=False, machine__isnull=False).select_related("machine", "mo"))
+    running = {r.mo_id: r.machine_id for r in live}
     cfg = {"shifts": shifts, "machines": machines, "coSamePart": st.planner.get("coSamePart", False),
-           "coFirst": st.planner.get("coFirst", True), "useLabor": st.planner.get("useLabor", True) is not False}
+           "coFirst": st.planner.get("coFirst", True), "useLabor": st.planner.get("useLabor", True) is not False,
+           "inkjetBases": list(st.planner.get("inkjetBases") or []), "inkjetMin": float(st.planner.get("inkjetMin") or 0)}
     # The Labor Budget plan: work calendar (holidays, days off, extra work days) and crew cost (labor/plan.py).
     # Which shifts a line runs is set in Lines & Shifts only; a shift with no crew in the plan is pointed out, not skipped.
     from labor.plan import LaborPlanView, machine_labor
@@ -84,7 +87,45 @@ def load_world(jobs_override=None):
     extra = [{"s": ms(w["s"]), "e": ms(w["e"]), "machines": sorted(w["machines"]) if w["machines"] else None}
              for w in extra_breaks(t0 - _td(days=2), t0 + _td(days=120))]
     return {"cfg": cfg, "labor": plan, "laborLines": machine_labor(plan, cfg), "extraBreaks": extra,
-            "mos": mos, "jobs": jobs, "catalog": Catalog(), "running": running, "now": ms(now())}
+            "mos": mos, "jobs": jobs, "catalog": Catalog(), "running": running, "actual": actual_runs(live, t0), "now": ms(t0)}
+
+
+def actual_runs(live, t):
+    """How each MO running now has really gone on its line: the filters counted and the stretches of time it ran
+    (every earlier shift's run of it on that line, and this shift's so far). {mo_id: {"made", "spans": [(ms, ms)]}}"""
+    from hmi.models import MoRun
+    out = {}
+    for sh in live:
+        a = {"machineId": sh.machine_id, "made": int(sh.mo_count or 0), "spans": [(ms(sh.mo_start or sh.start), ms(t))]}
+        for r in MoRun.objects.filter(mo=sh.mo.number, line=sh.machine.name, end_time__lte=t):
+            if r.shift_id == sh.pk:
+                continue   # this shift's own earlier piece is already in mo_count
+            a["made"] += int(r.qty or 0)
+            a["spans"].append((ms(r.start_time), ms(r.end_time)))
+        out[sh.mo_id] = a
+    return out
+
+
+ACT_MIN = 20   # minutes of run time before the real speed replaces the planned one
+
+
+def actual_pace(cal, m, act, eff):
+    """The running MO's real pace against the plan: {"eff": real filters/hr (downtime included), "planEff",
+    "workMin": shift minutes it has run, "made", "savedMin": time saved so far (negative: lost)}; None until it has
+    run ACT_MIN minutes and made something. Time is shift time (breaks and off-shift hours don't count)."""
+    if not act or not eff:
+        return None
+    work = 0.0
+    for s, e in act["spans"]:
+        segs = cal.between(m, s, e)
+        w = sum(b - a for a, b in segs) / MIN
+        work += w if w > 0 or e - s < 10 * MIN else (e - s) / MIN   # ran off shift (overtime): count the time it ran
+    made = act["made"]
+    if work < ACT_MIN or made <= 0:
+        return None
+    real = made / work * 60
+    real = min(eff * 4, max(eff / 4, real))   # a bad counter can't throw the plan out by more than 4×
+    return {"eff": real, "planEff": eff, "workMin": round(work), "made": made, "savedMin": round(made / eff * 60 - work)}
 
 
 def config_sig(cfg):
@@ -92,7 +133,7 @@ def config_sig(cfg):
     screen loaded, so a screen that was left open can't undo changes made meanwhile on another screen."""
     import hashlib
     keep = {"machines": cfg["machines"], "shifts": cfg["shifts"], "coSamePart": cfg["coSamePart"], "coFirst": cfg["coFirst"],
-            "useLabor": cfg.get("useLabor", True)}
+            "useLabor": cfg.get("useLabor", True), "inkjetBases": cfg.get("inkjetBases"), "inkjetMin": cfg.get("inkjetMin")}
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -305,8 +346,9 @@ def _stage_total(mo, st):
     """What a stage still has to make: Stage 1 what is left at the pleater, later stages the whole order. An S2K
     order's stages each make what their own MO says (2 per finished part makes Stage 1 and 2 twice packaging)."""
     q = float((mo.get("stageQty") or {}).get(st) or mo["qty"] or 0)
-    if st == "s1":
-        return max(0, q - float(mo.get("produced") or 0))
+    if st == "s1":   # good filters still to make (net: made less scrap)
+        made = mo.get("net") if mo.get("net") is not None else mo.get("produced")
+        return max(0, q - float(made or 0))
     return q
 
 
@@ -353,7 +395,7 @@ def _compute(world, jobs, cuts):
             lst = sorted((j for j in jobs.values() if j["machineId"] == m["id"] and j["moId"] in mos),
                          key=lambda j: (0 if st == "s1" and running.get(j["moId"]) == m["id"] else 1, j["reqStart"], str(j["id"])))
             by_m[m["id"]] = []
-            prev_end, prev_part = -math.inf, None
+            prev_end, prev_part, prev_no = -math.inf, None, None
             for j in lst:
                 mo = mos[j["moId"]]
                 item = cat.item_for(mo)
@@ -381,6 +423,9 @@ def _compute(world, jobs, cuts):
                 pkey = item["uid"] if item else str(mo["part"]).upper()
                 co_min = float(m["changeover"] or 0) if ((prev_part is None and cfg.get("coFirst") is not False) or
                                                         (prev_part is not None and (prev_part != pkey or cfg.get("coSamePart")))) else 0
+                inkjet = False
+                if co_min and prev_no and inkjet_only(prev_no, mo["part"], cfg.get("inkjetBases")):
+                    co_min, inkjet = float(cfg.get("inkjetMin") or 0), True   # same base part: only the inkjet branding changes
                 if is_running:
                     co_min = 0  # already set up and running
                 if rest:
@@ -392,6 +437,11 @@ def _compute(world, jobs, cuts):
                 if not rate and not rest:
                     warn.append("No run speed for this part on this line")
                 run_min = gross / eff * 60 if eff > 0 else 0
+                pace = actual_pace(cal, m, (world.get("actual") or {}).get(mo["id"]), eff) if is_running else None
+                if pace:   # running faster or slower than planned: what's left is planned at the real pace
+                    plan_min = run_min
+                    run_min = gross / pace["eff"] * 60
+                    pace["finishMin"] = round(plan_min - run_min)   # how much sooner (later, if negative) it finishes
 
                 def plan(frm):
                     dur = (co_min + run_min) * MIN
@@ -455,7 +505,8 @@ def _compute(world, jobs, cuts):
                        "runSegs": run_segs, "warn": warn, "waiting": waiting, "paced": paced,
                        "overlap": bool(up and run_start < up["end"]), "pushed": segs[0][0] - j["reqStart"] > MIN, "late": False,
                        "reqStart": j["reqStart"], "running": is_running, "part": int(j.get("part") or 1),
-                       "parts": len(parts.get((mo["id"], st)) or [j]), "rest": rest, "split": (parts.get((mo["id"], st)) or [j])[0].get("split")}
+                       "parts": len(parts.get((mo["id"], st)) or [j]), "rest": rest, "split": (parts.get((mo["id"], st)) or [j])[0].get("split"),
+                       "pace": pace, "inkjet": inkjet and not is_running}
                 if rest:
                     out["pushed"] = False
                 if is_running:
@@ -470,7 +521,7 @@ def _compute(world, jobs, cuts):
                     out["late"] = True
                 res[j["id"]] = out
                 by_m[m["id"]].append(j["id"])
-                prev_end, prev_part = out["end"], pkey
+                prev_end, prev_part, prev_no = out["end"], pkey, mo["part"]
                 if st == "s1" and not rest:   # later stages pace against every part of Stage 1
                     u = s1_res.get(mo["id"])
                     s1_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
@@ -478,6 +529,46 @@ def _compute(world, jobs, cuts):
                     u = mid_res.get(mo["id"])
                     mid_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
     return {"res": res, "byM": by_m, "cal": cal, "cuts": new_cuts}
+
+
+def history(world, cal, a, b):
+    """What ran on each line between a and b (ms): every MO run the kiosks recorded, and the run going on now up to
+    now, with its gross, scrap and net, and against the plan's speed how much time it saved or lost. Newest last."""
+    from hmi.models import MoRun, ShiftRun
+    from django.utils import timezone as tz
+    by_name = {m["name"]: m for m in world["cfg"]["machines"]}
+    t_now = world["now"]
+    A, B = from_ms(a), from_ms(b)
+    rows = [(r.line, r.mo, r.item, r.qty, r.scrap, ms(r.start_time), ms(r.end_time), False)
+            for r in MoRun.objects.filter(end_time__gt=A, start_time__lt=B).order_by("start_time")]
+    for sh in ShiftRun.objects.filter(active=True, mo__isnull=False).select_related("mo"):
+        s = ms(sh.mo_start or sh.start)
+        if s < b and t_now > a:
+            rows.append((sh.line, sh.mo.number, sh.mo.part, sh.mo_count, None, s, t_now, True))
+    numbers = {r[1] for r in rows}
+    mos = {m.number: m for m in MO.objects.filter(number__in=numbers)}
+    cat = world["catalog"]
+    out = []
+    for line, number, item_no, made, scrap, s, e, now_ in rows:
+        m = by_name.get(line)
+        if not m or e <= s:
+            continue
+        mo = mos.get(number)
+        mo_d = {"part": item_no, "pleats": mo.pleats if mo else None, "itemUid": mo.item_uid if mo else None}
+        item = cat.item_for(mo_d)
+        rate, basis = rate_for(m, item, mo_d)
+        dt = min(.95, max(0, float(m["downtime"] or 0) / 100))
+        eff = rate * (1 - dt)
+        work = sum(y - x for x, y in cal.between(m, s, e)) / MIN or (e - s) / MIN
+        plan_min = made / eff * 60 if eff and made else None
+        h = {"machineId": m["id"], "mo": number, "part": item_no, "start": s, "end": e, "now": now_, "gross": int(made or 0),
+             "workMin": round(work), "planMin": round(plan_min) if plan_min is not None else None,
+             "savedMin": round(plan_min - work) if plan_min is not None else None, "basis": basis}
+        if scrap is not None:
+            h["scrap"] = int(scrap)
+            h["net"] = max(0, int(made or 0) - int(scrap))
+        out.append(h)
+    return out
 
 
 def qty_in(r, a, b):
@@ -489,6 +580,26 @@ def qty_in(r, a, b):
 
 
 # ------------------------------------------------------------------ floor queue
+def place_on_line(mo, machine, t):
+    """The floor runs this MO on this machine (an emergency switch, an MO picked at the kiosk): its Stage 1 goes on
+    that line on the Scheduler from t, as it really is. True when the board changed."""
+    if not machine or machine.stage != "s1":
+        return False
+    jobs = list(Job.objects.filter(mo=mo, op="s1").order_by("part"))
+    if any(j.machine_id == machine.id for j in jobs):
+        return False
+    if jobs:
+        j = jobs[0]
+        j.machine, j.req_start = machine, t
+        j.save(update_fields=["machine", "req_start"])
+    else:
+        Job.objects.create(mo=mo, op="s1", machine=machine, req_start=t)
+    if not (mo.ops or {}).get("s1"):
+        mo.ops = {**(mo.ops or {}), "s1": True}
+        mo.save(update_fields=["ops"])
+    return True
+
+
 def refresh_floor_queue(by="Scheduler"):
     """Write each Stage 1 machine's planned run order onto its MOs (line, seq, plan times).
     MOs no longer planned on a machine leave its queue, except the one running there now."""

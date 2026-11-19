@@ -60,7 +60,7 @@ async function load(force){
   const j=await api(`/api/scheduler/state?from=${a}&to=${b}`);
   if(!j.ok)return;
   S.me=j.me;S.editLocked=j.editLocked;renderWho();
-  S.cfg=j.cfg;S.cfgSig=j.cfgSig;S.modes=j.modes;S.mos={};j.mos.forEach(m=>S.mos[m.id]=m);S.jobs=j.jobs;S.res=j.res;S.byM=j.byM;S.work=j.work;S.labor=j.labor||{on:false,lines:{},days:{}};S.catalog=j.catalog;S.v=j.v;S.loaded=true;
+  S.cfg=j.cfg;S.cfgSig=j.cfgSig;S.modes=j.modes;S.mos={};j.mos.forEach(m=>S.mos[m.id]=m);S.jobs=j.jobs;S.res=j.res;S.byM=j.byM;S.work=j.work;S.hist=j.hist||[];S.labor=j.labor||{on:false,lines:{},days:{}};S.catalog=j.catalog;S.v=j.v;S.loaded=true;
   LAST={res:S.res,byM:S.byM};
   requestRender(force);
 }
@@ -137,7 +137,12 @@ const SCALES={
   day:{px:64,start:t=>sod(t),end:s=>addDays(s,1),step:1,snap:15*MIN},
   week:{px:9,start:t=>{const s=sod(t),d=new Date(s).getDay();return addDays(s,-((d+6)%7))},end:s=>addDays(s,7),step:7,snap:30*MIN},
   month:{px:2,start:t=>{const d=new Date(t);return new Date(d.getFullYear(),d.getMonth(),1).getTime()},end:s=>{const d=new Date(s);return new Date(d.getFullYear(),d.getMonth()+1,1).getTime()},step:"m",snap:2*HOUR}};
-function viewWindow(){const sc=SCALES[S.view.scale];const a=sc.start(S.view.anchor);return {sc,a,b:sc.end(a)}}
+/* The board scrolls on forever: it holds the page in view (a day, week or month, which fills the screen) and BUF more
+   on each side; scrolling near an end loads the board again around where you are. S.view.anchor is the time at the
+   board's left edge. */
+const BUF={day:3,week:2,month:2};
+function addPages(s,n){const sc=SCALES[S.view.scale];if(sc.step==="m"){const d=new Date(s);return new Date(d.getFullYear(),d.getMonth()+n,1).getTime()}return addDays(s,n*sc.step)}
+function viewWindow(){const sc=SCALES[S.view.scale],a0=sc.start(S.view.anchor),b0=sc.end(a0),n=BUF[S.view.scale];return {sc,a0,b0,a:addPages(a0,-n),b:addPages(a0,n+1)}}
 /* Hours no shift covers (e.g. midnight to 6 am) are left off the board: every day shows only the hours from the
    earliest shift start to the latest shift end of all the plant's shifts (also a shift no line is crewed for yet,
    so a planner sees the whole working day). A shift past midnight shows whole days. */
@@ -189,7 +194,16 @@ const segLabel=D=>D.segs.map(g=>{const f=t=>{const x=new Date(t),h=t===addDays(D
 const dayClosed=t=>!!(TMAP&&TMAP.days.find(D=>D.d===t)?.closed);
 const X=(t,a,px)=>TMAP&&TMAP.a===a&&TMAP.px===px?TMAP.x(t):(t-a)/HOUR*px;
 function dayHours(D){const out=[];for(const g of D.segs)for(let t=Math.floor(g.s/HOUR)*HOUR;t<g.e;t+=HOUR)out.push([Math.max(t,g.s),Math.min(t+HOUR,g.e)]);return out}
-function buckets(a,b){const out=[];if(S.view.scale==="day"){if(TMAP)out.push(...dayHours(TMAP.days[0]));else for(let t=a;t<b;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
+function buckets(a,b){const out=[];if(S.view.scale==="day"){if(TMAP)for(const D of TMAP.days)out.push(...dayHours(D));else for(let t=a;t<b;t+=HOUR)out.push([t,t+HOUR])}else{for(let t=a;t<b;t=addDays(t,1))out.push([t,addDays(t,1)])}return out}
+/* the dates on screen, as the heading */
+function visibleLabel(t0,t1){
+  const d0=new Date(t0),d1=new Date(Math.max(t0,t1-1)),y=d1.getFullYear();
+  if(sod(t0)===sod(t1-1))return d0.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",year:"numeric"});
+  if(S.view.scale==="month"&&d0.getDate()===1&&addDays(sod(t1-1),1)===new Date(d1.getFullYear(),d1.getMonth()+1,1).getTime()&&d0.getMonth()===d1.getMonth())
+    return `${d0.toLocaleString("en-US",{month:"long"})} ${y}`;
+  const f=d=>d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  return `${f(d0)} – ${f(d1)}, ${y}`;
+}
 function rangeLabel(a,b){
   const d=new Date(a),mon=d.toLocaleString("en-US",{month:"long"});
   if(S.view.scale==="day")return d.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric",year:"numeric"});
@@ -198,24 +212,33 @@ function rangeLabel(a,b){
 }
 const machineById=id=>S.cfg.machines.find(m=>m.id===id);
 function qtyIn(r,a,b){const tot=r.runSegs.reduce((s,[x,y])=>s+(y-x),0);if(!tot)return 0;let ov=0;for(const [x,y] of r.runSegs){const o=Math.min(y,b)-Math.max(x,a);if(o>0)ov+=o}return r.qty*ov/tot}
+/* time saved (+) or lost (−) against the plan's speed */
+function paceTxt(min){min=Math.round(min||0);return min>=0?`${fmtDur(min)} saved`:`${fmtDur(-min)} lost`}
+function paceBadge(min){min=Math.round(min||0);if(Math.abs(min)<1)return "";return `<span class="pace ${min>=0?"ahead":"behind"}" title="${esc(paceTxt(min))} against the planned speed">${min>=0?"+":"−"}${fmtDur(Math.abs(min))}</span>`}
+function paceLines(p){if(!p)return "";const pct=Math.round((p.eff/p.planEff-1)*100);
+  return `\nRunning ${pct>=0?pct+"% faster":(-pct)+"% slower"} than planned (${fmtN(Math.round(p.eff))}/hr against ${fmtN(Math.round(p.planEff))}/hr over ${fmtDur(p.workMin)} of run time)\n${paceTxt(p.savedMin)} so far · the rest is planned at the real speed, so it finishes ${p.finishMin>=0?fmtDur(p.finishMin)+" sooner":fmtDur(-p.finishMin)+" later"}`}
 function resultsFor(mid){return (S.byM[mid]||[]).map(k=>S.res[k]).filter(Boolean)}
 function renderSchedule(){
   const main=$("#main");
-  const keepScroll=$(".gwrap")?{l:$(".gwrap").scrollLeft,t:$(".gwrap").scrollTop,k:S.view.scale+S.view.anchor}:null;
+  const vTop=$(".gwrap")?$(".gwrap").scrollTop:0;
   const railScroll=$(".rail-list")?$(".rail-list").scrollTop:0;
-  const {sc,a,b}=viewWindow();let px=sc.px;TMAP=makeMap(a,b,px);
-  /* week and month fill the screen: working days stretch, the thin strips for closed days keep their width */
+  const {sc,a0,b0,a,b}=viewWindow();let px=sc.px;
+  /* week and month: one week or month fills the screen (working days stretch, the thin strips for closed days keep
+     their width); the board holds more of them on each side to scroll to */
   if(S.view.scale!=="day"){const labw=parseFloat(getComputedStyle($(".planner")||document.body).getPropertyValue("--labw"))||200;
-    const avail=(main.clientWidth||1200)-(($(".rail")?.offsetWidth)||300)-labw-80,fixed=TMAP.days.filter(D=>D.closed).reduce((s,D)=>s+D.w,0);
-    if(TMAP.W-fixed>0&&avail>TMAP.W){px=px*(avail-fixed)/(TMAP.W-fixed);TMAP=makeMap(a,b,px)}}
+    const pm=makeMap(a0,b0,px);
+    const avail=(main.clientWidth||1200)-(($(".rail")?.offsetWidth)||300)-labw-80,fixed=pm.days.filter(D=>D.closed).reduce((s,D)=>s+D.w,0);
+    if(pm.W-fixed>0&&avail>pm.W)px=px*(avail-fixed)/(pm.W-fixed)}
+  TMAP=makeMap(a,b,px);
   const W=Math.round(X(b,a,px));
   const mos=Object.values(S.mos);
   const late=new Set(),waiting=new Set();let scheduled=0;
-  for(const mo of mos){const s1Done=mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));const rs=ops.map(o=>S.res[jobKey(mo.id,o)]).filter(Boolean);
+  for(const mo of mos){const s1Done=mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));const rs=ops.map(o=>S.res[jobKey(mo.id,o)]).filter(Boolean);
     if(rs.length===ops.length&&ops.length)scheduled++;if(rs.some(r=>r.late))late.add(mo.id);if(rs.some(r=>r.waiting))waiting.add(mo.id)}
   const unsched=mos.length-scheduled;
   let axis="";const now=Date.now();
-  if(S.view.scale==="day"){for(const [t,e] of dayHours(TMAP.days[0])){const h=new Date(t).getHours();axis+=`<div class="tick ${h%6===0?"major":""}" style="left:${X(t,a,px)}px;width:${X(e,a,px)-X(t,a,px)}px"><span class="big">${String(h).padStart(2,"0")}:${String(new Date(t).getMinutes()).padStart(2,"0")}</span></div>`}}
+  if(S.view.scale==="day"){for(const D of TMAP.days){if(D.closed)continue;dayHours(D).forEach(([t,e],i)=>{const h=new Date(t).getHours(),d=new Date(t),td=sod(now)===D.d;
+    axis+=`<div class="tick ${i===0?"major dstart":h%6===0?"major":""} ${td&&i===0?"today":""}" style="left:${X(t,a,px)}px;width:${X(e,a,px)-X(t,a,px)}px">${i===0?`<span class="dlab">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>`:""}<span class="big">${String(h).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}</span></div>`})}}
   else{for(let t=a;t<b;t=addDays(t,1)){const d=new Date(t),w=X(addDays(t,1),a,px)-X(t,a,px),we=d.getDay()===0||d.getDay()===6,td=sod(now)===t;
     if(dayClosed(t)){axis+=`<div class="tick closed ${td?"today":""}" style="left:${X(t,a,px)}px;width:${w}px" title="${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}: no shift on any line"><span class="big">${S.view.scale==="week"?DOW[d.getDay()].slice(0,2):""}</span>${S.view.scale==="week"?d.getDate():""}</div>`;continue}
     const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Holiday":"Day off"} in the Labor Budget plan"`:"",spL=sp==="HOLIDAY"?"Holiday":sp==="OFF"?"Off":sp==="WORK"?"Work day":"";
@@ -230,10 +253,10 @@ function renderSchedule(){
   for(const st of STAGE_ORDER){
     const ms=S.cfg.machines.filter(m=>m.stage===st);if(!ms.length)continue;
     const all=ms.flatMap(m=>resultsFor(m.id));
-    const gTot=all.reduce((s,r)=>s+qtyIn(r,a,b),0);
+    const gTot=all.reduce((s,r)=>s+qtyIn(r,a0,b0),0);
     const gcells=bk.map(([x,y])=>{const q=all.reduce((s,r)=>s+qtyIn(r,x,y),0),cw=X(y,a,px)-X(x,a,px);if(!q||cw<20)return "";
       return `<div class="qcell has" style="left:${X(x,a,px)}px;width:${cw}px" title="${fmtN(Math.round(q))} pcs ${S.view.scale==="day"?"this hour":"on "+fmtD(x)}">${cw<60?fmtS(q):fmtK(q)}</div>`}).join("");
-    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot">${fmtN(Math.round(gTot))} pcs</span></div><div class="g-track" style="width:${W}px">${bands}${gcells}</div></div>`;
+    rows+=`<div class="g-row group"><div class="g-lab"><span class="nm"><span class="swatch" style="background:var(--${st==="s1"?"st1":st})"></span>${esc(STAGES[st].name)}</span><span class="tot" data-stage="${st}">${fmtN(Math.round(gTot))} pcs</span></div><div class="g-track" style="width:${W}px">${bands}${gcells}</div></div>`;
     for(const m of ms){
       const rs=resultsFor(m.id);
       const work=S.work[m.id]||[];let off="",cur=a;
@@ -247,17 +270,23 @@ function renderSchedule(){
         const l=X(r.start,a,px),w=r.rest?Math.max(96,X(r.end,a,px)-l):Math.max(4,X(r.end,a,px)-l),cw=r.coMin?Math.min(w,X(r.runStart,a,px)-l):0;
         const pl=r.parts>1?` · ${r.part}/${r.parts}`:"",sp=r.parts>1&&r.part===1?r.split:null;
         const spTxt=sp?(sp.mode==="qty"?`Part 1 stops after ${fmtN(sp.qty)}`:sp.mode==="time"?`Part 1 stops at ${fmtDT(sp.at)}`:"Part 1 runs until the operator ends the MO"):"";
-        const tip=`${mo.mo}${pl} · ${mo.part} · ${r.rest?"the rest once the operator ends part 1":fmtN(r.qty)+" pcs"}${r.running?" · RUNNING at the kiosk now":""}${spTxt?"\n"+spTxt:""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\nChangeover ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
+        const tip=`${mo.mo}${pl} · ${mo.part} · ${r.rest?"the rest once the operator ends part 1":fmtN(r.qty)+" pcs"}${r.running?" · RUNNING at the kiosk now":""}${paceLines(r.pace)}${spTxt?"\n"+spTxt:""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\n${r.inkjet?"Inkjet-only changeover":"Changeover"} ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:r.inkjet?"\nInkjet-only changeover (same base part): no changeover time":""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
         const canSplit=!S.editLocked&&!r.unplanned&&(r.parts<2||r.part===1);
-        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
-      const tot=rs.reduce((s,r)=>s+qtyIn(r,a,b),0);
+        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${r.pace&&w>=170?paceBadge(r.pace.savedMin):""}${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
+      /* what already ran on this line (from the kiosks), behind the plan */
+      const hbars=(S.hist||[]).filter(h=>h.machineId===m.id&&h.end>a&&h.start<b).map(h=>{
+        const l=X(Math.max(h.start,a),a,px),w=Math.max(3,X(Math.min(h.end,b),a,px)-l);
+        const nums=h.net!=null?`Gross ${fmtN(h.gross)} · Net ${fmtN(h.net)} · Scrap ${fmtN(h.scrap)}`:`${fmtN(h.gross)} counted so far`;
+        const tip=`${h.now?"Running now":"Ran"}: ${h.mo} · ${h.part}\n${fmtDT(h.start)} → ${h.now?"now":fmtDT(h.end)}\n${nums}${h.planMin!=null?`\nPlanned speed ${fmtDur(h.planMin)} for that many · took ${fmtDur(h.workMin)} of shift time · ${paceTxt(h.savedMin)}`:""}`;
+        return `<div class="hbar ${m.stage} ${h.now?"now":""}" style="left:${l}px;width:${w}px" title="${esc(tip)}"><b>${esc(h.mo)}</b><span>${fmtK(h.net!=null?h.net:h.gross)}${h.savedMin!=null&&w>=70?" "+paceBadge(h.savedMin):""}</span></div>`}).join("");
+      const tot=rs.reduce((s,r)=>s+qtyIn(r,a0,b0),0);
       const cells="";
       const U={ppm:"PPM",mms:"mm/s",pcs:"parts/min"}[m.unit]||"PPM";
       const sp=m.stage==="s1"?`${m.mode==="fixed"||m.unit&&m.unit!=="ppm"?m.ppm+" "+U:m.mode==="new"?"New-machine PPM":"Sheet PPM"}`:`${(S.modes[m.stage]||[]).find(x=>x[0]===m.mode)?.[1].split(" (")[0]||"Fixed"}`;
       const lab=(S.labor.lines||{})[m.id];
       const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} no crew`).join(" · "):"";
       const labTip=`${m.name}\n${sp} · ${m.scrap}% scrap · ${m.downtime}% down${lab?"\nCrew: "+crewTxt:""}\n${fmtN(Math.round(tot))} pcs in view`;
-      rows+=`<div class="g-row ${rs.some(r=>r.end>a&&r.start<b)?"":"idle"}"><div class="g-lab" title="${esc(labTip)}"><span class="nm">${esc(m.name)}</span><span class="ds">${tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}${esc(sp)}</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${bars}${cells}</div></div>`;
+      rows+=`<div class="g-row ${rs.some(r=>r.end>a&&r.start<b)?"":"idle"}"><div class="g-lab" title="${esc(labTip)}"><span class="nm">${esc(m.name)}</span><span class="ds"><span class="ltot" data-mid="${esc(m.id)}">${tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}</span>${esc(sp)}</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${hbars}${bars}${cells}</div></div>`;
     }
   }
   /* Orders by stage: an MO with several stages is listed once in each stage it still needs, so each section is the
@@ -267,7 +296,7 @@ function renderSchedule(){
     .sort((x,y)=>(x.due||9e15)-(y.due||9e15)||String(x.mo).localeCompare(String(y.mo)));
   const card=(mo,o)=>{
     const item=mo.item,k=jobKey(mo.id,o),r=S.res[k],j=S.jobs[k];
-    const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
+    const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;
     const blocked=o!=="s1"&&!s1Done&&!S.jobs[jobKey(mo.id,"s1")];
     const smo=stageMo(mo,o);
     const others=STAGE_ORDER.filter(x=>x!==o&&mo.ops&&mo.ops[x]).map(x=>{const rx=S.res[jobKey(mo.id,x)];const dn=x==="s1"&&s1Done;
@@ -276,10 +305,12 @@ function renderSchedule(){
     return `<div class="mo ${o} ${blocked?"blocked":"grab"} ${j?"placed":""}" ${blocked?"":`draggable="true"`} data-mo="${esc(mo.id)}" data-op="${o}" tabindex="0" role="button" title="${blocked?"Schedule Stage 1 for this order first":`Drag onto a ${esc(STAGES[o].short)} line, or click to set a start time`}">
       <div class="mo-top"><span class="mo-id">${esc(mo.mo)}${mo.example?' <span class="pill">example</span>':""}${o!=="s1"&&mo.status!=="OPEN"?' <span class="pill" title="Closed at the pleater">S1 closed</span>':""}</span><span class="mo-qty">${fmtN(stageQty(mo,o))}</span></div>
       ${smo&&smo.mo!==mo.mo?`<div class="mo-meta"><span title="The S2K MO for this stage">${STAGES[o].tag} MO ${esc(smo.mo)} · ${esc(smo.part)}</span></div>`:""}
-      <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}${o==="s1"&&mo.produced?`<span>${fmtN(mo.produced)} made</span>`:""}</div>
+      <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}</div>
+      ${mo.produced||mo.scrapped?`<div class="mo-nums" title="Counted at the pleater: gross is every filter made, scrap what was scrapped, net the good ones"><span>Gross <b>${fmtN(mo.produced||0)}</b></span><span>Net <b>${fmtN(mo.net||0)}</b></span><span class="${mo.scrapped?"sc":""}">Scrap <b>${fmtN(mo.scrapped||0)}</b></span></div>`:""}
+      ${r&&r.pace?`<div class="mo-pace ${r.pace.savedMin>=0?"ahead":"behind"}">${r.pace.eff>=r.pace.planEff?"Faster":"Slower"} than planned · ${paceTxt(r.pace.savedMin)} · finish moved ${r.pace.finishMin>=0?fmtDur(r.pace.finishMin)+" earlier":fmtDur(-r.pace.finishMin)+" later"}</div>`:""}
       <div class="mo-where">${where}${others?`<span class="others">${others}</span>`:""}</div></div>`};
   const sections=STAGE_ORDER.map(o=>{
-    const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.produced||0)>=mo.qty;
+    const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;
       if(o==="s1"&&s1Done)return false;
       return S.view.showDone||!S.jobs[jobKey(mo.id,o)]});
     if(!list.length&&!S.cfg.machines.some(m=>m.stage===o))return "";
@@ -292,7 +323,7 @@ function renderSchedule(){
     <div class="seg" role="group" aria-label="Scale">${["day","week","month"].map(s=>`<button data-scale="${s}" aria-pressed="${S.view.scale===s}">${s}</button>`).join("")}</div>
     <button class="btn" id="prev" aria-label="Previous">‹</button><button class="btn" id="today">Today</button><button class="btn" id="next" aria-label="Next">›</button>
     <input type="date" id="jump" aria-label="Jump to date" value="${isoDay(S.view.anchor)}">
-    <span class="range">${esc(rangeLabel(a,b))}</span>
+    <span class="range" id="range">${esc(rangeLabel(a0,b0))}</span>
     <span class="spacer"></span>
     <div class="legend"><span><i style="background:var(--st1)"></i>Stage 1</span><span><i style="background:var(--eb)"></i>End Band</span><span><i style="background:var(--ac)"></i>Arts &amp; Crafts</span><span><i style="background:var(--gb)"></i>Glue Bead</span><span><i class="hatch"></i>Changeover</span>${S.cfg.shifts.filter(s=>(s.days||[]).length).slice().sort((x,y)=>hm(x.start)-hm(y.start)).slice(0,3).map((s,i)=>`<span><i class="sband-key n${i+1}"></i>${esc(s.name)}</span>`).join("")}<span><i class="offkey"></i>Off shift / break</span></div>
   </div>
@@ -301,6 +332,8 @@ function renderSchedule(){
     <span class="kpi ${unsched?"warn":""}"><b>${unsched}</b> need scheduling</span>
     <span class="kpi ${late.size?"bad":""}"><b>${late.size}</b> finish after due date</span>
     ${waiting.size?`<span class="kpi bad"><b>${waiting.size}</b> waiting on Stage 1</span>`:""}
+    ${(()=>{const ps=Object.values(S.res).filter(r=>r.pace);if(!ps.length)return "";const t=ps.reduce((s,r)=>s+r.pace.savedMin,0);
+      return `<span class="kpi ${t>=0?"ok":"bad"}" title="The MOs running now against their planned speed; their runs are re-planned at the real speed"><b>${t>=0?"+":"−"}${fmtDur(Math.abs(t))}</b> ${t>=0?"ahead":"behind"} on running MOs</span>`})()}
   </div>
   <div class="board">
     <aside class="rail" aria-label="Manufacturing orders">
@@ -318,30 +351,60 @@ function renderSchedule(){
     </div></div>
   </div>`;
   const gw=$(".gwrap");
-  if(keepScroll&&keepScroll.k===S.view.scale+S.view.anchor){gw.scrollLeft=keepScroll.l;gw.scrollTop=keepScroll.t}
-  else if(now>=a&&now<b&&S.view.scale==="day"){gw.scrollLeft=Math.max(0,X(now,a,px)-200)}
+  /* where to scroll: a time asked for (Today, a date, a new scale), else where the board was (its left edge) */
+  const fo=S.focus||{t:S.view.anchor,f:0};S.focus=null;
+  const vw=Math.max(200,gw.clientWidth-labW());
+  gw.scrollLeft=Math.max(0,Math.round(X(Math.min(Math.max(fo.t,a),b),a,px)-fo.f*vw));gw.scrollTop=vTop;
   $(".rail-list").scrollTop=railScroll;
+  onBoardScroll(true);
+  gw.addEventListener("scroll",()=>{if(scrollRaf)return;scrollRaf=requestAnimationFrame(()=>{scrollRaf=0;onBoardScroll(false)})},{passive:true});
   wireSchedule(a,px);
 }
-function shiftView(dir){
-  const s=S.view.scale;
-  if(s==="month"){const d=new Date(SCALES.month.start(S.view.anchor));d.setMonth(d.getMonth()+dir);S.view.anchor=d.getTime()}
-  else S.view.anchor=addDays(SCALES[s].start(S.view.anchor),dir*SCALES[s].step);
-  saveView();load(true);
+let scrollRaf=0,totT=null,rewin=false;
+const labW=()=>parseFloat(getComputedStyle($(".planner")||document.body).getPropertyValue("--labw"))||200;
+/* The board scrolled: the heading, the date box and the totals follow what's on screen; near either end the board
+   loads again around where you are, so it scrolls on without stopping. */
+function onBoardScroll(first){
+  const gw=$(".gwrap");if(!gw||!TMAP)return;
+  const vw=Math.max(200,gw.clientWidth-labW()),x0=gw.scrollLeft,t0=TMAP.t(x0),t1=TMAP.t(Math.min(TMAP.W,x0+vw)),mid=TMAP.t(x0+vw/2);
+  S.view.anchor=t0;
+  const r=$("#range");if(r)r.textContent=visibleLabel(t0,t1);
+  const j=$("#jump");if(j&&document.activeElement!==j)j.value=isoDay(mid);
+  clearTimeout(totT);totT=setTimeout(()=>{saveView();updateTotals(t0,t1)},first?0:200);
+  if(first||rewin||DRAG)return;
+  if(x0<vw*0.6||x0+vw>TMAP.W-vw*0.6){   // near an end: load the board again around here
+    const {a,b}=viewWindow();if(a===TMAP.a&&b===TMAP.b)return;   // already centred on this page
+    rewin=true;S.focus={t:t0,f:0};load(true).finally(()=>{rewin=false})}
+}
+/* pieces made in the stretch on screen, by line and by stage */
+function updateTotals(t0,t1){
+  for(const el of $$(".ltot")){const tot=resultsFor(el.dataset.mid).reduce((s,r)=>s+qtyIn(r,t0,t1),0);el.innerHTML=tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}
+  for(const el of $$(".g-lab .tot[data-stage]")){const st=el.dataset.stage;const all=S.cfg.machines.filter(m=>m.stage===st).flatMap(m=>resultsFor(m.id));
+    el.textContent=`${fmtN(Math.round(all.reduce((s,r)=>s+qtyIn(r,t0,t1),0)))} pcs`}
+}
+function shiftView(dir){   // ‹ › scroll a screenful
+  const gw=$(".gwrap");if(!gw)return;gw.scrollBy({left:dir*Math.max(200,gw.clientWidth-labW())*0.9,behavior:"smooth"});
 }
 let DRAG=null;
 function wireSchedule(a,px){
-  $$("[data-scale]").forEach(b=>b.onclick=()=>{S.view.scale=b.dataset.scale;saveView();load(true)});
+  $$("[data-scale]").forEach(b=>b.onclick=()=>{   // a new scale, keeping the middle of the screen in the middle
+    const gw=$(".gwrap");let mid=S.view.anchor;if(gw&&TMAP){const vw=Math.max(200,gw.clientWidth-labW());mid=TMAP.t(gw.scrollLeft+vw/2)}
+    S.view.scale=b.dataset.scale;S.view.anchor=mid;S.focus={t:mid,f:.5};saveView();load(true)});
   $("#prev").onclick=()=>shiftView(-1);$("#next").onclick=()=>shiftView(1);
-  $("#today").onclick=()=>{S.view.anchor=Date.now();saveView();load(true)};
-  $("#jump").onchange=e=>{if(e.target.value){const [y,m,d]=e.target.value.split("-").map(Number);S.view.anchor=new Date(y,m-1,d).getTime();saveView();load(true)}};
+  /* Today and a picked date: scroll there (loading the board around it when it isn't on the board yet) */
+  const goTo=(t,f)=>{const gw=$(".gwrap");
+    if(gw&&TMAP&&t>=TMAP.a&&t<TMAP.b){const vw=Math.max(200,gw.clientWidth-labW());gw.scrollTo({left:Math.max(0,X(t,TMAP.a,TMAP.px)-f*vw),behavior:"smooth"});return}
+    S.view.anchor=t;S.focus={t,f};saveView();load(true)};
+  $("#today").onclick=()=>goTo(Date.now(),S.view.scale==="day"?.15:.05);
+  $("#jump").onchange=e=>{if(e.target.value){const [y,m,d]=e.target.value.split("-").map(Number);goTo(new Date(y,m-1,d).getTime(),0)}};
   $("#q").oninput=e=>{S.view.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)};
   $("#showdone").onchange=e=>{S.view.showDone=e.target.checked;saveView();render()};
   $$(".rail-sec-h").forEach(h=>h.onclick=()=>{S.view.closed=Object.assign({},S.view.closed,{[h.dataset.sec]:h.getAttribute("aria-expanded")==="true"});render()});
   $$(".rail .mo[data-op]").forEach(c=>{
     const blocked=c.classList.contains("blocked");
     c.addEventListener("dragstart",e=>{if(blocked){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
-      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grabPx:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging")});
+      DRAG={moId:+c.dataset.mo,op:c.dataset.op,grabPx:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging");
+      sizeDrag(DRAG)});
     c.addEventListener("dragend",()=>c.classList.remove("dragging"));
     const open=()=>{if(blocked){toast("Schedule Stage 1 for this order first.");return}openJobDialog(+c.dataset.mo,c.dataset.op)};
     c.addEventListener("click",open);c.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open()}});
@@ -349,7 +412,7 @@ function wireSchedule(a,px){
   $$(".bar").forEach(bEl=>{
     bEl.addEventListener("dragstart",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;const rect=bEl.getBoundingClientRect();
       DRAG={moId:j.moId,op:j.op,part:j.part||1,grabPx:e.clientX-rect.left,w:rect.width,from:j.id};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move";
-      bEl.classList.add("dragging")});
+      bEl.classList.add("dragging");sizeDrag(DRAG)});
     bEl.addEventListener("dragend",()=>bEl.classList.remove("dragging"));
     bEl.addEventListener("click",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;
       if(e.target.closest(".splitbtn")||(j.part||1)>1){openSplitDialog(j.moId,j.op);return}
@@ -362,11 +425,16 @@ function wireSchedule(a,px){
     const m=machineById(+tr.dataset.m);
     tr.addEventListener("dragover",e=>{if(!DRAG)return;const ok=m.stage===DRAG.op;tr.classList.toggle("drop-ok",ok);tr.classList.toggle("drop-no",!ok);
       if(ok){e.preventDefault();e.dataTransfer.dropEffect="move";let g=tr.querySelector(".ghost-line");if(!g){g=document.createElement("div");g.className="ghost-line";g.innerHTML="<span></span>";tr.appendChild(g)}
-        const t=tAt(tr,e);g.style.left=X(t,a,px)+"px";g.style.width=(DRAG.w?Math.max(2,DRAG.w):2)+"px";g.classList.toggle("box",!!DRAG.w);g.firstChild.textContent="Starts "+fmtDT(t)}});
+        /* the MO at its real length on this line (changeover and run, over the line's working hours), as soon as it's known */
+        const t=tAt(tr,e),du=DRAG.dur&&DRAG.dur[m.id];let w=DRAG.w||0,lab="Starts "+fmtDT(t);
+        if(du){const end=endAfter(m.id,t,du.co+du.run);w=Math.max(4,X(end,a,px)-X(t,a,px));lab=`${fmtDT(t)} → ${fmtDT(end)}${du.co?` · CO ${Math.round(du.co)}m`:""}`}
+        g.style.left=X(t,a,px)+"px";g.style.width=(w?Math.max(2,w):2)+"px";g.classList.toggle("box",!!w);g.firstChild.textContent=lab}});
     tr.addEventListener("dragleave",e=>{if(!tr.contains(e.relatedTarget)){tr.classList.remove("drop-ok","drop-no");tr.querySelector(".ghost-line")?.remove()}});
-    tr.addEventListener("drop",async e=>{e.preventDefault();tr.classList.remove("drop-ok","drop-no");tr.querySelector(".ghost-line")?.remove();
-      if(!DRAG)return;const d=DRAG;DRAG=null;
-      if(m.stage!==d.op){toast(`${STAGES[d.op].short} work can only go on a ${STAGES[d.op].short} line.`);return}
+    tr.addEventListener("drop",async e=>{e.preventDefault();tr.classList.remove("drop-ok","drop-no");
+      const ghost=tr.querySelector(".ghost-line");
+      if(!DRAG){ghost?.remove();return}const d=DRAG;DRAG=null;
+      if(m.stage!==d.op){ghost?.remove();toast(`${STAGES[d.op].short} work can only go on a ${STAGES[d.op].short} line.`);return}
+      if(ghost){ghost.classList.add("placed");if(!ghost.classList.contains("box"))ghost.remove()}   // stays, at its size, until the board redraws
       if(d.op!=="s1"&&!S.jobs[jobKey(d.moId,"s1")]){toast("Schedule Stage 1 for this order first.");return}
       const k=d.from||jobKey(d.moId,d.op),want=tAt(tr,e,d);
       const was=S.res[k];
@@ -378,6 +446,23 @@ function wireSchedule(a,px){
         else if(x.start-want>SCALES[S.view.scale].snap)toast(`Starts ${fmtDT(x.start)}: the first time ${m.name} is crewed and free from ${fmtDT(want)}.`)}
     });
   });
+}
+
+/* How long an MO takes on each line it could go on (changeover + run, in working minutes), asked of the server as
+   soon as the drag starts, so the drop target shows the real length while dragging. */
+async function sizeDrag(d){
+  const lines=S.cfg.machines.filter(m=>m.stage===d.op);d.dur={};
+  await Promise.all(lines.map(async m=>{
+    const j=await fetch("/api/scheduler/preview",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},
+      body:JSON.stringify({moId:d.moId,op:d.op,machineId:m.id,reqStart:Date.now()})}).then(r=>r.json()).catch(()=>null);   // quietly: no toasts mid-drag
+    if(j&&j.ok&&j.res)d.dur[m.id]={co:j.res.coMin||0,run:j.res.runMin||0}}));
+}
+/* the time `mins` working minutes after t on line mid (its shifts, breaks left out); past the hours on the board,
+   straight time */
+function endAfter(mid,t,mins){
+  let left=mins*MIN,cur=t;
+  for(const [s,e] of (S.work[mid]||[])){if(e<=cur)continue;const st=Math.max(s,cur);if(e-st>=left)return st+left;left-=e-st;cur=e}
+  return cur+left;
 }
 
 /* ---------- job dialog ---------- */
@@ -433,7 +518,7 @@ function openJobDialog(moId,op){
 function openSplitDialog(moId,op){
   const mo=S.mos[moId];if(!mo)return;const k=jobKey(moId,op),r1=S.res[k],j1=S.jobs[k];if(!j1)return;
   const k2=`${k}__2`,r2=S.res[k2],sp=r1&&r1.parts>1?r1.split:null;
-  const total=op==="s1"?Math.max(0,mo.qty-(mo.produced||0)):mo.qty;
+  const total=op==="s1"?Math.max(0,mo.qty-(mo.net??mo.produced??0)):mo.qty;
   const mid=r1?Math.round(((r1.runStart+r1.end)/2)/(15*MIN))*15*MIN:Date.now();
   const mode=sp?sp.mode:"time";
   $("#layer").innerHTML=`<div class="scrim" id="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgt">
@@ -514,7 +599,8 @@ function renderLines(){
   <button class="btn primary" id="addm">+ Add line</button></div>
   <div class="tablewrap"><table><thead><tr><th>Line</th><th>Stage</th><th>Speed basis</th><th class="n">Speed / fallback</th><th class="n">Scrap %</th><th class="n">Downtime %</th><th class="n">Changeover min</th><th title="Tick the shifts a line runs; on each, tick through lunch if relief cover keeps it running during that shift's lunch">Shifts · through lunch</th><th class="n">Hours / week</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="small muted" style="margin:8px 0 22px">Sheet-based lines fall back to the speed shown when a part has no rate on the cost sheet. Scrap adds extra pieces to every run; downtime slows the effective speed.</p>
-  <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label></div>
+  <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label>
+    <div class="row small" style="gap:8px;align-items:center;flex-wrap:wrap"><span>Inkjet-only changeover between filters with the same base part, for part numbers starting</span><input type="text" id="inkbases" value="${esc((c.inkjetBases||[]).join(", "))}" style="width:120px" aria-label="Base part prefixes" placeholder="AQ"><span>(e.g. AQ1278 → AQ1278C):</span><input type="number" id="inkmin" min="0" max="240" value="${c.inkjetMin||0}" style="width:70px" aria-label="Inkjet changeover minutes"><span>min</span></div></div>
   ${laborSection(c)}
   <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after, except lunch on a shift a line runs <b>through lunch</b>.</p></div><button class="btn" id="adds">+ Add shift</button></div>
   <div class="shift-grid">${shifts}</div>`;
@@ -532,7 +618,8 @@ function renderLines(){
     if(typeof m.id==="number")REMOVED.machines.add(m.id);c.machines.splice(i,1);saveCfg();renderLines()};
   $("#addm").onclick=()=>{const c=S.cfg;c.machines.push({id:uid("new-"),name:`New line ${c.machines.length+1}`,stage:"s1",mode:"fixed",ppm:180,rate:0,scrap:5,downtime:10,changeover:30,shifts:c.shifts.map(s=>s.id).slice(0,1)});saveCfg();renderLines()};
   $("#uselabor").onchange=e=>{S.cfg.useLabor=e.target.checked;saveCfg()};
-  $("#cosame").onchange=e=>{S.cfg.coSamePart=e.target.checked;saveCfg()};$("#cofirst").onchange=e=>{S.cfg.coFirst=e.target.checked;saveCfg()};
+  $("#cosame").onchange=e=>{S.cfg.coSamePart=e.target.checked;saveCfg()};
+  $("#inkbases").onchange=e=>{S.cfg.inkjetBases=e.target.value.split(/[,\s]+/).filter(Boolean);saveCfg()};$("#inkmin").onchange=e=>{S.cfg.inkjetMin=Math.max(0,Number(e.target.value)||0);saveCfg()};$("#cofirst").onchange=e=>{S.cfg.coFirst=e.target.checked;saveCfg()};
   $("#adds").onclick=()=>{const c=S.cfg;c.shifts.push({id:uid("new-"),name:`Shift ${c.shifts.length+1}`,start:"23:00",end:"06:00",days:[1,2,3,4,5],breaks:[{label:"Lunch",start:"03:00",end:"03:30"}]});saveCfg();renderLines()};
   $$(".shift").forEach(card=>{const SH=()=>S.cfg.shifts[+card.dataset.si];
     card.oninput=card.onchange=e=>{const sh=SH();if(!sh)return;const t=e.target;
@@ -559,7 +646,7 @@ function renderOrders(){
       <td class="n"><input type="number" min="1" data-qty id="qt-${esc(mo.id)}" value="${mo.qty}" aria-label="Quantity"></td>
       <td><input type="date" data-due id="du-${esc(mo.id)}" value="${mo.due?isoDay(mo.due):""}" aria-label="Due date"></td>
       <td><div class="opsel">${STAGE_ORDER.map(o=>`<button type="button" class="${o}" data-op="${o}" aria-pressed="${!!(mo.ops&&mo.ops[o])}" ${o==="s1"?"disabled":""} title="${STAGES[o].name}">${STAGES[o].tag}</button>`).join("")}</div></td>
-      <td>${st}</td><td>${mo.produced?`<span class="muted small">${fmtN(mo.produced)} made</span>`:`<button class="btn sm danger" data-rm>Delete</button>`}</td></tr>`}).join("");
+      <td>${st}</td><td>${mo.produced?`<span class="muted small">${fmtN(mo.produced)} gross · ${fmtN(mo.net||0)} net · ${fmtN(mo.scrapped||0)} scrap</span>`:`<button class="btn sm danger" data-rm>Delete</button>`}</td></tr>`}).join("");
   const pv=IMPV;
   $("#main").innerHTML=`
   <div class="page-head"><div><h2>Manufacturing Orders</h2><p class="sub">Export open MOs from S2K or your database as Excel or CSV and bring them in here. MOs pulled from S2K on the Operator Kiosk land here too. Parts are matched to the cost sheet by customer part number or AQ number to get pleat counts and stage rates.</p></div></div>

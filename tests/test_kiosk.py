@@ -329,9 +329,9 @@ class KioskTests(TestCase):
         r = self.do("qcReview", id=q.id, decision="disapproved", scrap="12")
         q.refresh_from_db(); sh.refresh_from_db()
         self.assertEqual((q.review, q.scrapped, q.reviewed_by), ("disapproved", 12, "S. Lead"))
-        self.assertEqual((sh.count, sh.mo_count), (88, 38))
+        self.assertEqual((sh.count, sh.mo_count), (88, 50))   # the shift's good count drops; the MO's gross stays
         mo = MO.objects.get(pk=sh.mo_id)
-        self.assertEqual((mo.produced, mo.scrap), (488, 12))
+        self.assertEqual((mo.produced, mo.scrap), (500, 12))   # gross 500, scrap 12: net 488
         # and corrects the check
         self.assertContains(self.c.get(f"/kiosk/m/qc?edit={q.id}"), "Save changes")
         self.do("qcSave", id=q.id, **good)

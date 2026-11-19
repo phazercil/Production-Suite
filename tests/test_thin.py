@@ -54,6 +54,31 @@ class DataKioskTests(TestCase):
         self.assertEqual(Client().get("/data/r/live?line=Nope").status_code, 404)
         self.assertEqual(Client().get("/data/r/nope").status_code, 404)
 
+    def test_full_screen_button(self):
+        self.assertContains(Client().get("/data/"), 'class="suite-fs" data-fullscreen')                 # in the top bar
+        self.assertContains(Client().get("/data/?view=1"), 'class="suite-fs float" data-fullscreen')    # the corner, no bar
+        self.assertContains(Client().get("/data/"), "suite/fullscreen.js")
+
+    def test_one_machine_and_view_only_link(self):
+        r = Client().get("/data/salvatore/")                    # any letter case
+        self.assertContains(r, 'id="live-salvatore"')
+        self.assertNotContains(r, 'id="live-barbara"')
+        self.assertContains(r, 'hx-get="/data/r/board?line=Salvatore"')
+        self.assertContains(r, "http://testserver/data/Salvatore/?view=1")   # the link to copy
+        self.assertContains(r, 'class="suitebar"')
+        self.assertEqual(Client().get("/data/Nope/").status_code, 404)
+        v = Client().get("/data/Salvatore/?view=1")
+        self.assertNotContains(v, 'class="suitebar"')            # no menu
+        self.assertNotContains(v, "dk-pick")                      # no line picker or link box
+        self.assertNotContains(v, "Operator Kiosk › Admin")       # no links into the suite
+        self.assertContains(v, "view only")
+        self.assertContains(v, 'hx-get="/data/r/board?line=Salvatore&amp;view=1"')
+        b = Client().get("/data/r/board?line=Salvatore&view=1")
+        self.assertContains(b, 'id="live-salvatore"')
+        self.assertNotContains(b, 'id="live-barbara"')
+        self.assertNotContains(b, "Grafana is not connected")
+        self.assertContains(Client().get("/data/?view=1"), 'id="live-barbara"')   # every line, view only
+
     def test_rotation_and_grafana_panels_are_decided_by_the_server(self):
         st = PlantSettings.load()
         st.settings["grafana"].update(on=True, url="http://192.168.100.40:3000", uid="pleat")
@@ -87,6 +112,14 @@ class ChartWindowTests(TestCase):
         for cls in ("c-now", "c-mark", "c-shade", "1st shift"):
             self.assertIn(cls, html)
         self.assertIn("No readings", svg.speed_chart([], 180, empty="No readings yet", start=t, end=t + timedelta(hours=8)))
+
+    def test_hour_lines_and_dotted_half_hours(self):
+        from django.utils import timezone
+        start = timezone.localtime(now()).replace(hour=7, minute=0, second=0, microsecond=0)
+        html = svg.speed_chart([(start + timedelta(minutes=5), 100)], 180, start=start, end=start + timedelta(hours=8))
+        self.assertEqual(html.count('class="c-hour"'), 7)    # 8am … 2pm (the chart's two edges have none)
+        self.assertEqual(html.count('class="c-half"'), 8)    # 7:30 … 2:30
+        self.assertIn("stroke-dasharray", open("static/suite/shell.css").read())
 
     def test_operator_and_lead_windows(self):
         from django.test import Client

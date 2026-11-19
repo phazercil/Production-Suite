@@ -168,20 +168,15 @@ def default_ops(item):
 
 
 def part_spec(item, specs=None, catalog=None):
-    """Drawing spec for a part: the Parts & specs table, else cost sheet pleats with estimated dimensions."""
+    """Drawing spec for a part: the Parts & specs table, else only the cost sheet's pleat count (no dimensions: they
+    are never guessed). "estimated" marks a part that isn't in Parts & specs."""
     k = part_key(item)
     if specs is None:
         specs = {p.key: p.as_dict() for p in PartSpec.objects.all()}
     if k in specs:
         return dict(specs[k], key=k)
-    h = 7
-    for c in k:
-        h = (h * 31 + ord(c)) % 997
-    pleats = 24 + h % 18
     cat = catalog or Catalog()
     m = cat.matches(k) or cat.matches(item)
-    if m:
-        pleats = m[0]["pleats"]
-    return {"key": k, "pleats": pleats, "len": round(8 + (h % 30) / 10, 2), "wid": round(7 + (h % 20) / 10, 2),
-            "ph": round(0.9 + (h % 40) / 100, 2), "sb": round(1 + (h % 35) / 100, 2), "tol": 0.06, "rev": "A",
-            "media": "Synthetic, 1-ply", "estimated": True}
+    pleats = m[0]["pleats"] if m else None
+    return {"key": k, "pleats": pleats, "len": None, "wid": None, "ph": None, "sb": None, "tol": None, "rev": "",
+            "media": "", "url": "", "estimated": True}

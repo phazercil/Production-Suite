@@ -45,4 +45,14 @@
 .setup{background:var(--warn-bg);border:1px solid var(--warn);color:var(--warn-ink);border-radius:12px;padding:12px 16px;font-size:14px}
 .setup a{color:var(--ink);font-weight:600}
 .empty{color:var(--ink-2);padding:24px;text-align:center}
+.dk-pick{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dk-pick a{color:var(--ink-2);text-decoration:none;padding:6px 12px;border-radius:999px;border:1px solid var(--rule);font-size:14px;font-weight:600}
+.dk-pick a:hover{color:var(--ink);border-color:var(--ink-3)}
+.dk-pick a[aria-current]{background:var(--card);color:var(--ink);border-color:var(--accent)}
+.dk-pick .grow{flex:1}
+.dk-share{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+.dk-share input{background:var(--ground);border:1px solid var(--rule);color:var(--ink);border-radius:8px;padding:6px 10px;font:13px var(--f-mono);width:min(46vw,420px)}
+.dk-copy{background:var(--accent);color:#0d1117;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}
+.dk-copy.done{background:var(--ok)}
+.dk.focus .chartbox{height:clamp(260px,52vh,640px)}
 @media (max-width:900px){.band{grid-template-columns:minmax(0,1fr)}.speed b{font-size:48px}.dk-clock{font-size:28px}}

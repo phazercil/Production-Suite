@@ -256,13 +256,18 @@ class LiveConnectionTests(Base):
         self.assertNotIn("s2k", connections.databases)
         self.assertNotIn("S2K_DB_HOST", (self.dir / ".env").read_text())
 
-    def test_bad_login_or_public_address_is_not_saved(self):
+    def test_public_address_is_not_saved_but_a_failing_login_is(self):
+        r = cmd(self.c, "connSave", {"group": "assets", "fields": {"host": "8.8.8.8", "name": "a", "user": "u", "password": "x"}})
+        self.assertFalse(r["ok"])                                                  # outside the plant network: never saved
+        self.assertFalse((self.dir / ".env").exists())
         with mock.patch("plant.dbcheck.driver", return_value=FakeDB(ok=False)):
             r = cmd(self.c, "connSave", {"group": "assets", "fields": {"host": "192.168.100.31", "name": "a", "user": "u", "password": "x"}})
-        self.assertFalse(r["ok"])
-        r = cmd(self.c, "connSave", {"group": "assets", "fields": {"host": "8.8.8.8", "name": "a", "user": "u", "password": "x"}})
-        self.assertFalse(r["ok"])
-        self.assertFalse((self.dir / ".env").exists())
+        self.assertTrue(r["ok"], r)                                                # doesn't connect yet: saved anyway, with why
+        self.assertIn("isn't connecting yet", r["msg"])
+        self.assertTrue(r["data"]["warn"])
+        self.assertIn('ASSET_DB_HOST="192.168.100.31"', (self.dir / ".env").read_text())
+        from plant.models import PlantSettings
+        self.assertFalse(PlantSettings.load().conn["assets"]["ok"])
 
     def test_paycom_feed_key_and_operators(self):
         self.assertTrue(cmd(self.c, "connSave", {"group": "paycom", "fields": {"sid": "abc", "token": "tok"}})["ok"])

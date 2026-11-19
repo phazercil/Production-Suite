@@ -184,8 +184,14 @@ def open_unattended(machine, t):
 CO_ENDED = {"window": "shift change", "operator change": "operator change"}
 
 
-def co_steps(co):
-    return (co or {}).get("steps") or [{"text": t} for t in config()["coSteps"]]
+def co_steps(co, line=""):
+    return (co or {}).get("steps") or [{"text": t} for t in machine_list("coSteps", line)]
+
+
+def inkjet_change(old, new):
+    """Going from MO old to MO new only changes the inkjet branding (same base part, Scheduler › Lines & Shifts)."""
+    from plant.models import inkjet_only
+    return bool(old and new) and inkjet_only(old.part, new.part, settings_obj().planner.get("inkjetBases") or [])
 
 
 def co_piece(sh, end, ended, note=""):
@@ -205,7 +211,7 @@ def co_piece(sh, end, ended, note=""):
         # the minute counter logs the stops that already ended)
         add_down(sh, sh.stop_start, end, "Changeover")
         sh.stop_start, sh.stop_what = (None if ended == "finished" else end), ""   # a changeover going on: so does its stop
-    steps = co_steps(co)
+    steps = co_steps(co, sh.line)
     done = set(co.get("done") or [])
     mine = sorted(int(i) for i, d in (co.get("doneBy") or {}).items()
                   if int(i) in done and (d or {}).get("t", 0) >= co["start"] and (d or {}).get("t", 0) <= ms(end))
@@ -512,6 +518,11 @@ def tick(machine, sample, t):
         if sh.mo:
             MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + units)
             sh.mo_count += units
+        elif co and sh.co and sh.co.get("inkjet") and sh.co.get("newMo"):
+            # an inkjet-only changeover: the line keeps running, already making the new MO
+            MO.objects.filter(pk=sh.co["newMo"]).update(produced=F("produced") + units)
+            sh.co = {**sh.co, "made": int(sh.co.get("made") or 0) + units}
+            ShiftRun.objects.filter(pk=sh.pk).update(co=sh.co)
     if not running:
         if not sh.stop_start:
             sh.stop_start = t - timedelta(minutes=1)
@@ -762,12 +773,17 @@ def co_end(p, ctx):
     need(co and co.get("step") == 1, "Open the changeover first.")
     mo = MO.objects.filter(pk=co.get("oldMo")).first()
     if mo:
-        q, sc = to_number(p.get("qty") or 0), to_number(p.get("scrap") or 0)
+        q = to_number(p.get("qty") or 0)
+        logged = run_scrap(sh, mo)
+        sc = to_number(p.get("scrap")) if str(p.get("scrap") or "").strip() != "" else logged
         need(q is not None and 0 <= q <= 10_000_000, "Enter the final count for this run as a whole number.")
         need(sc is not None and 0 <= sc <= 10_000_000, "Enter scrap as a whole number (0 if none).")
+        n = len(machine_list("endSteps", sh.line))
+        checks = p.get("checks") if isinstance(p.get("checks"), list) else []
+        need(len(checks) >= n and all(checks[:n]), f"Check off all {n} end-of-order items first.")
         q, sc = int(q), int(sc)
         mo.produced += q - sh.mo_count
-        mo.scrap += sc
+        mo.scrap += sc - logged   # scrap already logged this run (QC checks, disapprovals) is in it
         if p.get("close"):
             mo.status = "CLOSE"
             mo.line, mo.seq = None, 0
@@ -775,6 +791,7 @@ def co_end(p, ctx):
         MoRun.objects.create(shift=sh, line=sh.line, mo=mo.number, item=mo.part, qty=q, scrap=sc, start_time=sh.mo_start or sh.start,
                              end_time=ctx.now)
         event("mo_end", {"mo": mo.number, "qty": q, "scrap": sc, "closed": mo.status == "CLOSE"})
+        co["ended"] = {"mo": mo.number, "qty": q, "scrap": sc, "by": ctx.by, "t": ms(ctx.now), "checks": n}
     # a stop under way goes on as part of the changeover: when it ends it's Changeover downtime, from when it began
     sh.mo, sh.state, sh.override = None, "changeover", None
     co.update({"start": ms(ctx.now), "step": 2, "first": ms(ctx.now), "id": uuid.uuid4().hex, "doneBy": {}, "pieces": []})
@@ -784,11 +801,25 @@ def co_end(p, ctx):
         refresh_schedule("closing an MO")
 
 
+def run_scrap(sh, mo):
+    """Scrap already logged for this MO in this run (QC checks' scrap counts and supervisors' disapprovals)."""
+    from django.db.models import Sum
+    since = sh.mo_start or sh.start
+    a = QCCheck.objects.filter(shift=sh, mo=mo.number, t__gte=since).aggregate(s=Sum("scrap"), d=Sum("scrapped"))
+    return int(a["s"] or 0) + int(a["d"] or 0)
+
+
 def load_changeover_steps(sh, co):
     """Steps and settings for the new part: asset database, else the last saved copy, else the standard checklist."""
     st = settings_obj()
     params = co_params(sh, co)
-    co.update({"steps": None, "settings": [], "src": "admin", "err": ""})
+    old = MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None
+    new = MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None
+    co["inkjet"] = inkjet_change(old, new)
+    if co["inkjet"]:   # same base part: only the inkjet branding changes
+        co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
+        return
+    co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
     if not (st.settings.get("useDb") and integrations.assets_ready()):
         return
     q = SavedQuery.objects.filter(name="changeover_steps").first()
@@ -869,9 +900,7 @@ def co_pick_part(p, ctx):
     sh = shift_of(p, ctx)
     co = sh.co
     need(co and co.get("step", 0) >= 2, "End the current MO first.")
-    part = re.sub(r"\s+", "", str(p.get("part") or "")).upper()[:40]
-    need(part, "Enter the filter number to run.")
-    need(re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]*", part), "A filter number is letters and numbers (and - . / _), e.g. MG4062HP.")
+    part = _filter_number(p)
     qty = str(p.get("qty") or "").strip()
     need(not qty or (qty.isdigit() and 0 < int(qty) <= 10_000_000), "Enter how many as a whole number, or leave it blank.")
     why = re.sub(r"\s+", " ", str(p.get("why") or "")).strip()[:200]
@@ -887,14 +916,123 @@ def co_pick_part(p, ctx):
     item = (cat.matches(part) or [None])[0]
     m = MO.objects.create(number=number, part=part, qty=int(qty) if qty else 0, status="OPEN", source="floor", line=sh.machine,
                           ops=default_ops(item), process=((sh.machine.code if sh.machine else "") or "")[:12])
-    co.update({"newMo": m.id, "step": 3, "done": [], "noMo": {"by": ctx.by, "why": why}})
+    co.update({"newMo": m.id, "step": 3, "done": [], "noMo": {"by": ctx.by, "why": why}, "madeMo": True})
     load_changeover_steps(sh, co)
     sh.co = co
     sh.save(update_fields=["co"])
     audit(ctx, f"No MO on {sh.line}: {ctx.by} set it to run {part}" + (f" × {qty}" if qty else "") + f" as {number} ({why})")
     notify(f"{sh.line} is running {part} without an MO ({number}), set by {ctx.by}: {why}", "planner")
-    known = bool(item) or PartSpec.objects.filter(key=part_key(part)).exists()
-    return {"msg": f"Running {part} as {number}." + ("" if known else " That filter number isn't in the cost sheet or Parts & specs, so its specs are estimated.")}
+    return {"msg": f"Running {part} as {number}."}
+
+
+@cmd("coBack")
+def co_back(p, ctx):
+    """Set up › Back: pick the next MO again (a filter number typed wrong, the wrong MO scanned). A run-by-filter-number
+    MO made for this changeover that never ran is removed."""
+    sh = shift_of(p, ctx)
+    co = sh.co
+    need(co and co.get("step") == 3, "No changeover in progress.")
+    made = MO.objects.filter(pk=co.get("newMo"), source="floor", produced=0).first() if co.get("madeMo") else None
+    if made and not ShiftRun.objects.filter(mo=made).exists() and not QCCheck.objects.filter(mo=made.number).exists():
+        audit(ctx, f"Removed {made.number} ({made.part}): went back from the changeover before it ran")
+        made.delete()
+    for k in ("newMo", "noMo", "madeMo", "inkjet", "override"):
+        co.pop(k, None)
+    co.update({"step": 2, "done": [], "steps": None, "settings": []})
+    sh.co = co
+    sh.save(update_fields=["co"])
+
+
+def known_part(part):
+    """True when the suite knows this filter: the cost sheet, Parts & specs, or the asset database has it."""
+    if (Catalog().matches(part) or [None])[0] or PartSpec.objects.filter(key=part_key(part)).exists():
+        return True
+    if integrations.assets_ready():
+        try:
+            pull_drawing(part_key(part))
+        except Exception as e:  # noqa: BLE001
+            log.warning("asset lookup for %s failed: %s", part, e)
+        return PartSpec.objects.filter(key=part_key(part)).exists()
+    return False
+
+
+def _filter_number(p):
+    part = re.sub(r"\s+", "", str(p.get("part") or "")).upper()[:40]
+    need(part, "Enter the filter number to run.")
+    need(re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]*", part), "A filter number is letters and numbers (and - . / _), e.g. MG4062HP.")
+    need(known_part(part), f"{part} isn't in the cost sheet, Parts & specs or the asset database. Check the number, "
+                           "or add the part in Quality › Parts & specs first.")
+    return part
+
+
+@cmd("coPickMo", "runs.nomo")
+def co_pick_mo(p, ctx):
+    """Supervisor override: change over to an MO that isn't lined up for this line (the planner called for an emergency
+    switch). An MO the suite has is moved to this line; one it doesn't have yet is added with its filter number. Once
+    it runs, the Scheduler shows it on this line from then on."""
+    sh = shift_of(p, ctx)
+    co = sh.co
+    need(co and co.get("step", 0) >= 2, "End the current order first.")
+    number = re.sub(r"\s+", "", str(p.get("mo") or "")).upper()[:40]
+    need(number and re.fullmatch(r"[A-Z0-9][A-Z0-9._/-]*", number), "Type the MO number.")
+    why = re.sub(r"\s+", " ", str(p.get("why") or "")).strip()[:200]
+    need(why, "Say why (e.g. emergency switch called by the planner).")
+    m = open_mo(number)
+    made = False
+    if m:
+        need(not running_elsewhere(m, sh.machine), f"MO {m.number} is running on another machine right now.")
+        was = m.line.name if m.line_id and m.line_id != sh.machine_id else ""
+    else:
+        need(not MO.objects.filter(number=number).exists(), f"MO {number} is closed. Pick an open MO.")
+        part = _filter_number(p)
+        qty = str(p.get("qty") or "").strip()
+        need(qty.isdigit() and 0 < int(qty) <= 10_000_000, "Enter the MO's quantity as a whole number.")
+        item = (Catalog().matches(part) or [None])[0]
+        m = MO.objects.create(number=number, part=part, qty=int(qty), status="OPEN", source="floor", line=sh.machine,
+                              ops=default_ops(item), process=((sh.machine.code if sh.machine else "") or "")[:12])
+        made, was = True, ""
+    co.update({"newMo": m.id, "step": 3, "done": [], "override": {"by": ctx.by, "why": why, "from": was}, "madeMo": made})
+    load_changeover_steps(sh, co)
+    sh.co = co
+    sh.save(update_fields=["co"])
+    audit(ctx, f"Supervisor override on {sh.line}: {ctx.by} changed over to MO {m.number} ({m.part})"
+               + (f", moved from {was}" if was else "") + (", added (not in the suite yet)" if made else "") + f": {why}")
+    notify(f"{sh.line} is changing over to MO {m.number} ({m.part}), not on its schedule: {ctx.by}, {why}. "
+           "The Scheduler moves it to this line once it runs.", "planner")
+    return {"msg": f"Changing over to MO {m.number} · {m.part}"}
+
+
+@cmd("moAttach")
+def mo_attach(p, ctx):
+    """Running without an MO (or by filter number): pick the MO it's for. The filters already made for it move to it."""
+    sh = shift_of(p, ctx)
+    need(sh.state != "changeover" and not sh.co, "Finish the changeover first.")
+    need(not sh.mo or sh.mo.source == "floor", f"{sh.line} is already running MO {sh.mo.number if sh.mo else ''}.")
+    m = open_mo(p.get("mo") or "")
+    need(m, "That MO is not open. Check the number or pick one from the list.")
+    need(m.pk != sh.mo_id, f"{sh.line} is already running MO {m.number}.")
+    need(not running_elsewhere(m, sh.machine), f"MO {m.number} is already running on another machine.")
+    lead = bool(ctx.user) and perms.can(ctx.user, "runs.nomo")
+    need(not m.line_id or m.line_id == sh.machine_id or lead,
+         f"MO {m.number} is scheduled on {m.line.name if m.line else ''}. A supervisor can move it here (Supervisor button).")
+    q = to_number(p.get("qty") or 0)
+    need(q is not None and q == int(q) and 0 <= q <= 10_000_000, "How many of the filters made so far are this MO? (a whole number)")
+    q = int(q)
+    old = sh.mo
+    if old:   # the run by filter number becomes this MO: its count, scrap and QC checks move to it
+        MO.objects.filter(pk=old.pk).update(produced=Greatest(F("produced") - q, 0), status="CLOSE", line=None, seq=0)
+        MO.objects.filter(pk=m.pk).update(scrap=F("scrap") + old.scrap)
+        MO.objects.filter(pk=old.pk).update(scrap=0)
+        QCCheck.objects.filter(shift=sh, mo=old.number).update(mo=m.number)
+    MO.objects.filter(pk=m.pk).update(produced=F("produced") + q)
+    sh.mo, sh.mo_count = m, q
+    sh.mo_start = sh.mo_start if old else (sh.mo_start or sh.start)
+    sh.save(update_fields=["mo", "mo_count", "mo_start"])
+    from scheduler.engine import place_on_line
+    place_on_line(m, sh.machine, ctx.now)
+    audit(ctx, f"{sh.line} now running MO {m.number} ({m.part})" + (f" in place of {old.number}" if old else "") + f", {q:,} already made")
+    refresh_schedule("an MO picked at the kiosk")
+    return {"msg": f"Running MO {m.number} · {m.part}" + (f" · {q:,} already made counted to it" if q else "")}
 
 
 @cmd("coReload")
@@ -932,7 +1070,7 @@ def co_finish(p, ctx):
     sh = shift_of(p, ctx)
     co = sh.co
     need(co and co.get("step") == 3, "Pick the next MO first.")
-    n = len(co.get("steps") or config()["coSteps"])
+    n = len(co_steps(co, sh.line))
     need(len(co.get("done") or []) >= n, f"Finish all {n} steps first ({len(co.get('done') or [])} done).")
     m = MO.objects.select_for_update().filter(pk=co["newMo"], status="OPEN").first()
     need(m, "That MO was closed or removed while you were setting up. Pick the next MO again.")
@@ -941,11 +1079,60 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     co_piece(sh, ctx.now, "finished")
-    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, 0, "running", None
+    made = int(co.get("made") or 0)   # filters made during an inkjet-only changeover are already this MO's
+    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, made, "running", None
     sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()
     event("mo_start", {"line": sh.line, "mo": m.number, "item": m.part, "steps_from": co.get("src", "admin")})
+    from scheduler.engine import place_on_line
+    if place_on_line(m, sh.machine, ctx.now):   # not on this line on the board (an emergency switch): it is now
+        refresh_schedule("an MO started on another line than planned")
     return {"msg": f"Running MO {m.number} · {m.part}"}
+
+
+@cmd("coForceEnd", "floor.override")
+def co_force_end(p, ctx):
+    """A supervisor ends a changeover nobody finished (left open, the operator gone): its time so far is kept as
+    changeover (with who force-ended it and why), unchecked steps are skipped, and the line goes on. With an MO picked
+    for it and "run" set, the line runs that MO; otherwise it's left without an MO (Pick MO at the kiosk)."""
+    sh = shift_of(p, ctx)
+    need(sh.co, f"There's no changeover open on {sh.line}.")
+    why = re.sub(r"\s+", " ", str(p.get("why") or "")).strip()[:200]
+    need(why, "Say why it's being ended (e.g. operator left without finishing it).")
+    co = sh.co
+    note = f"Force-ended by {ctx.by}: {why}"
+    if co.get("step", 1) < 2 or sh.state != "changeover":   # only opened: the order wasn't ended, nothing to keep
+        sh.co = None
+        sh.save(update_fields=["co"])
+        audit(ctx, f"{sh.line}: changeover closed before it started (order not ended). {why}")
+        return {"msg": f"Closed the changeover on {sh.line}; the order it was on keeps running."}
+    steps = co_steps(co, sh.line)
+    skipped = len(steps) - len(set(co.get("done") or []))
+    new = MO.objects.filter(pk=co.get("newMo"), status="OPEN").first() if co.get("newMo") else None
+    run = bool(p.get("run", True)) and new and not running_elsewhere(new, sh.machine)
+    co_piece(sh, ctx.now, "force-ended", note=note)
+    made = int((sh.co or {}).get("made") or 0)
+    if run:
+        if not new.line_id:
+            new.line, new.seq = sh.machine, 0
+            new.save(update_fields=["line", "seq"])
+        sh.mo, sh.mo_start, sh.mo_count = new, ctx.now, made
+        sh.qc_after_co, sh.qc_due_at = True, None
+    else:
+        sh.mo, sh.mo_start, sh.mo_count = None, ctx.now, 0
+    sh.state = "stopped" if sh.stop_start else "running"
+    sh.co = None
+    sh.save()
+    what = f"running MO {new.number} ({new.part})" if run else "with no MO (Pick MO at the kiosk)"
+    audit(ctx, f"{sh.line}: changeover force-ended by {ctx.by}, {what}" + (f", {skipped} step{'s' if skipped != 1 else ''} not checked" if skipped else "")
+               + f". {why}")
+    notify(f"{ctx.by} force-ended the changeover on {sh.line}: {why}. The line is {what}.", "schedule", lines=[sh.line])
+    if run:
+        event("mo_start", {"line": sh.line, "mo": new.number, "item": new.part, "steps_from": "force-ended"})
+        from scheduler.engine import place_on_line
+        if place_on_line(new, sh.machine, ctx.now):
+            refresh_schedule("an MO started on another line than planned")
+    return {"msg": f"Changeover on {sh.line} ended. The line is {what}."}
 
 
 def _qc_values(sh, p):
@@ -1041,12 +1228,11 @@ def qc_review(p, ctx):
         n = int(n) - q.scrapped   # a second decision only scraps the difference
     sh = q.shift
     if n:
-        if sh:
+        if sh:   # the shift's count is good filters
             sh.count = max(0, sh.count - n)
-            if sh.mo and sh.mo.number == q.mo:
-                sh.mo_count = max(0, sh.mo_count - n)
-            sh.save(update_fields=["count", "mo_count"])
-        MO.objects.filter(number=q.mo).update(produced=Greatest(F("produced") - n, 0), scrap=F("scrap") + n)
+            sh.save(update_fields=["count"])
+        # the MO keeps every filter made (gross); scrapping them takes them off its net
+        MO.objects.filter(number=q.mo).update(scrap=F("scrap") + n)
     q.review, q.reviewed_by, q.reviewed_at = d, ctx.by, ctx.now
     q.scrapped = q.scrapped + n
     fields = ["review", "reviewed_by", "reviewed_at", "scrapped"]
@@ -1230,6 +1416,9 @@ def _first_row(name, key, ctx):
     return {str(k).lower(): v for k, v in rows[0].items()} if rows else {}
 
 
+SPEC_NUMS = ("pleats", "len", "wid", "ph", "sb", "tol")
+
+
 def pull_drawing(key, ctx=None):
     """The part's drawing from the asset database into Parts & specs: Part specs (dimensions, rev) and Drawing file
     (rev, link). The drawing file's rev wins: it comes with the file operators open. Returns what happened in a
@@ -1241,17 +1430,32 @@ def pull_drawing(key, ctx=None):
     if not (o or d):
         return f"The asset database has nothing for {key}."
     o, d = o or {}, d or {}
-    cur = spec_for(key)
-    vals = {f: n for f in ("pleats", "len", "wid", "ph", "sb", "tol") if (n := _spec_number(o.get(f))) is not None}
+    ps = PartSpec.objects.filter(key=key).first()
+    hand = set(ps.hand or []) if ps else set()
+    vals = {f: n for f in SPEC_NUMS if (n := _spec_number(o.get(f))) is not None}
     vals = {f: to_inches(v, o.get(f + "_uom") or o.get("uom"), f) for f, v in vals.items()}
-    rev = str(d.get("rev") or o.get("rev") or cur["rev"]).strip()[:20]
-    url = _drawing_link(d.get("url")) or cur.get("url") or ""
-    if not (vals or PartSpec.objects.filter(key=key).exists()):   # a drawing file but no dimensions: estimates aren't saved as the drawing's
+    rev = str(d.get("rev") or o.get("rev") or (ps.rev if ps and "rev" in hand else "")).strip()[:20]
+    url = _drawing_link(d.get("url")) or (ps.drawing_url if ps else "") or ""
+    if not (vals or ps):   # a drawing file but no dimensions: nothing to check against
         return (f"Drawing rev {rev} found, but the asset database has no dimensions for {key}. Add them in Quality › Parts & specs "
                 f"(or wire Part specs in the Connector builder) to keep the drawing.")
-    PartSpec.objects.update_or_create(key=key, defaults={**{k: cur[k] for k in ("pleats", "len", "wid", "ph", "sb", "tol")}, **vals,
-                                                         "rev": rev, "media": str(o.get("media") or cur["media"])[:80], "drawing_url": url})
-    return f"Drawing rev {rev} loaded from the asset database ({fmt_t(ctx.now)})."
+    # What the asset database has, as it has it. What it doesn't have stays blank (never a guess), unless someone
+    # typed it in Parts & specs.
+    keep = {f: (vals[f] if f in vals else getattr(ps, f) if ps and f in hand else None) for f in SPEC_NUMS}
+    media = str(o.get("media") or "").strip()[:80] or (ps.media if ps and "media" in hand else "")
+    from . import qc
+    extra = {}
+    for f in qc.features():   # measurements added in Quality › Tolerances
+        k = f["key"]
+        n = _spec_number(o.get(k))
+        if n is not None:
+            extra[k] = to_inches(n, o.get(k + "_uom") or o.get("uom"), k)
+        elif ps and k in hand and (ps.extra or {}).get(k) is not None:
+            extra[k] = ps.extra[k]
+    PartSpec.objects.update_or_create(key=key, defaults={**keep, "rev": rev, "media": media, "drawing_url": url, "extra": extra})
+    missing = [SPEC_LABEL[f] for f in SPEC_NUMS if keep[f] is None]
+    return f"Drawing rev {rev or '—'} loaded from the asset database ({fmt_t(ctx.now)})." + (
+        f" Not in the asset database (left blank): {', '.join(missing)}." if missing else "")
 
 
 UNIT_IN = {"mm": 1 / 25.4, "millimeter": 1 / 25.4, "millimeters": 1 / 25.4, "millimetre": 1 / 25.4, "millimetres": 1 / 25.4,
@@ -1682,56 +1886,88 @@ def person_save(p, ctx):
 
 
 # ---------------------------------------------------------- admin lists, machines, shifts, parts, rules
-LISTS = ["reasons", "safety", "pm", "coSteps", "issueTypes", "equipment"]
+LISTS = ["reasons", "safety", "pm", "coSteps", "endSteps", "inkjetSteps", "issueTypes", "equipment"]
+PER_MACHINE = ("coSteps", "endSteps", "inkjetSteps")   # each machine can have its own copy of these
 
 
-def _list(k):
+def machine_list(k, machine_name, cfg=None):
+    """A checklist as one machine uses it: its own (Admin › Checklists, that machine), else the standard one."""
+    cfg = cfg if cfg is not None else config()
+    own = ((cfg.get("machineLists") or {}).get(k) or {}).get(machine_name or "")
+    return list(own) if own else list(cfg.get(k) or [])
+
+
+def _list(k, m=""):
     need(k in LISTS, "Unknown list.")
     st = settings_obj()
+    if m:
+        need(k in PER_MACHINE, "That list is the same on every machine.")
+        need(Machine.objects.filter(name=m).exists(), "Machine not found.")
+        ml = st.config.setdefault("machineLists", {}).setdefault(k, {})
+        if not ml.get(m):   # its first change: the machine's own list starts as a copy of the standard one
+            ml[m] = list(st.config.get(k) or [])
+        return st, ml[m]
     return st, st.config[k]
+
+
+def _lname(p):
+    return p["k"] + (f" ({p['m']})" if p.get("m") else "")
+
+
+@cmd("listReset", "lists.edit")
+def list_reset(p, ctx):
+    """A machine goes back to the standard checklist."""
+    k, m = p.get("k"), str(p.get("m") or "")
+    need(k in PER_MACHINE and m, "Pick the machine.")
+    st = settings_obj()
+    ml = (st.config.get("machineLists") or {}).get(k) or {}
+    if ml.pop(m, None) is not None:
+        st.save(update_fields=["config"])
+        audit(ctx, f"{m} uses the standard {k} again")
+    return {"msg": f"{m} uses the standard list"}
 
 
 @cmd("listAdd", "lists.edit")
 def list_add(p, ctx):
-    st, L = _list(p.get("k"))
+    st, L = _list(p.get("k"), str(p.get("m") or ""))
     v = str(p.get("v") or "").strip()
     need(v, "Type the new item.")
     need(v.lower() not in [x.lower() for x in L], f'"{v}" is already on the list.')
     L.append(v)
     st.save(update_fields=["config"])
-    audit(ctx, f'Added "{v}" to {p["k"]}')
+    audit(ctx, f'Added "{v}" to {_lname(p)}')
 
 
 @cmd("listDel", "lists.edit")
 def list_del(p, ctx):
-    st, L = _list(p.get("k"))
+    st, L = _list(p.get("k"), str(p.get("m") or ""))
     need(len(L) > 1, "Keep at least one item on this list.")
     v = L.pop(int(p.get("i")))
     st.save(update_fields=["config"])
-    audit(ctx, f'Removed "{v}" from {p["k"]}')
+    audit(ctx, f'Removed "{v}" from {_lname(p)}')
     return {"msg": f'Removed "{v}"'}
 
 
 @cmd("listMove", "lists.edit")
 def list_move(p, ctx):
-    st, L = _list(p.get("k"))
+    st, L = _list(p.get("k"), str(p.get("m") or ""))
     i = int(p.get("i"))
     j = i + int(p.get("d"))
     need(0 <= j < len(L), "Cannot move further.")
     L[i], L[j] = L[j], L[i]
     st.save(update_fields=["config"])
-    audit(ctx, f"Reordered {p['k']}")
+    audit(ctx, f"Reordered {_lname(p)}")
 
 
 @cmd("listSet", "lists.edit")
 def list_set(p, ctx):
-    st, L = _list(p.get("k"))
+    st, L = _list(p.get("k"), str(p.get("m") or ""))
     i, v = int(p.get("i")), str(p.get("v") or "").strip()
     need(v, "An item cannot be blank. Use ✕ to remove it.")
     if L[i] != v:
         old, L[i] = L[i], v
         st.save(update_fields=["config"])
-        audit(ctx, f'Renamed "{old}" to "{v}" in {p["k"]}')
+        audit(ctx, f'Renamed "{old}" to "{v}" in {_lname(p)}')
 
 
 @cmd("lineAdd", "machines.edit")
@@ -2238,10 +2474,10 @@ def part_add(p, ctx):
     need(k, "Type a part number.")
     need(not PartSpec.objects.filter(key=k).exists(), f"{k} is already listed.")
     g = spec_for(k)
-    PartSpec.objects.create(key=k, **{f: g[f] for f in ("pleats", "len", "wid", "ph", "sb", "tol", "rev", "media")})
+    PartSpec.objects.create(key=k, pleats=g["pleats"], hand=["pleats"] if g["pleats"] else [])   # the cost sheet's pleat count
     audit(ctx, f"Added part {k}")
     refresh_part(k, force=True)   # the asset database's drawing, when it has one
-    return {"msg": f"{k} added. Specs come from the asset database when it has the part; otherwise they're estimates to check."}
+    return {"msg": f"{k} added. Its specs come from the asset database when it has the part; type in what it doesn't have."}
 
 
 @cmd("partSet", "quality.tolerances")
@@ -2252,18 +2488,21 @@ def part_set(p, ctx):
     need(f in ("pleats", "len", "wid", "ph", "sb", "tol", "rev", "media"), "Unknown field.")
     if f in ("rev", "media"):
         v = str(v or "").strip()
+    elif str(v or "").strip() == "":
+        v = None   # not known
     else:
         try:
             v = float(v)
         except (TypeError, ValueError):
             v = 0
-        need(v > 0, "Enter a number above 0.")
+        need(v > 0, "Enter a number above 0, or leave it blank.")
     setattr(ps, f, v)
+    ps.hand = sorted(set(ps.hand or []) | {f} if v not in (None, "") else set(ps.hand or []) - {f})
     ps.save()
     audit(ctx, f"{ps.key} {f} set to {v}")
 
 
-SPEC_NUMS = ("pleats", "len", "wid", "ph", "sb", "tol")
+SPEC_LABEL = dict(zip(SPEC_NUMS, ("pleats", "length", "width", "pleat height", "side band", "tolerance")))
 
 
 @cmd("partsSave", "quality.tolerances")
@@ -2278,15 +2517,39 @@ def parts_save(p, ctx):
             continue
         new = {}
         for f in SPEC_NUMS:
+            if str(r.get(f) if r.get(f) is not None else "").strip() == "":
+                new[f] = None   # not known: blank
+                continue
             v = to_number(r.get(f))
-            need(v is not None and v > 0, f"{ps.key}: enter a number above 0 for {dict(zip(SPEC_NUMS, ('pleats', 'length', 'width', 'pleat height', 'side band', 'tolerance')))[f]}.")
+            need(v is not None and v > 0, f"{ps.key}: enter a number above 0 for {SPEC_LABEL[f]}, or leave it blank.")
             new[f] = v
         new["rev"] = str(r.get("rev") or "").strip()[:20] or ps.rev
         new["media"] = str(r.get("media") or "").strip()[:80]
-        diff = [f for f, v in new.items() if getattr(ps, f) != v]
+        from . import qc
+        ext = dict(ps.extra or {})
+        for x in qc.features():   # measurements added in Quality › Tolerances
+            k = x["key"]
+            if k not in r:
+                continue
+            if str(r.get(k) if r.get(k) is not None else "").strip() == "":
+                new[k] = None
+            else:
+                v = to_number(r.get(k))
+                need(v is not None and v > 0, f"{ps.key}: enter a number above 0 for {x['label'].lower()}, or leave it blank.")
+                new[k] = v
+        diff = [f for f, v in new.items() if (ext.get(f) if f.startswith("x") else getattr(ps, f)) != v]
         if diff:
             for f, v in new.items():
-                setattr(ps, f, v)
+                if f.startswith("x"):
+                    if v is None:
+                        ext.pop(f, None)
+                    else:
+                        ext[f] = v
+                else:
+                    setattr(ps, f, v)
+            ps.extra = ext
+            # typed by hand: kept when the asset database doesn't have it (blanked: not known any more)
+            ps.hand = sorted((set(ps.hand or []) | {f for f in diff if new[f] not in (None, "")}) - {f for f in diff if new[f] in (None, "")})
             ps.save()
             changed.append(f"{ps.key} ({', '.join(diff)})")
     if changed:
@@ -2323,10 +2586,34 @@ def parts_import(p, ctx):
     return {"msg": out, "data": {"done": done, "missing": missing, "failed": failed}}
 
 
+@cmd("partsRefresh", "quality.tolerances")
+def parts_refresh(p, ctx):
+    """Quality › Parts & specs › Refresh: connect to the asset database again and re-read every part listed (and every
+    part an open MO runs), so the dimensions, rev and drawing link are the database's latest."""
+    need(integrations.assets_ready(), "The asset database isn't set up yet (Admin › Connections).")
+    from django.core.cache import cache
+    from django.db import connections
+    for alias in ("assets",):   # a fresh connection: settings or the server may have changed
+        if alias in connections.databases:
+            try:
+                connections[alias].close()
+            except Exception:  # noqa: BLE001
+                pass
+    keys = list(PartSpec.objects.values_list("key", flat=True))
+    keys += [part_key(x) for x in MO.objects.filter(status="OPEN").values_list("part", flat=True)]
+    keys = list(dict.fromkeys(k for k in keys if k))[:2000]
+    r = parts_import({"parts": keys}, ctx) if keys else {"msg": "No parts to refresh.", "data": {}}
+    for k in keys:
+        cache.delete("spec-fresh:" + k)
+    integrations.set_conn("assets", not (r.get("data") or {}).get("failed"), f"Refreshed {len(keys)} parts")
+    return {"msg": "Refreshed from the asset database. " + r["msg"], "data": r.get("data")}
+
+
 @cmd("assetUnitsSet", "quality.tolerances")
 def asset_units_set(p, ctx):
     """Which dimensions the asset database keeps in millimetres: converted to inches as they're read."""
-    units = {f: "mm" for f in ("len", "wid", "ph", "sb", "tol") if p.get(f) == "mm"}
+    from . import qc
+    units = {f: "mm" for f in ("len", "wid", "ph", "sb", "tol", *(x["key"] for x in qc.features())) if p.get(f) == "mm"}
     st = settings_obj()
     st.config = {**st.config, "assetUnits": units}
     st.save(update_fields=["config"])
@@ -2441,14 +2728,23 @@ def _db_fields(group, f):
     return prefix, what, out
 
 
-def _db_test(group, f):
+def _records_db():
     from django.db import connections
+    db = connections.settings.get("default", {})
+    return (db.get("HOST", ""), str(db.get("PORT", "")), str(db.get("NAME", ""))) if "mysql" in db.get("ENGINE", "") else None
 
+
+def _db_bad(group, f):
+    """Why this database login can never be used (it isn't saved); None if it can be saved."""
+    from plant.dbcheck import precheck
+    _, what, v = _db_fields(group, f)
+    return precheck(v["host"], v["port"], v["name"], v["user"], what, records=_records_db(), internet=v["internet"])
+
+
+def _db_test(group, f):
     from plant.dbcheck import test_read_only
     prefix, what, v = _db_fields(group, f)
-    db = connections.settings.get("default", {})
-    records = (db.get("HOST", ""), str(db.get("PORT", "")), str(db.get("NAME", ""))) if "mysql" in db.get("ENGINE", "") else None
-    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=records, internet=v["internet"],
+    return prefix, what, v, test_read_only(v["host"], v["port"], v["name"], v["user"], v["password"], what, records=_records_db(), internet=v["internet"],
                                            kind=v["kind"])
 
 
@@ -2507,15 +2803,21 @@ def conn_save(p, ctx):
     from plant.liveconfig import TEXT_RE
     group, f = p.get("group"), p.get("fields") if isinstance(p.get("fields"), dict) else {}
     if group in ("assets", "s2k", "machines"):
-        prefix, what, v, r = _db_test(group, f)
-        need(r["ok"], r["msg"])
+        # saved even when the server doesn't answer yet (it can be fixed on the database side and tested later);
+        # only a login that could never be used is refused
+        prefix, what, v = _db_fields(group, f)
+        need(not _db_bad(group, f), _db_bad(group, f))
+        _, _, _, r = _db_test(group, f)
+        from plant.dbkinds import KINDS
+        kind = r.get("kind") or (v["kind"] if v["kind"] in KINDS else "mysql")
         liveconfig.save({f"{prefix}_HOST": v["host"], f"{prefix}_PORT": v["port"], f"{prefix}_NAME": v["name"],
                          f"{prefix}_USER": v["user"], f"{prefix}_PASSWORD": v["password"], f"{prefix}_INTERNET": "1" if v["internet"] else None,
-                         f"{prefix}_KIND": r.get("kind") or "mysql"})
-        integrations.set_conn(group, True, f"{r.get('tables', 0)} tables (read-only)")
-        from plant.dbkinds import KINDS
-        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']} ({KINDS[r.get('kind') or 'mysql']['label']})"
-                   + (" (outside the plant network, allowed by this login)" if v["internet"] else ""))
+                         f"{prefix}_KIND": kind})
+        integrations.set_conn(group, r["ok"], f"{r.get('tables', 0)} tables (read-only)" if r["ok"] else r["msg"])
+        audit(ctx, f"{what} connection set to {v['name']} on {v['host']}:{v['port']} as {v['user']} ({KINDS[kind]['label']})"
+                   + (" (outside the plant network, allowed by this login)" if v["internet"] else "") + ("" if r["ok"] else " — not connecting yet"))
+        if not r["ok"]:
+            return {"msg": f"{what} saved, but it isn't connecting yet: {r['msg']}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": f"{what} saved. {r['msg']}" + (" Note: this login is allowed to change data; a read-only login is safer." if r.get("writable") else ""),
                 "data": liveconfig.info()}
     if group == "s2kapi":
@@ -2555,18 +2857,21 @@ def conn_save(p, ctx):
         from . import influx
         c = _influx_fields(f)
         try:
-            r = influx.test(c)
+            r = {"ok": True, "msg": influx.test(c)["msg"]}
         except influx.InfluxError as e:
-            raise Need(f"Not saved: {e}")
+            r = {"ok": False, "msg": str(e)}
         liveconfig.save({"INFLUX_URL": c["url"], "INFLUX_VERSION": c["version"], "INFLUX_ORG": c["org"], "INFLUX_TOKEN": c["token"],
                          "INFLUX_USER": c["user"], "INFLUX_DB": c["db"], "INFLUX_WRITE_BUCKET": c["out"]})
-        integrations.set_conn("influx", True, r["msg"])
+        integrations.set_conn("influx", r["ok"], r["msg"])
         PlantSettings.bump()
         st = settings_obj()
         if (st.conn.get("influxOut") or {}).get("bucket") != c["out"]:
             st.conn["influxOut"] = {"bucket": c["out"]}  # a new bucket starts from the last 7 days again
             st.save(update_fields=["conn"])
-        audit(ctx, f"InfluxDB connection set to {c['url']}" + (f", writing suite records to {c['out']}" if c["out"] else ""))
+        audit(ctx, f"InfluxDB connection set to {c['url']}" + (f", writing suite records to {c['out']}" if c["out"] else "")
+                   + ("" if r["ok"] else " — not connecting yet"))
+        if not r["ok"]:
+            return {"msg": f"InfluxDB saved, but it isn't connecting yet: {r['msg']}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": f"InfluxDB saved. {r['msg']}." + (f" Suite records will be copied to {c['out']} every minute." if c["out"] else ""),
                 "data": liveconfig.info()}
     if group == "github":
@@ -2577,12 +2882,15 @@ def conn_save(p, ctx):
         need(ghupdates.REPO_RE.match(repo), "The repository should look like owner/name, e.g. phazercil/Production-Suite.")
         need(token or saved["hasToken"], "Paste a GitHub token that can read the repository.")
         need(not token or re.match(r"^[A-Za-z0-9_]{20,255}$", token), "That doesn't look like a GitHub token (they start with github_pat_ or ghp_).")
-        try:   # only save a login that works
+        err = ""
+        try:
             ghupdates.check({"repo": repo, "token": token or dj_settings.SUITE.get("GITHUB_UPDATES_TOKEN", ""), "daily": False})
         except ghupdates.GHError as e:
-            raise Need(f"Not saved: {e}")
+            err = str(e)
         liveconfig.save({"GITHUB_UPDATES_REPO": repo, "GITHUB_UPDATES_CHECK": "1" if f.get("daily") else None, **({"GITHUB_UPDATES_TOKEN": token} if token else {})})
-        audit(ctx, f"Updates from GitHub set up ({repo}{', checked daily' if f.get('daily') else ''})")
+        audit(ctx, f"Updates from GitHub set up ({repo}{', checked daily' if f.get('daily') else ''})" + (" — not working yet" if err else ""))
+        if err:
+            return {"msg": f"Updates from GitHub saved, but it isn't working yet: {err}", "data": {**liveconfig.info(), "warn": True}}
         return {"msg": "Updates from GitHub saved. The token works.", "data": liveconfig.info()}
     if group == "feed":
         key = str(f.get("key") or "").strip() or liveconfig.new_feed_key()
@@ -2643,10 +2951,11 @@ def qc_item_add(p, ctx):
     stage = p.get("stage")
     items = _qc_list(st, stage)
     key = p.get("key") or ""
-    if key in qc.BUILTIN:
+    feats = {f["key"]: f for f in qc.features(st.config)}
+    if key in qc.BUILTIN or key in feats:
         need(all(i["key"] != key for i in items), "That item is already on the list.")
         items.append({"key": key})
-        what = qc.BUILTIN[key]["label"]
+        what = (qc.BUILTIN.get(key) or feats[key])["label"]
     else:
         label = str(p.get("label") or "").strip()[:60]
         need(label, "Name the check.")

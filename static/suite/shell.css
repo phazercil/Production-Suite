@@ -42,6 +42,8 @@ body.offline .conn .dot{background:var(--bad,#E06C5B)}
 .chartbox .plot{position:relative;width:100%;height:100%}
 .chartbox svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .chartbox .c-grid{stroke:#343C45;stroke-width:1;vector-effect:non-scaling-stroke}
+.chartbox .c-hour{stroke:#3E4752;stroke-width:1;vector-effect:non-scaling-stroke}
+.chartbox .c-half{stroke:#343C45;stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
 .chartbox .c-rated{stroke:#8A939C;stroke-width:1;stroke-dasharray:5 4;vector-effect:non-scaling-stroke}
 .chartbox .c-area{fill:rgba(91,155,213,.16)}
 .chartbox .c-line{fill:none;stroke:#5B9BD5;stroke-width:2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
@@ -55,3 +57,16 @@ body.offline .conn .dot{background:var(--bad,#E06C5B)}
 .chartbox .c-y,.chartbox .c-x{position:absolute;color:#A7AFB8;font:500 10px 'IBM Plex Mono',ui-monospace,monospace;line-height:1;white-space:nowrap}
 .chartbox .c-y{right:calc(100% + 6px);transform:translateY(-50%)}
 .chartbox .c-x{top:calc(100% + 8px);transform:translateX(-50%)}
+
+/* Full screen button (top bar; the corner when there's no bar) */
+.suitebar{position:relative}
+.suite-fs{position:absolute;right:12px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:6px;background:var(--s-bar);
+  border:1px solid var(--s-rule);color:inherit;border-radius:8px;padding:7px;font:600 12px/1 inherit;cursor:pointer;opacity:.8}
+.suite-fs span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.suite-fs:hover{opacity:1;border-color:currentColor}
+.suite-fs svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.suite-fs .fs-out,.suite-fs.on .fs-in{display:none}
+.suite-fs.on .fs-out{display:inline}
+.suite-fs.float{position:fixed;left:auto;right:10px;bottom:26px;top:auto;transform:none;z-index:50;background:rgba(0,0,0,.35);opacity:.35}
+.suite-fs.float:hover,.suite-fs.float:focus-visible{opacity:1}
+.suite-fs[hidden]{display:none}

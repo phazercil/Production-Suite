@@ -40,6 +40,21 @@ QDEF = {
 
 
 
+def qdef():
+    """QDEF as it is now: Part specs also reads each measurement added in Quality › Tolerances (role = its key)."""
+    import copy
+    from . import qc
+    d = copy.deepcopy(QDEF)
+    roles = d["part_spec"]["roles"]
+    i = next((n for n, r in enumerate(roles) if r[0] == "uom"), len(roles))
+    try:
+        feats = qc.features()
+    except Exception:  # noqa: BLE001 - no settings to read (no database): the standard roles
+        feats = []
+    d["part_spec"]["roles"] = roles[:i] + [[f["key"], f["label"]] for f in feats] + roles[i:]
+    return d
+
+
 def _influx_info():
     from . import influx
     c = influx.config()

@@ -1,6 +1,7 @@
 """Charts drawn on the server, so screens only display them.
 
-speed_chart: pleats per minute over the shift, with the rated speed, hour marks and the latest reading. The plot is
+speed_chart: pleats per minute over the shift, with the rated speed, a line at every hour and a dotted line at every
+half hour, and the latest reading. The plot is
 an SVG stretched to its box (lines keep their width at any size) and the labels are ordinary text placed by
 percentage, so the chart reads the same on a phone and on a wall screen. Every piece of text is escaped.
 """
@@ -46,6 +47,15 @@ def speed_chart(points, rated, empty="No readings this shift", label="Pleater sp
     for i in range(5):
         y = Y(top * i / 4)
         svg.append(f'<line class="c-grid" x1="0" x2="1000" y1="{y:.2f}" y2="{y:.2f}"/>')
+    # a line at every hour and a dotted line at every half hour
+    tg = timezone.localtime(t0).replace(minute=0, second=0, microsecond=0)
+    if tg < t0:
+        tg += timedelta(minutes=30)
+    while tg < t1:
+        if tg > t0:
+            cls = "c-hour" if timezone.localtime(tg).minute == 0 else "c-half"
+            svg.append(f'<line class="{cls}" x1="{X(tg):.1f}" x2="{X(tg):.1f}" y1="0" y2="100"/>')
+        tg += timedelta(minutes=30)
     if rated:
         svg.append(f'<line class="c-rated" x1="0" x2="1000" y1="{Y(rated):.2f}" y2="{Y(rated):.2f}"/>')
     labels = []

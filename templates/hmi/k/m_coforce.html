@@ -1,0 +1,10 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Force end the changeover{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/coForceEnd"{% endblock %}
+{% block body %}<p class="sub">Ends the changeover on {{ sh.line }} as it is: its time so far stays on the record as changeover, with your name and the reason, and steps not checked are skipped.</p>
+  {% if new %}<label class="chk"><input type="radio" name="run" value="1" checked> Run MO {{ new.floor_number }} · {{ new.part }} (a QC check is due when it runs)</label>
+  <label class="chk"><input type="radio" name="run" value="0"> Leave {{ sh.line }} without an MO (pick one with Pick MO)</label>
+  {% else %}<input type="hidden" name="run" value="0"><p class="note">No next MO was picked, so {{ sh.line }} is left without an MO; pick one with <b>Pick MO</b>.</p>{% endif %}
+  <label class="f">Why<input type="text" name="why" maxlength="200" autofocus placeholder="e.g. operator left without finishing it"></label>
+  <p class="note">{% if S.sup %}Supervisor: {{ S.sup.name }}{% else %}{{ S.actor.name }}{% endif %}</p>{% endblock %}
+{% block foot %}<button type="button" class="btn ghost" hx-get="/kiosk/m/changeover?refresh=1" hx-target="#modal" hx-swap="innerHTML">Back</button><button class="btn warn" type="submit">Force end</button>{% endblock %}

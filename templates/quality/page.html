@@ -33,6 +33,7 @@
     {% if canTol %}<div class="row"><button class="btn go" type="submit">Save issues</button></div>{% endif %}
   </form>
 {% elif f.tab == "parts" %}
+  {% if unwired %}<div class="flash" role="status" style="border-color:var(--warn,#F2B66D)"><b>Not connected to the asset database yet:</b> {% for x in unwired %}{{ x.label }}{% if not forloop.last %}, {% endif %}{% endfor %}. {% if assetsReady %}Build the connection in <a href="/admin/?tab=connector&amp;focus=part_spec">Admin › Connector builder › Part specs</a> (each has its own role there), then press Refresh on Parts &amp; specs to read every filter's value.{% else %}Set up the asset database first (<a href="/admin/?tab=connections">Admin › Connections</a>), then wire {% if unwired|length > 1 %}them{% else %}it{% endif %} in Admin › Connector builder › Part specs.{% endif %} Until then, type the values in Parts &amp; specs.</div>{% endif %}
   <div class="sv-grid">
     <form class="card sv-form" method="post">{% csrf_token %}<input type="hidden" name="action" value="partsImport">
       <h2>Import from the asset database</h2>
@@ -49,14 +50,14 @@
     </form>
   </div>
   <div class="card" style="margin-top:14px">
-    <div class="sv-head" style="margin:0 0 8px"><h2 style="margin:0">Parts &amp; QC specs <span class="muted">· {{ nParts }} part{{ nParts|pluralize }}</span></h2><span class="grow"></span>
+    <div class="sv-head" style="margin:0 0 8px"><h2 style="margin:0">Parts &amp; QC specs <span class="muted">· {{ nParts }} part{{ nParts|pluralize }}</span></h2>{% if canTol and canImport %}<form method="post" style="margin:0 0 0 12px">{% csrf_token %}<input type="hidden" name="action" value="partsRefresh"><button class="btn" type="submit" title="Connect to the asset database again and re-read every part listed here (and every part an open MO runs)">Refresh from the asset database</button></form>{% endif %}<span class="grow"></span>
       <form method="get" class="sv-filter" style="margin:0"><input type="hidden" name="tab" value="parts"><label>Find<input type="search" name="q" value="{{ q }}" placeholder="Part number"></label><button class="btn">Find</button></form>
       {% if canTol %}<form method="post" class="sv-filter" style="margin:0">{% csrf_token %}<input type="hidden" name="action" value="partAdd"><label>New part<input type="text" name="k" placeholder="e.g. MG4120" maxlength="40"></label><button class="btn">Add part</button></form>{% endif %}</div>
-    <p class="muted">QC checks, drawings and unit counts use these values. Prefixes like 1MG/2MG share the MG spec. Inches.{% if nParts > 500 %} Showing the first 500: use Find.{% endif %}</p>
+    <p class="muted">QC checks, drawings and unit counts use these values. Prefixes like 1MG/2MG share the MG spec. Inches. A blank (—) is a value the asset database doesn't have: it's never guessed, and that measurement isn't judged until it's filled in. Values typed here are kept when the database doesn't have them.{% if nParts > 500 %} Showing the first 500: use Find.{% endif %}</p>
     <form method="post">{% csrf_token %}<input type="hidden" name="action" value="partsSave">
     <div class="tblwrap"><table class="st"><thead><tr><th>Part</th>{% for f, lbl, st in fields %}<th>{{ lbl }}</th>{% endfor %}<th>Rev</th><th>Media</th><th>Drawing</th></tr></thead><tbody>
     {% for x in parts %}<tr><td class="nw"><b>{{ x.p.key }}</b><input type="hidden" name="k" value="{{ x.p.key }}"></td>
-      {% for f, lbl, st, v in x.vals %}<td><div class="fld"><input type="number" step="any" min="0" name="{{ f }}" value="{{ v }}" style="width:92px" aria-label="{{ lbl }} for {{ x.p.key }}" {% if not canTol %}disabled{% endif %}></div></td>{% endfor %}
+      {% for f, lbl, st, v in x.vals %}<td><div class="fld"><input type="number" step="any" min="0" name="{{ f }}" value="{{ v|default_if_none:'' }}" placeholder="—" title="{% if v is None %}Not known: the asset database doesn't have it. Type it in, or leave it blank.{% endif %}" style="width:92px" aria-label="{{ lbl }} for {{ x.p.key }}" {% if not canTol %}disabled{% endif %}></div></td>{% endfor %}
       <td><div class="fld"><input type="text" name="rev" value="{{ x.p.rev }}" maxlength="20" style="width:64px" aria-label="Rev for {{ x.p.key }}" {% if not canTol %}disabled{% endif %}></div></td>
       <td><div class="fld"><input type="text" name="media" value="{{ x.p.media }}" maxlength="80" style="width:180px" aria-label="Media for {{ x.p.key }}" {% if not canTol %}disabled{% endif %}></div></td>
       <td class="nw">{% if x.p.drawing_url %}<a href="{{ x.p.drawing_url }}" target="_blank" rel="noopener noreferrer">Open</a>{% else %}<span class="muted">—</span>{% endif %}</td></tr>
@@ -66,11 +67,12 @@
     {% if canTol and parts %}<form method="post" class="sv-filter" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="partDel"><label>Remove part<select name="k">{% for x in parts %}<option>{{ x.p.key }}</option>{% endfor %}</select></label><button class="btn bad" type="submit">Remove</button></form>{% endif %}
   </div>
 {% elif f.tab == "tol" %}
+  {% if unwired %}<div class="flash" role="status" style="border-color:var(--warn,#F2B66D)"><b>Not connected to the asset database yet:</b> {% for x in unwired %}{{ x.label }}{% if not forloop.last %}, {% endif %}{% endfor %}. {% if assetsReady %}Build the connection in <a href="/admin/?tab=connector&amp;focus=part_spec">Admin › Connector builder › Part specs</a> (each has its own role there), then press Refresh on Parts &amp; specs to read every filter's value.{% else %}Set up the asset database first (<a href="/admin/?tab=connections">Admin › Connections</a>), then wire {% if unwired|length > 1 %}them{% else %}it{% endif %} in Admin › Connector builder › Part specs.{% endif %} Until then, type the values in Parts &amp; specs.</div>{% endif %}
   <form class="card sv-form sv-narrow" method="post">{% csrf_token %}<input type="hidden" name="action" value="qcTolSet">
     <h2>Tolerances for every filter</h2>
     <p class="muted">A QC check fails when a measurement is further under or over the drawing than this. They apply to every part; leave a row blank to use each part's own tolerance (Quality › Parts &amp; specs › Tol ±). Fill in one box for the same tolerance both ways. Inches. Past checks keep the result they had.</p>
     <div class="tblwrap" style="grid-column:1/-1"><table class="st"><thead><tr><th>Measurement</th><th>Under the drawing by up to (−)</th><th>Over the drawing by up to (+)</th><th>Now</th></tr></thead><tbody>
-      {% for t in tols %}<tr><td><b>{{ t.label }}</b></td>
+      {% for t in tols %}<tr><td><b>{{ t.label }}</b>{% if t.added %} <span class="note">added</span>{% if canTol %} <button class="btn ghost po" type="submit" form="del-{{ t.k }}" aria-label="Remove {{ t.label }}" title="Remove this measurement">✕</button>{% endif %}{% endif %}</td>
         <td><div class="fld"><input type="number" step="any" min="0" max="10" inputmode="decimal" name="{{ t.k }}_minus" value="{{ t.minus }}" placeholder="part's own" aria-label="{{ t.label }}: under by up to" {% if not canTol %}disabled{% endif %}></div></td>
         <td><div class="fld"><input type="number" step="any" min="0" max="10" inputmode="decimal" name="{{ t.k }}_plus" value="{{ t.plus }}" placeholder="part's own" aria-label="{{ t.label }}: over by up to" {% if not canTol %}disabled{% endif %}></div></td>
         <td class="nw">{% if t.set %}−{{ t.minus }} / +{{ t.plus }}{% else %}<span class="muted">each part's own</span>{% endif %}</td></tr>{% endfor %}
@@ -78,6 +80,15 @@
     {% if canTol %}<div class="row"><button class="btn go" type="submit">Save tolerances</button></div>
     {% else %}<p class="muted">Changing them needs the <b>Quality settings</b> permission (Admin › Permissions).</p>{% endif %}
   </form>
+  {% if canTol %}{% for t in tols %}{% if t.added %}<form id="del-{{ t.k }}" method="post" hidden>{% csrf_token %}<input type="hidden" name="action" value="specFeatureDel"><input type="hidden" name="key" value="{{ t.k }}"></form>{% endif %}{% endfor %}
+  <form class="card sv-form sv-narrow" method="post" style="margin-top:14px">{% csrf_token %}<input type="hidden" name="action" value="specFeatureAdd">
+    <h2>Add a measurement</h2>
+    <p class="muted">Another dimension every filter has (frame thickness, gasket width…). It gets a column in Parts &amp; specs for each filter, a tolerance here, a role in Admin › Connector builder › Part specs to read it from the asset database, and it can be added to a stage's QC check (QC checks tab).</p>
+    <label class="fld"><span>Name</span><input type="text" name="label" maxlength="40" placeholder="e.g. Frame thickness"></label>
+    <label class="fld"><span>Under by up to (−)</span><input type="number" step="any" min="0" max="10" name="minus" placeholder="part's own"></label>
+    <label class="fld"><span>Over by up to (+)</span><input type="number" step="any" min="0" max="10" name="plus" placeholder="part's own"></label>
+    <div class="row"><button class="btn go" type="submit">Add measurement</button></div>
+  </form>{% endif %}
 {% else %}
   <form class="sv-filter" method="get">
     <input type="hidden" name="tab" value="report">

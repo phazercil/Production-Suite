@@ -22,7 +22,7 @@ def qc_tol_set(p, ctx):
     """p: {"<spec>_minus": in, "<spec>_plus": in} for each spec in qc.TOL_SPECS. Both blank: that measurement goes
     back to each part's own tolerance. One blank: the same both ways."""
     out, said = {}, []
-    for k, label in qc.TOL_SPECS:
+    for k, label in qc.tol_specs():
         lo, hi = _num(p.get(f"{k}_minus"), f"how far under for {label.lower()}"), _num(p.get(f"{k}_plus"), f"how far over for {label.lower()}")
         if lo is None and hi is None:
             said.append(f"{label}: each part's own")
@@ -40,6 +40,55 @@ def qc_tol_set(p, ctx):
     if out != before:
         audit(ctx, "QC tolerances: " + "; ".join(said))
     return {"msg": "Tolerances saved. New QC checks use them; past checks keep their result."}
+
+
+@cmd("specFeatureAdd", PERM)
+def spec_feature_add(p, ctx):
+    """Quality › Tolerances › Add a measurement: every filter gets a value for it in Parts & specs (read from the asset
+    database once its Part specs has a column for it), QC checks can measure it, and it has its own tolerance."""
+    import re
+    from hmi.engine import notify
+    label = re.sub(r"\s+", " ", str(p.get("label") or "")).strip()[:40]
+    need(label, "Name the measurement (e.g. Frame thickness).")
+    st = settings_obj()
+    cfg = dict(st.config)
+    feats = list(cfg.get("specFeatures") or [])
+    taken = {x.lower() for _, x in qc.TOL_SPECS} | {f["label"].lower() for f in feats} | {"pleats", "tolerance", "media", "rev"}
+    need(label.lower() not in taken, f"There's already a measurement called {label}.")
+    need(len(feats) < 20, "That's 20 added measurements already.")
+    n = 1 + max([int(f["key"][1:]) for f in feats if f["key"][1:].isdigit()] + [0])
+    key = f"x{n}"
+    feats.append({"key": key, "label": label})
+    cfg["specFeatures"] = feats
+    lo, hi = _num(p.get("minus"), f"how far under for {label.lower()}"), _num(p.get("plus"), f"how far over for {label.lower()}")
+    if lo is not None or hi is not None:
+        cfg["qcTol"] = {**(cfg.get("qcTol") or {}), key: {"minus": lo if lo is not None else hi, "plus": hi if hi is not None else lo}}
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"Added the measurement {label} ({key}) to Parts & specs and Tolerances")
+    notify(f"New measurement {label}: connect it to the asset database in Admin › Connector builder › Part specs "
+           f"(its role is \"{label}\"), then Refresh Quality › Parts & specs to read every filter's value.", "planner", go="admin")
+    return {"msg": f"{label} added to every filter in Parts & specs. Connect it to the asset database (Admin › Connector builder › "
+                   "Part specs) to read each filter's value, or type them in."}
+
+
+@cmd("specFeatureDel", PERM)
+def spec_feature_del(p, ctx):
+    """Remove an added measurement (its values stay on the parts, unused)."""
+    key = str(p.get("key") or "")
+    st = settings_obj()
+    cfg = dict(st.config)
+    feats = [f for f in cfg.get("specFeatures") or [] if f.get("key") != key]
+    need(len(feats) < len(cfg.get("specFeatures") or []), "That measurement is already gone.")
+    gone = next(f for f in cfg["specFeatures"] if f.get("key") == key)
+    cfg["specFeatures"] = feats
+    cfg["qcTol"] = {k: v for k, v in (cfg.get("qcTol") or {}).items() if k != key}
+    cfg["qcItems"] = {s: [i for i in (items or []) if not (isinstance(i, dict) and i.get("key") == key)]
+                      for s, items in (cfg.get("qcItems") or {}).items()}
+    st.config = cfg
+    st.save(update_fields=["config"])
+    audit(ctx, f"Removed the measurement {gone['label']}")
+    return {"msg": f"{gone['label']} removed."}
 
 
 @cmd("qualityIssuesSet", PERM)

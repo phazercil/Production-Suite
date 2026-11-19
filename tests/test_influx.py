@@ -143,6 +143,14 @@ class InfluxTests(Base):
         self.assertFalse(cmd(op, "connSave", {"group": "influx", "fields": {"url": self.fake.url}})["ok"])
         self.assertFalse((self.dir / ".env").exists())
 
+    def test_saved_even_when_it_does_not_answer(self):
+        from unittest import mock
+        with mock.patch.object(influx, "test", side_effect=influx.InfluxError("InfluxDB refused the token")):
+            r = self.save()
+        self.assertTrue(r["ok"], r)
+        self.assertIn("isn't connecting yet: InfluxDB refused the token", r["msg"])
+        self.assertIn('INFLUX_TOKEN="tok-123"', (self.dir / ".env").read_text())
+
     def test_machine_reads_speed_from_a_flux_query(self):
         self.assertTrue(self.save()["ok"])
         r = cmd(self.c, "lineSet", {"id": "Barbara", "f": "feed.type", "v": "influx"})

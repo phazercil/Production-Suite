@@ -1,5 +1,5 @@
-<div id="dk-board" class="dk-board" hx-get="/data/r/board" hx-trigger="suite:config from:body{% if L.rotate %}, every {{ L.rotate }}s{% endif %}">
-  {% if not L.grafana %}<section class="setup">Grafana is not connected, so these are the built-in charts. A shift lead can connect it in
+<div id="dk-board" class="dk-board" hx-get="/data/r/board{% if q %}?{{ q }}{% endif %}" hx-trigger="suite:config from:body{% if L.rotate %}, every {{ L.rotate }}s{% endif %}">
+  {% if not L.grafana and not view %}<section class="setup">Grafana is not connected, so these are the built-in charts. A shift lead can connect it in
     <a href="/operator/#admin">Operator Kiosk › Admin › Connections</a> and pick the panels for this screen there.</section>{% endif %}
   {% if L.dash %}<section class="dk-dash"><iframe title="Grafana dashboard" src="{{ L.dashSrc }}"></iframe></section>{% endif %}
   <section class="dk-lines" aria-live="polite">
@@ -10,11 +10,11 @@
         {% for p in b.panels %}
           {% if p.builtin %}{% include "datakiosk/_chart.html" with c=b.card title=p.title %}
           {% else %}<div class="panel"><h3>{{ p.title }}</h3><iframe title="{{ p.title }} · {{ b.name }}" src="{{ p.src }}" loading="lazy"></iframe></div>{% endif %}
-        {% empty %}{% if not L.dash %}<div class="empty">Add panels in Operator Kiosk › Admin › Connections.</div>{% endif %}
+        {% empty %}{% if not L.dash %}<div class="empty">{% if view %}No panels are set up for this screen.{% else %}Add panels in Operator Kiosk › Admin › Connections.{% endif %}</div>{% endif %}
         {% endfor %}
       </div>
     </article>
-    {% empty %}<div class="empty">No pleating lines are set up yet.</div>
+    {% empty %}<div class="empty">{% if L.focus %}{{ L.focus }} is out of service.{% else %}No pleating lines are set up yet.{% endif %}</div>
     {% endfor %}
   </section>
 </div>

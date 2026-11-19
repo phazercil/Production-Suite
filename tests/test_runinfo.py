@@ -161,7 +161,9 @@ class ScheduleTimelineTests(TestCase):
         body = r.content.decode()
         self.assertIn('class="fin"', body)                                # checkered flag at the MO's end
         self.assertIn("Barbara runs through lunch", body)                 # the demo's Barbara has relief cover
-        self.assertIn("Salvatore stops for lunch", body)
+        self.assertNotIn("Salvatore", body)                               # only this screen's line
+        self.c.post("/kiosk/do/station", {"line": "Salvatore"})
+        self.assertIn("Salvatore stops for lunch", self.c.get("/kiosk/v/schedule?view=timeline").content.decode())
 
     def test_changeover_in_progress_turns_red_when_over_time(self):
         from hmi.models import ShiftRun
@@ -179,3 +181,40 @@ class ScheduleTimelineTests(TestCase):
         r = self.c.get("/kiosk/v/schedule?view=timeline")
         self.assertContains(r, "blk co live over")
         self.assertContains(r, "15 min over")                             # Barbara is allowed 30 minutes
+
+
+class ScheduleWeekTests(TestCase):
+    """The kiosk's Schedule page shows only this screen's line, and only this week's (or next week's) MOs."""
+
+    def setUp(self):
+        no_planned_time(self)
+        cache.clear()
+        seed_demo(reset=True)
+        self.c = Client(HTTP_HX_REQUEST="true")
+        self.c.post("/kiosk/do/station", {"line": "Barbara"})
+
+    def test_week_and_list_are_this_lines_only(self):
+        from datetime import timedelta as td
+        from plant.models import Machine
+        bar, sal = Machine.objects.get(name="Barbara"), Machine.objects.get(name="Salvatore")
+        now = timezone.now()
+        here = MO.objects.create(number="950001", part="MG4062HP", qty=100, status="OPEN", line=bar, seq=50,
+                                 plan_start=now + td(hours=2), plan_end=now + td(hours=4))
+        later = MO.objects.create(number="950002", part="MG4062HP", qty=100, status="OPEN", line=bar, seq=51,
+                                  plan_start=now + td(days=15), plan_end=now + td(days=15, hours=2))
+        other = MO.objects.create(number="950003", part="MG4062HP", qty=100, status="OPEN", line=sal, seq=50,
+                                  plan_start=now + td(hours=2), plan_end=now + td(hours=4))
+        r = self.c.get("/kiosk/v/schedule?view=week&week=0").content.decode()
+        self.assertIn("Schedule · Barbara", r)
+        self.assertIn("950001", r)
+        self.assertNotIn("950002", r)                  # weeks away
+        self.assertNotIn("950003", r)                  # another line
+        self.assertIn('class="wk"', r)
+        r = self.c.get("/kiosk/v/schedule?view=timeline").content.decode()
+        self.assertNotIn("950003", r)
+        self.assertNotIn(">Salvatore<", r)
+        locked = Client(HTTP_HX_REQUEST="true")
+        locked.get("/station/Barbara/schedule/")
+        r = locked.get("/kiosk/v/schedule").content.decode()
+        self.assertIn("Schedule · Barbara", r)
+        self.assertNotIn("Plan in the Scheduler", r)           # nothing on a machine's own screen leads off it

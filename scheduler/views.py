@@ -49,6 +49,8 @@ def fail(msg, status=400):
 def result_json(r, lead=False):
     out = {k: r[k] for k in ("id", "moId", "op", "machineId", "rate", "basis", "eff", "gross", "qty", "scrap", "dt", "coMin", "runMin", "start",
                              "runStart", "end", "warn", "waiting", "paced", "overlap", "pushed", "late", "reqStart")}
+    out["pace"] = r.get("pace")
+    out["inkjet"] = r.get("inkjet", False)
     out["runSegs"] = r["runSegs"]
     out["unplanned"] = r.get("unplanned", False)
     out["running"] = r.get("running", False)
@@ -84,11 +86,13 @@ def state(request):
     sch = compute(world)
     st = PlantSettings.load()
     a, b = request.GET.get("from"), request.GET.get("to")
-    work = {}
-    if a and b and a.isdigit() and b.isdigit() and 0 < int(a) < int(b) and int(b) - int(a) <= 62 * 86_400_000:
+    work, hist = {}, []
+    if a and b and a.isdigit() and b.isdigit() and 0 < int(a) < int(b) and int(b) - int(a) <= 400 * 86_400_000:
         a, b = int(a), int(b)
         for m in world["cfg"]["machines"]:
             work[m["id"]] = sch["cal"].between(m, a, b)
+        from .engine import history
+        hist = history(world, sch["cal"], a, b)
     cat = world["catalog"]
     from plant import perms
     me, _ = current_person(request)
@@ -96,7 +100,7 @@ def state(request):
     edit = perms.can(me, "schedule.edit")
     return ok(me={"name": me.name, "lead": edit} if me else None, editLocked=settings.SUITE["SCHEDULER_REQUIRE_LEAD"] and not edit,
               cfg=world["cfg"], cfgSig=config_sig(world["cfg"]), modes=SPEED_MODES, mos=[mo_json(m, cat) for m in world["mos"].values()],
-              jobs=world["jobs"], res={k: result_json(r, lead) for k, r in sch["res"].items()}, byM=sch["byM"], work=work,
+              jobs=world["jobs"], res={k: result_json(r, lead) for k, r in sch["res"].items()}, byM=sch["byM"], work=work, hist=hist,
               labor=labor_json(world, lead, *( (a, b) if work else (None, None))),
               catalog={"count": len(cat.items), **(st.catalog_source or {})}, v=st.version, now=ms(now()))
 
@@ -350,8 +354,11 @@ def save_config(request):
 
     labor = False   # the lines are the suite's own (the Labor Budget only starts new ones; Lines & Shifts shows where it differs)
     st = PlantSettings.load()
+    bases = p.get("inkjetBases") if isinstance(p.get("inkjetBases"), list) else st.planner.get("inkjetBases", ["AQ"])
+    bases = [b for b in dict.fromkeys(re.sub(r"[^A-Z]", "", str(x).upper())[:6] for x in bases[:20]) if b]
     st.planner = {"coSamePart": bool(p.get("coSamePart")), "coFirst": p.get("coFirst") is not False,
-                  "useLabor": p.get("useLabor") is not False}
+                  "useLabor": p.get("useLabor") is not False, "inkjetBases": bases,
+                  "inkjetMin": num(p.get("inkjetMin", st.planner.get("inkjetMin", 0)), "Inkjet changeover minutes", 0, 240)}
     st.save(update_fields=["planner"])
     keep_s, sid_map = [], {}
     for i, sh in enumerate(shifts_in):   # the shifts are the machine schedule's (Admin › Machine schedule), also with the Labor Budget on
