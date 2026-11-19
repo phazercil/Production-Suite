@@ -58,6 +58,10 @@ class DataKioskTests(TestCase):
         self.assertContains(Client().get("/data/"), 'class="suite-fs" data-fullscreen')                 # in the top bar
         self.assertContains(Client().get("/data/?view=1"), 'class="suite-fs float" data-fullscreen')    # the corner, no bar
         self.assertContains(Client().get("/data/"), "suite/fullscreen.js")
+        k = Client(HTTP_HX_REQUEST="true")
+        page = k.get("/station/Barbara/").content.decode()
+        self.assertNotIn("suite-fs float", page)                                                       # the kiosk: in its rail
+        self.assertIn("suite-fs-rail", k.get("/kiosk/r/rail").content.decode())
 
     def test_one_machine_and_view_only_link(self):
         r = Client().get("/data/salvatore/")                    # any letter case

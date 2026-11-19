@@ -27,7 +27,7 @@ from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
 VIEWS = PAGES | {"admin"}   # Admin is its own section (/admin/) but its view is built the same way
-BUILT = {"controls", "schedule", "part-info", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
+BUILT = {"controls", "schedule", "part-info", "model", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -197,6 +197,10 @@ def view_data(s, page, request):
         return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "week"}, "timeline"),
                                            page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort,
                                            int(page_option(request, "week", {"0", "1"}, "0")))}
+    if page == "model":   # the 3D viewer, view only, following the filter this line runs
+        sh = s.shift
+        mo = sh.mo if sh else None
+        return {"line": s.station, "mo": mo}
     if page == "part-info":
         P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
         return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}

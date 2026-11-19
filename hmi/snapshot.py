@@ -32,6 +32,14 @@ QDEF = {
                      "perPart": True,
                      "roles": [["url", "Drawing link (PDF or image)"], ["rev", "Drawing rev"],
                                ["newest", "Newest first by (date or rev), when the part has a row per rev"]]},
+    "filter_3d": {"title": "3D filter data", "help": "One row for the part: the dimensions the 3D viewer (Quality › 3D viewer) builds the "
+                                                  "filter from. The viewer keeps each filter in the suite's own database; when this is set up, "
+                                                  "what it returns updates the stored filter each time it's opened (and with Refresh). "
+                                                  "Anything it doesn't return stays as stored.",
+                  "perPart": True,
+                  "roles": [["ph", "Pleat height"], ["pc", "Pleat count"], ["pp", "Pleat pitch"], ["fl", "Filter (pack) length"],
+                            ["mw", "Media width"], ["mt", "Media thickness"], ["fr", "Fold inside radius"],
+                            ["uom", "Unit of measure (mm, in…): each dimension's own"]]},
     "part_tooling": {"title": "Tooling for the part", "help": "What the run screen shows under Up Next and Current MO. Either one row per tool (Tool type + Tool), "
                                                                 "or one row with a column each for screws, helix, media and side bands.",
                      "roles": [["kind", "Tool type (screws, helix, media, side band)"], ["name", "Tool / part number"], ["detail", "Size or note"],

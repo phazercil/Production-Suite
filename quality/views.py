@@ -22,7 +22,7 @@ from plant.util import local, part_spec
 
 PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
-TABS = [("report", "Quality report"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances")]
+TABS = [("report", "Quality report"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"), ("viewer", "3D viewer")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
            "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
            "specFeatureAdd": "tol", "specFeatureDel": "tol"}
@@ -211,6 +211,11 @@ def page(request):
     ctx = {"mode": "quality", "me": me, "f": f, "tabs": TABS, "kinds": KINDS, "canTol": can_tol, "err": err,
            "msg": request.GET.get("msg", "")[:200], "here": _query(f), "tabq": {k: _query(f, tab=k) for k, _ in TABS},
            "canEdit": perms.can(me, "history.edit"), "canSup": perms.can(me, "section.supervisor"), "canOut": perms.can(me, "qc.approve")}
+    if f["tab"] == "viewer":
+        from plant.models import FilterModel3D
+
+        from .viewer import db_ready
+        ctx.update(fvDb=db_ready(), fvCount=FilterModel3D.objects.count())
     if f["tab"] == "checks":
         from plant.models import STAGES
         cfg = PlantSettings.load().config

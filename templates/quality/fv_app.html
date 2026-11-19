@@ -1,0 +1,2344 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pleated Filter 3D Viewer</title>
+<style>
+  :root { --bg:#2b3240; --panel:#1f2430; --line:#3a4252; --text:#e6e9ef; --muted:#9aa3b2; --accent:#5fa8ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+  #app { display:flex; height:100%; }
+  #panel { width:280px; flex:none; background:var(--panel); border-right:1px solid var(--line); padding:16px; overflow-y:auto; }
+  #view { flex:1; position:relative; min-width:0; }
+  canvas { display:block; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:16px; }
+  .field { margin-bottom:12px; }
+  .field label { display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px; }
+  .field label span { color:var(--muted); }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row input[type=range] { flex:1; }
+  .row input[type=number] { width:72px; background:#141821; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 6px; font:inherit; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:18px 0 8px; border-top:1px solid var(--line); padding-top:14px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td { padding:3px 0; }
+  td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+  .chk { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; cursor:pointer; }
+  button { background:#2d3442; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:6px 10px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  .btns { display:flex; gap:6px; flex-wrap:wrap; }
+  #hint { position:absolute; top:10px; right:14px; color:var(--muted); font-size:12px; pointer-events:none; }
+  #view { display:flex; flex-direction:column; }
+  #canvasWrap { flex:1; position:relative; min-height:0; }
+  #drawer { flex:none; background:var(--panel); border-top:1px solid var(--line); display:flex; flex-direction:column; max-height:48%; }
+  #drawer.closed #drawerBody { display:none; }
+  #drawerBar { display:flex; gap:6px; align-items:center; padding:6px 10px; border-bottom:1px solid var(--line); }
+  #drawerBar .sp { flex:1; }
+  #drawerBar button.on { background:var(--accent); border-color:var(--accent); color:#0d1420; font-weight:600; }
+  #drawerBody { overflow:auto; padding:0 14px 10px; min-height:180px; }
+  #drawerBody > div > :first-child { margin-top:10px; }
+  .pane-head { position:sticky; top:0; z-index:2; background:var(--panel); padding:10px 0 4px; margin:0 0 6px; border-bottom:1px solid var(--line); }
+  .pane-head > :last-child { margin-bottom:0; }
+  .sheet { border-collapse:collapse; width:100%; font-size:13px; }
+  .sheet td, .sheet th { border:1px solid var(--line); padding:0; }
+  .sheet th { background:#232a37; color:var(--muted); font-weight:600; text-align:left; padding:5px 8px; font-size:12px; }
+  .sheet td.lab { padding:5px 8px; color:var(--muted); width:34%; background:#1b202a; }
+  .sheet td.calc { padding:5px 8px; font-variant-numeric:tabular-nums; color:#c9d6e8; }
+  .sheet input { width:100%; background:transparent; border:0; color:var(--text); font:inherit; padding:5px 8px; }
+  .sheet input:focus { outline:2px solid var(--accent); outline-offset:-2px; background:#141821; }
+  .sheet td.x { width:30px; text-align:center; }
+  .sheet td.x button { padding:1px 6px; font-size:12px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:1000px){ .cols { grid-template-columns:1fr; } }
+  .lib-row { display:flex; gap:8px; align-items:center; padding:6px 8px; border:1px solid var(--line); border-radius:4px; margin-bottom:6px; background:#1a1f29; }
+  .lib-row .pn { font-weight:600; min-width:110px; }
+  .lib-row.loaded { border-color:#3fbf6a; box-shadow:0 0 0 1px #3fbf6a, 0 0 10px rgba(63,191,106,.35); background:#1a2a22; }
+  .lib-row.loaded .pn::after { content:'loaded'; display:inline-block; margin-left:8px; font-size:10px; font-weight:600; color:#0d1a12; background:#3fbf6a; border-radius:3px; padding:0 5px; vertical-align:middle; }
+  .fl-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .fl-row select, .fl-row input { width:auto; }
+  .fl-row input { width:110px; }
+  .hit { background:rgba(95,168,255,.25); border-radius:3px; padding:0 2px; }
+  .lib-row .meta { flex:1; color:var(--muted); font-size:12px; }
+  .note { color:var(--muted); font-size:12px; margin:6px 0; }
+  .need { outline:2px solid #ffb454; outline-offset:3px; border-radius:4px; background:rgba(255,180,84,.06); }
+  .field.need > label::after, label.chk.need::after { content:'⚠ check'; color:#ffb454; font-size:11px; margin-left:6px; }
+  td.need { outline-offset:-2px; }
+  button.need-tab::after { content:' ⚠'; color:#ffb454; }
+  #modeBox { display:none; border:1px solid #3fbf6a; background:rgba(63,191,106,.09); border-radius:6px; padding:8px 10px; margin-bottom:12px; font-size:12px; }
+  #modeBox b { color:#7fe0a0; }
+  #modeBox button { margin-top:6px; font-size:12px; padding:3px 8px; }
+  .locked-note { color:var(--muted); font-size:11px; }
+  #panel :disabled, #sheetInfo :disabled { opacity:.45; cursor:not-allowed; }
+  #pickModal { position:fixed; inset:0; background:rgba(8,11,16,.6); display:none; align-items:center; justify-content:center; z-index:50; }
+  #pickModal .box { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; width:min(440px, 92vw); max-height:80vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  #pickModal h3 { margin:0 0 4px; font-size:15px; }
+  #pickModal .opt { display:flex; flex-direction:column; align-items:flex-start; width:100%; text-align:left; margin:6px 0; padding:8px 10px; }
+  #pickModal .opt .s { color:var(--muted); font-size:12px; margin-top:2px; }
+  #pickModal .opt:hover { border-color:#3fbf6a; }
+  #newModal { position:fixed; inset:0; background:rgba(8,11,16,.6); display:none; align-items:center; justify-content:center; z-index:50; }
+  #newModal .box { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; width:min(420px, 92vw); box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  #newModal h3 { margin:0 0 10px; font-size:15px; }
+  #b_new { width:100%; margin:0 0 12px; border-color:#3fbf6a; font-weight:600; }
+  #copyModal { position:fixed; inset:0; background:rgba(8,11,16,.6); display:none; align-items:center; justify-content:center; z-index:50; }
+  #copyModal .box { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; width:min(620px, 94vw); max-height:88vh; overflow:auto; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  #copyModal h3 { margin:0 0 10px; font-size:15px; }
+  #copyModal h4 { margin:12px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  #copyModal .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:2px 12px; }
+  #cpGroups { border:1px solid var(--line); border-radius:4px; max-height:300px; overflow:auto; padding:4px 8px; }
+  .cg { border-bottom:1px solid var(--line); padding:2px 0; }
+  .cg:last-child { border-bottom:0; }
+  .cg-h { display:flex; align-items:center; gap:6px; }
+  .cg-h label.chk { flex:1; margin:4px 0; font-weight:600; }
+  .cg-h button { padding:0 6px; font-size:12px; }
+  .cg-h .cnt { color:var(--muted); font-size:11px; }
+  .cg-items { display:none; grid-template-columns:1fr 1fr; gap:0 12px; padding:0 0 6px 22px; }
+  .cg.open .cg-items { display:grid; }
+  .cg-items label.chk { margin:2px 0; font-size:12px; }
+  #cpTargets { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:4px; padding:4px 8px; margin-top:6px; }
+  #cpTargets label { display:flex; gap:8px; align-items:center; font-size:13px; padding:2px 0; }
+  #cpTargets label .note { margin:0; }
+  .cchip { display:inline-block; border:1px solid var(--line); border-radius:3px; padding:0 4px; margin-left:2px; font-size:11px; }
+  .cchip.ink { border-color:#3fbf6a; color:#7fe0a0; }
+  #needsBox { display:none; border:1px solid #ffb454; background:rgba(255,180,84,.08); border-radius:6px; padding:8px 10px; margin-bottom:12px; font-size:12px; }
+  #needsBox .t { font-weight:600; color:#ffb454; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center; }
+  #needsBox .t button { font-size:11px; padding:2px 6px; }
+  #needsBox .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  #needsBox .chips button { font-size:11px; padding:2px 7px; border-color:#ffb454; }
+  .warnline { color:#ffb454; }
+  .ok { color:#7fd18b; } .err { color:#ffb454; }
+  .tin { background:#141821; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:5px 8px; font:inherit; }
+  .foam { border:1px solid var(--line); border-radius:6px; padding:10px; margin-bottom:10px; background:#1a1f29; }
+  .foam .hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-weight:600; font-size:13px; }
+  .foam .hd button { padding:2px 8px; font-size:12px; }
+  .tabs { display:flex; gap:0; margin:6px 0 12px; }
+  .tabs button { flex:1; border-radius:0; }
+  .tabs button:first-child { border-radius:4px 0 0 4px; } .tabs button:last-child { border-radius:0 4px 4px 0; }
+  .tabs button.on { background:var(--accent); border-color:var(--accent); color:#0d1420; font-weight:600; }
+  .dimlbl { font:11px/1.2 system-ui, sans-serif; color:#cfe6ff; background:rgba(16,22,32,.82); border:1px solid #3d6fa8; border-radius:3px; padding:1px 5px; white-space:nowrap; pointer-events:none; }
+  .dimlbl b { color:#fff; font-weight:600; }
+  #warn { color:#ffb454; font-size:12px; min-height:16px; margin-top:4px; }
+  @media (max-width:700px){ #app{flex-direction:column;} #panel{width:auto;height:45%;border-right:0;border-bottom:1px solid var(--line);} }
+</style>
+<style>
+  /* Production Suite: the view-only screen (Operator Kiosk › 3D Model) and the note on what's shown */
+  body.fv-view #b_new, body.fv-view #b_reset, body.fv-view #b_stl, body.fv-view #d_lib, body.fv-view #d_batch, body.fv-view #d_export,
+  body.fv-view #sh_add, body.fv-view #sh_copy, body.fv-view #needsClear, body.fv-view #modeBase, body.fv-view #lib_new { display:none !important; }
+  body.fv-view #panel :disabled { opacity:.8; cursor:default; }
+  body.fv-view #modeBox .locked-note, body.fv-view #modeBox br { display:none; }
+  #fvNote { position:absolute; left:12px; top:10px; z-index:5; max-width:min(560px, 70%); background:rgba(20,24,33,.88); border:1px solid var(--line);
+            border-radius:6px; padding:8px 12px; font-size:13px; color:var(--text); }
+  #fvNote b { color:#7fe0a0; }
+  #fvNote.warn { border-color:#ffb454; }
+  #fvNote.warn b { color:#ffb454; }
+</style>
+</head>
+<body>
+<div id="pickModal"><div class="box"><h3 id="pickTitle"></h3><div class="note" id="pickSub"></div><div id="pickList"></div><div style="text-align:right;margin-top:8px"><button id="pickCancel">Cancel</button></div></div></div>
+<div id="copyModal"><div class="box">
+  <h3>Copy settings</h3>
+  <div class="field"><label>Copy from</label><select id="cpFrom" class="tin" style="width:100%"></select></div>
+  <h4 style="display:flex;align-items:center;gap:8px">What to copy <span style="flex:1"></span><button id="cpSelAll" style="font-size:11px;padding:1px 6px">All</button><button id="cpSelNone" style="font-size:11px;padding:1px 6px">None</button><button id="cpExpand" style="font-size:11px;padding:1px 6px">Expand all</button></h4>
+  <div id="cpGroups"></div>
+  <h4>Copy to</h4>
+  <label class="chk"><input type="radio" name="cpTo" value="current" checked> The filter in the viewer (not saved until you save it)</label>
+  <label class="chk"><input type="radio" name="cpTo" value="lib"> Parts in the library (saved straight away)</label>
+  <div id="cpLibBox" style="display:none">
+    <div class="row" style="gap:6px;margin-top:6px"><input id="cpFind" class="tin" placeholder="Filter parts… (same search as the library)" style="flex:1"><button id="cpAll">Select shown</button><button id="cpNone">Clear</button></div>
+    <div id="cpTargets"></div>
+  </div>
+  <div id="cpMsg" class="note" style="margin-top:8px"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button id="cpCancel">Close</button><button id="cpApply" style="border-color:#3fbf6a">Copy settings</button></div>
+</div></div>
+<div id="newModal"><div class="box">
+  <h3>New filter</h3>
+  <div class="field"><label>Part number</label><input id="nf_pn" class="tin" style="width:100%" placeholder="e.g. AQ1300"></div>
+  <div class="field"><label>Customer / OE # <span>optional</span></label><input id="nf_oe" class="tin" style="width:100%" placeholder="e.g. MG4100, CV1234"></div>
+  <div class="field"><label>Start from</label><select id="nf_from" class="tin" style="width:100%"></select></div>
+  <label class="chk"><input type="checkbox" id="nf_save" checked> Save to the part library straight away</label>
+  <div id="nf_msg" class="note" style="margin-top:6px"></div>
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px"><button id="nf_cancel">Cancel</button><button id="nf_go" style="border-color:#3fbf6a">Create filter</button></div>
+</div></div>
+<div id="app">
+  <div id="panel">
+    <h1>Pleated Filter Viewer</h1>
+    <button id="b_new" title="Start a new filter with its own part number">+ New filter</button>
+    <div id="modeBox"></div>
+    <div id="needsBox"><div class="t"><span id="needsTitle"></span><button id="needsClear">Clear flags</button></div><div class="chips" id="needsChips"></div></div>
+    <div class="sub">All dimensions in mm. Defaults: AQ1136C.</div>
+
+    <div class="field"><label>Pleat height <span>mm</span></label>
+      <div class="row"><input type="range" id="r_ph" min="5" max="80" step="0.5"><input type="number" id="n_ph" step="0.5"></div></div>
+    <div class="field"><label>Filter length <span>mm</span></label>
+      <div class="row"><input type="range" id="r_fl" min="20" max="600" step="0.1"><input type="number" id="n_fl" step="0.1"></div>
+      <label class="chk" style="margin-top:4px"><input type="checkbox" id="c_lock" checked> Lock length (count ↔ pitch)</label></div>
+    <div class="field"><label>Pleat count <span>pleats</span></label>
+      <div class="row"><input type="range" id="r_pc" min="2" max="120" step="1"><input type="number" id="n_pc" step="1"></div></div>
+    <div class="field"><label>Pleat pitch <span>mm</span></label>
+      <div class="row"><input type="range" id="r_pp" min="2" max="30" step="0.1"><input type="number" id="n_pp" step="0.1"></div></div>
+    <div class="field"><label>Pleat (media) thickness <span>mm</span></label>
+      <div class="row"><input type="range" id="r_mt" min="0.05" max="3" step="0.05"><input type="number" id="n_mt" step="0.05"></div></div>
+    <div class="field"><label>Fold inside radius <span>mm</span></label>
+      <div class="row"><input type="range" id="r_fr" min="0" max="5" step="0.05"><input type="number" id="n_fr" step="0.05"></div></div>
+    <div class="field"><label>Media orientation</label>
+      <select id="s_cutend" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="top">Cut ends on top</option><option value="bottom">Cut ends on bottom</option></select></div>
+    <div class="field"><label>Media width <span>mm</span></label>
+      <div class="row"><input type="range" id="r_mw" min="50" max="400" step="1"><input type="number" id="n_mw" step="1"></div></div>
+
+    <div id="ui_side"></div>
+    <div id="ui_end"></div>
+
+    <h2>Pull tab</h2>
+    <label class="chk"><input type="checkbox" id="c_tab"> Pull tab</label>
+    <div id="tabOpts">
+    <div class="field"><label>On band</label>
+      <select id="s_tabon" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="side0">Side A (front)</option><option value="side1">Side B (back)</option><option value="end0">End A (right)</option><option value="end1">End B (left)</option></select></div>
+    <div class="field"><label>Free end points</label>
+      <select id="s_tabdir" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="1">Right (facing the band)</option><option value="-1">Left (facing the band)</option></select></div>
+    
+    <div class="field"><label>Glue-on length <span>mm</span></label>
+      <div class="row"><input type="range" id="r_tg" min="1" max="150" step="0.5"><input type="number" id="n_tg" step="0.5"></div></div>
+    
+    <div class="field"><label>Free-floating length <span>mm</span></label>
+      <div class="row"><input type="range" id="r_tf" min="0" max="100" step="0.5"><input type="number" id="n_tf" step="0.5"></div></div>
+    
+    <div class="field"><label>Strip width <span>mm</span></label>
+      <div class="row"><input type="range" id="r_tw" min="2" max="60" step="0.5"><input type="number" id="n_tw" step="0.5"></div></div>
+    
+    <div class="field"><label>Position from band end <span>mm</span></label>
+      <div class="row"><input type="range" id="r_tp" min="0" max="300" step="0.5"><input type="number" id="n_tp" step="0.5"></div></div>
+    
+    <div class="field"><label>Height offset from band centre <span>mm</span></label>
+      <div class="row"><input type="range" id="r_tv" min="-30" max="30" step="0.5"><input type="number" id="n_tv" step="0.5"></div></div>
+    
+    <div class="field"><label>Free end angle (inward) <span>°</span></label>
+      <div class="row"><input type="range" id="r_ta" min="0" max="90" step="1"><input type="number" id="n_ta" step="1"></div></div>
+    <div class="sub" style="margin:-4px 0 8px">Position is measured from the band end the free end points to, to where the tab leaves the band. 0 = tab leaves at the very end.</div>
+    </div>
+
+    <h2>Foam</h2>
+    <div id="foamList"></div>
+    <button id="b_foam_add" style="width:100%;margin-bottom:6px">+ Add foam strip</button>
+
+    <h2>Inkjet</h2>
+    <label class="chk"><input type="checkbox" id="c_ink"> Inkjet print</label>
+    <div id="inkOpts">
+    <div class="field"><label>Printed on</label>
+      <select id="s_inkon" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="side0">Side A (front)</option><option value="side1">Side B (back)</option><option value="end0">End A (right)</option><option value="end1">End B (left)</option></select></div>
+    <div class="field"><label>Part number</label><input type="text" id="i_part" value="1136C" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"></div>
+    <div class="field"><label>Date code</label><input type="text" id="i_date" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"></div>
+    <div class="field"><label>Country of origin</label><input type="text" id="i_coo" value="Made In U.S.A." style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"></div>
+    <div class="field"><label>EPA registration <span>printed before the part number</span></label><textarea id="i_epa" rows="2" placeholder="EPA Est. No.&#10;100559-VA-1" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit;resize:vertical"></textarea></div>
+    <div class="field"><label>Extra word <span>e.g. HEPA, before the arrows</span></label><input type="text" id="i_word" placeholder="HEPA" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"></div>
+    <div class="field"><label>Arrow direction</label>
+      <select id="s_arrow" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="up">Up ↑</option><option value="down">Down ↓</option></select></div>
+    <div class="field"><label>Arrow text</label>
+      <select id="s_inklabel" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="AIR FLOW">AIR FLOW</option><option value="UP">UP</option></select></div>
+    <div class="field"><label>Orientation</label>
+      <select id="s_orient" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="up">Right side up</option><option value="down">Upside down</option></select></div>
+    
+    <div class="field"><label>Text height <span>mm</span></label>
+      <div class="row"><input type="range" id="r_kh" min="2" max="20" step="0.5"><input type="number" id="n_kh" step="0.5"></div></div>
+    
+    <div class="field"><label>Horizontal position from centre <span>mm</span></label>
+      <div class="row"><input type="range" id="r_kx" min="-200" max="200" step="0.5"><input type="number" id="n_kx" step="0.5"></div></div>
+    
+    <div class="field"><label>Vertical position from centre <span>mm</span></label>
+      <div class="row"><input type="range" id="r_ky" min="-30" max="30" step="0.5"><input type="number" id="n_ky" step="0.5"></div></div>
+    </div>
+
+    <h2>Glue beads</h2>
+    <label class="chk"><input type="checkbox" id="c_glue"> Glue beads</label>
+    <div id="glueOpts">
+    <div class="field"><label>Applied to</label>
+      <select id="s_glue" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="top">Top of filter</option><option value="bottom">Bottom of filter</option><option value="both">Top and bottom</option></select></div>
+    <div class="field"><label>Number of beads <span>beads</span></label>
+      <div class="row"><input type="range" id="r_gn" min="1" max="12" step="1"><input type="number" id="n_gn" step="1"></div></div>
+    <div class="field"><label>Spacing between beads <span>mm</span></label>
+      <div class="row"><input type="range" id="r_gs" min="5" max="200" step="0.5"><input type="number" id="n_gs" step="0.5"></div></div>
+    <div class="field"><label>Bead diameter <span>mm</span></label>
+      <div class="row"><input type="range" id="r_gd" min="0.5" max="6" step="0.1"><input type="number" id="n_gd" step="0.1"></div></div>
+    <div class="field"><label>Bead dip between pleats <span>mm</span></label>
+      <div class="row"><input type="range" id="r_gg" min="0" max="15" step="0.1"><input type="number" id="n_gg" step="0.1"></div></div>
+    <div class="sub" style="margin:-4px 0 8px">Beads are always centred across the media width. Spacing is centre to centre.</div>
+    </div>
+    <div id="warn"></div>
+
+    <h2>Calculated</h2>
+    <table>
+      <tr><td>Filter width</td><td id="o_wid"></td></tr>
+      <tr><td>Overall length</td><td id="o_olen"></td></tr>
+      <tr><td>Side band blank height</td><td id="o_blank"></td></tr>
+      <tr id="row_eblank"><td>End band blank height</td><td id="o_eblank"></td></tr>
+      <tr><td>Filter height</td><td id="o_hgt"></td></tr>
+      <tr><td>Pleat angle</td><td id="o_ang"></td></tr>
+      <tr><td>Unfolded media length</td><td id="o_mlen"></td></tr>
+      <tr><td>Media area</td><td id="o_area"></td></tr>
+    </table>
+
+    <h2>Display</h2>
+    <div class="field"><label>Media colour</label>
+      <select id="s_mcol" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="carbon">Carbon (dark grey)</option><option value="white">White</option><option value="grey">Light grey</option><option value="hepa">HEPA (carbon top / white bottom)</option></select></div>
+    <div class="field"><label>Band colour</label>
+      <select id="s_bcol" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"><option value="grey">Grey</option><option value="white">White</option><option value="carbon">Carbon (dark grey)</option></select></div>
+    <label class="chk"><input type="checkbox" id="c_ghost"> See-through side bands</label>
+    <label class="chk"><input type="checkbox" id="c_edges" checked> Pleat edge lines</label>
+    <label class="chk"><input type="checkbox" id="c_grid" checked> Grid</label>
+    <label class="chk"><input type="checkbox" id="c_dims"> Show dimensions</label>
+    <div id="dimOpts" style="display:none;padding-left:22px">
+      <label class="chk"><input type="checkbox" id="c_dim_o" checked> Overall size</label>
+      <label class="chk"><input type="checkbox" id="c_dim_p" checked> Pleats &amp; media</label>
+      <label class="chk"><input type="checkbox" id="c_dim_b" checked> Bands &amp; flaps</label>
+      <label class="chk"><input type="checkbox" id="c_dim_x" checked> Foam, pull tab &amp; glue</label>
+    </div>
+    <div class="btns" style="margin-top:10px">
+      <button id="b_iso">Iso</button><button id="b_side">Side</button><button id="b_top">Top</button><button id="b_reset">Reset values</button><button id="b_stl">Export STL</button>
+    </div>
+  </div>
+  <div id="view">
+    <div id="canvasWrap"><div id="fvNote" hidden></div><div id="hint">Drag to rotate · Right-drag to pan · Scroll to zoom</div></div>
+    <div id="drawer" class="closed">
+      <div id="drawerBar">
+        <button id="d_sheet">Filter info sheet</button><button id="d_lib">Part library</button><button id="d_batch">Batch sheet</button><button id="d_export">Export</button>
+        <span class="sp"></span><span id="d_status" class="note"></span><button id="d_close">▾ Hide</button>
+      </div>
+      <div id="drawerBody">
+        <div id="pane_sheet">
+          <div class="row" style="gap:8px;margin-bottom:10px">
+            <button id="sh_add">+ Add row</button><button id="sh_copy">Copy as table (for Excel)</button>
+            <span class="note">Calculated rows update from the model. Saving a part saves this sheet with it.</span>
+          </div>
+          <div class="cols">
+            <table class="sheet" id="sheetInfo"></table>
+            <table class="sheet" id="sheetCalc"></table>
+          </div>
+        </div>
+        <div id="pane_batch" style="display:none"><div class="pane-head">
+          <div class="row" style="gap:8px;margin-bottom:6px;flex-wrap:wrap">
+            <button id="bt_template">Download batch sheet</button>
+            <button id="bt_export">Export saved parts to sheet</button>
+            <label class="tin" style="cursor:pointer">Import filled sheet… <input type="file" id="bt_file" accept=".xlsx,.xls,.csv" style="display:none"></label>
+          </div>
+          <div class="note">The batch sheet has one row per filter and one column per setting. Row 2 is filled in with the current filter as an example. Blank cells use the defaults; blank Side B / End B cells copy Side A / End A. A "Help" tab in the workbook lists the columns and allowed values.</div>
+          <div id="bt_msg" class="note"></div>
+          </div>
+          <div id="bt_list"></div>
+        </div>
+        <div id="pane_export" style="display:none"><div class="pane-head">
+          <div class="row" style="gap:14px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+            <span class="note">Export as</span>
+            <label class="chk" style="margin:0"><input type="checkbox" id="ex_stl" checked> STL (3D model, one file per part)</label>
+            <label class="chk" style="margin:0"><input type="checkbox" id="ex_xlsx"> Excel (batch sheet format)</label>
+            <button id="ex_go" style="margin-left:auto;border-color:#3fbf6a">Export selected</button>
+          </div>
+          <div class="row" style="gap:8px;margin-bottom:6px;align-items:center">
+            <input id="ex_find" class="tin" placeholder="Filter parts… (same search as the library, e.g. hepa pleats>25)" style="flex:1">
+            <button id="ex_all">Select shown</button><button id="ex_none">Clear selection</button>
+            <span id="ex_count" class="note"></span>
+          </div>
+          <div id="ex_msg" class="note"></div>
+          </div>
+          <div id="ex_list"></div>
+        </div>
+        <div id="pane_lib" style="display:none"><div class="pane-head">
+          <div class="row" style="gap:8px;margin-bottom:8px">
+            <input id="lib_pn" class="tin" placeholder="Part number" style="width:180px">
+            <button id="lib_save">Save current filter</button>
+            <button id="lib_new" title="Start a new filter with its own part number">+ New filter</button>
+            <button id="lib_copy" title="Copy groups of settings from one filter to others">Copy settings…</button>
+            <input id="lib_find" class="tin" placeholder="Search… e.g. AQ10   carbon   pleats>28   width:215   height 25-30   flagged" style="flex:1">
+          </div>
+          <div id="lib_filters"></div>
+          <div class="row" style="gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+            <button id="lf_addfilter">+ Filter by attribute</button>
+            <span class="note">Sort by</span><select id="lib_sort" class="tin"></select>
+            <button id="lib_sortdir" title="Reverse order">↑</button>
+            <span id="lib_count" class="note"></span>
+            <button id="lib_clearsearch" style="margin-left:auto">Clear search</button>
+          </div>
+          <div id="lib_msg" class="note"></div>
+          </div>
+          <div id="lib_list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'vendor/xlsx/xlsx.full.min.js' %}"></script>
+<script>window.FV_HOST = {"canEdit": {{ canEdit|yesno:"true,false" }}, "view": {{ view|yesno:"true,false" }}, "part": "{{ part|escapejs }}", "line": "{{ line|escapejs }}"};</script>
+<script src="{% static 'quality/fv-host.js' %}"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "{% static 'vendor/three/three.module.min.js' %}",
+  "three/addons/": "{% get_static_prefix %}vendor/three/addons/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const DEFAULTS = { ph:28, pc:28, pp:9.8, mw:215, mt:0.8, fr:0.5, fl:274.4, gn:3, gs:55, gd:2.5, gg:3, tg:40, tf:25, tw:20, tp:0, tv:0, ta:8, kh:6, kx:0, ky:0 };
+const BAND_DEFAULT = { sb:30, bt:1.5, ob:1, ot:1, scored:false, fx:8, fa:0, ends:'top',
+                       fold:false, ol:12, oa:90, fends:'top' };
+// Two band groups. side: A = front (+Z), B = back (-Z).  end: A = right (+X), B = left (-X).
+const GROUPS = {
+  side: { title:'Side bands', on:true,  label:'Side band', tabs:['Side A (front)','Side B (back)'], short:['Side A','Side B'], fold:false },
+  end:  { title:'End bands',  on:false, label:'End band',  tabs:['End A (right)','End B (left)'],  short:['End A','End B'],  fold:true  },
+};
+function resetGroups(){
+  for (const g of Object.values(GROUPS)){ g.bands = [ { ...BAND_DEFAULT }, { ...BAND_DEFAULT } ]; g.cur = 0; }
+}
+resetGroups();
+const $ = id => document.getElementById(id);
+const isSym = gk => $(gk + '_c_sym').checked;
+const isOn  = gk => $(gk + '_c_on').checked;
+
+const SEL = 'style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit"';
+const field = (gk, k, label, unit, min, max, step) => `
+    <div class="field"><label>${label} <span>${unit}</span></label>
+      <div class="row"><input type="range" id="${gk}_r_${k}" min="${min}" max="${max}" step="${step}"><input type="number" id="${gk}_n_${k}" step="${step}"></div></div>`;
+const edgeSelect = (id, label) => `
+    <div class="field"><label>${label}</label>
+      <select id="${id}" ${SEL}><option value="top">Top edge</option><option value="bottom">Bottom edge</option><option value="both">Top and bottom</option></select></div>`;
+function bandUI(gk){
+  const g = GROUPS[gk];
+  return `
+    <h2>${g.title}</h2>
+    <label class="chk"><input type="checkbox" id="${gk}_c_on" ${g.on ? 'checked' : ''}> Show ${g.title.toLowerCase()}</label>
+    <div id="${gk}_body">
+    <label class="chk"><input type="checkbox" id="${gk}_c_sym" checked> Symmetrical (same on both ${gk === 'side' ? 'sides' : 'ends'})</label>
+    <div id="${gk}_tabs" class="tabs"><button id="${gk}_t_0" class="on">${g.tabs[0]}</button><button id="${gk}_t_1">${g.tabs[1]}</button></div>
+    ${field(gk,'sb', g.label + ' height','mm',5,90,0.5)}
+    ${field(gk,'bt', g.label + ' thickness','mm',0.1,10,0.1)}
+    ${field(gk,'ob','Band offset below pleat bottom','mm',-10,20,0.1)}
+    ${field(gk,'ot','Band offset above pleat top','mm',-10,20,0.1)}
+    <div class="sub" style="margin:-4px 0 8px">Band height stays as set. Changing one offset slides the band and moves the other; each offset is limited to the band height. Changing band height moves the top offset. Negative offset = band ends inside the pleat.</div>
+    <label class="chk" style="margin-top:4px"><input type="checkbox" id="${gk}_c_scored"> Scored band (flap folds outward)</label>
+    <div id="${gk}_scoredOpts">
+    ${field(gk,'fx','Score flap length','mm',1,60,0.5)}
+    ${field(gk,'fa','Flap fold angle','°',0,90,1)}
+    ${edgeSelect(gk + '_s_ends','Flap on')}
+    </div>
+    ${g.fold ? `
+    <label class="chk" style="margin-top:4px"><input type="checkbox" id="${gk}_c_fold"> Fold over (folds inward onto the filter)</label>
+    <div id="${gk}_foldOpts">
+    ${field(gk,'ol','Fold-over length','mm',1,60,0.5)}
+    ${field(gk,'oa','Fold-over angle','°',0,90,1)}
+    ${edgeSelect(gk + '_s_fends','Fold over on')}
+    </div>` : ''}
+    </div>`;
+}
+$('ui_side').innerHTML = bandUI('side');
+$('ui_end').innerHTML = bandUI('end');
+const P = { ...DEFAULTS };
+
+// ---------- scene ----------
+const view = document.getElementById('canvasWrap');
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.3;
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b3240);
+const camera = new THREE.PerspectiveCamera(35, 1, 1, 10000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xdfe6f2, 0x30343c, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(300, 500, 250); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.5); fill.position.set(-300, 200, -300); scene.add(fill);
+
+let grid = null;
+// dimension overlay: lines drawn through the model, labels as HTML on top
+const dimsGroup = new THREE.Group(); scene.add(dimsGroup);
+const dimMat = new THREE.LineBasicMaterial({ color: 0x6fb6ff, depthTest: false, transparent: true });
+const labelRenderer = new CSS2DRenderer();
+Object.assign(labelRenderer.domElement.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none' });
+view.appendChild(labelRenderer.domElement);
+const filter = new THREE.Group();
+scene.add(filter);
+
+const mediaMat = new THREE.MeshStandardMaterial({ color:0x3b3d40, roughness:0.9, metalness:0, side:THREE.DoubleSide, flatShading:true });
+const bandMat  = new THREE.MeshStandardMaterial({ color:0x555a60, roughness:0.7, metalness:0, side:THREE.DoubleSide });
+
+const COLOURS = { carbon:0x3b3d40, white:0xe8e8e4, grey:0xa9adb3, hepa:0xe8e8e4 };
+// HEPA media is two layers: dark carbon on the top face of the filter, white particulate underneath
+const hepaCarbonMat = new THREE.MeshStandardMaterial({ color:0x2e3034, roughness:0.95, metalness:0, side:THREE.DoubleSide, flatShading:true });
+const hepaWhiteMat  = new THREE.MeshStandardMaterial({ color:0xeceae4, roughness:0.95, metalness:0, side:THREE.DoubleSide, flatShading:true });
+function applyLook(){
+  mediaMat.color.setHex(COLOURS[document.getElementById('s_mcol').value]);
+  bandMat.color.setHex(COLOURS[document.getElementById('s_bcol').value]);
+}
+
+// box UVs in millimetres (planar per face) so the fibre texture keeps a constant scale
+function mmUV(geo){
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++){
+    const ax = Math.abs(n.getX(i)), ay = Math.abs(n.getY(i)), az = Math.abs(n.getZ(i));
+    if (ax >= ay && ax >= az) uv.setXY(i, p.getZ(i), p.getY(i));
+    else if (ay >= az)        uv.setXY(i, p.getX(i), p.getZ(i));
+    else                      uv.setXY(i, p.getX(i), p.getY(i));
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+const edgeMat  = new THREE.LineBasicMaterial({ color:0x8a9099 });
+const scoreMat = new THREE.LineBasicMaterial({ color:0xffb454 });
+const glueMat  = new THREE.MeshStandardMaterial({ color:0xd9d6cc, roughness:0.35, metalness:0 });
+const foamMat  = new THREE.MeshStandardMaterial({ color:0x2f3034, roughness:1, metalness:0 });
+
+// ---------- inkjet ----------
+// Default date code: MMDDYY + shift
+{ const d = new Date(), z = n => String(n).padStart(2, '0');
+  document.getElementById('i_date').value = z(d.getMonth() + 1) + z(d.getDate()) + String(d.getFullYear()).slice(2) + ' 1'; }
+let inkCache = { key: '', tex: null, w: 0, h: 0 };
+// Lays out: PART  [date / country]  ARROW  LABEL  ARROW, like the print drawing.
+function inkjetTexture(o){
+  const key = JSON.stringify(o);
+  if (inkCache.key === key) return inkCache;
+  const S = 24;                                   // px per mm
+  const H = o.h * S;                              // main text height (px)
+  const big = `600 ${H}px Arial, Helvetica, sans-serif`;
+  const small = `400 ${H * 0.36}px Arial, Helvetica, sans-serif`;
+  const lab = `600 ${H * 0.62}px Arial, Helvetica, sans-serif`;
+  const m = document.createElement('canvas').getContext('2d');
+  const tw = (font, t) => { m.font = font; return m.measureText(t).width; };
+  const gap = H * 0.45, arrowW = H * 0.5;
+  const epa = String(o.epa || '').split(/\n|\|/).map(t => t.trim()).filter(Boolean);   // stacked lines
+  const word = String(o.word || '').trim(), wordF = `600 ${H * 0.82}px Arial, Helvetica, sans-serif`;
+  const epaF = `400 ${H * (epa.length > 2 ? 0.28 : 0.36)}px Arial, Helvetica, sans-serif`;
+  const wEpa = epa.length ? Math.max(...epa.map(t => tw(epaF, t))) : 0, wWord = word ? tw(wordF, word) : 0;
+  const wPart = tw(big, o.part), wSmall = Math.max(tw(small, o.date), tw(small, o.coo)), wLab = tw(lab, o.label);
+  const W = Math.ceil((wEpa ? wEpa + gap * 0.6 : 0) + wPart + gap + wSmall + gap + (wWord ? wWord + gap * 0.4 : 0) + arrowW + gap * 0.5 + wLab + gap * 0.5 + arrowW + 4);
+  const Hc = Math.ceil(H * 1.3);
+  const c = document.createElement('canvas'); c.width = W; c.height = Hc;
+  const g = c.getContext('2d');
+  g.fillStyle = '#16171a'; g.textBaseline = 'middle';
+  const cy = Hc / 2;
+  let x = 2;
+  if (epa.length){                               // EPA registration block, lines stacked and centred
+    g.font = epaF; const lh = H * (epa.length > 2 ? 0.3 : 0.4);
+    epa.forEach((t, i) => g.fillText(t, x + (wEpa - tw(epaF, t)) / 2, cy + (i - (epa.length - 1) / 2) * lh));
+    x += wEpa + gap * 0.6;
+  }
+  g.font = big; g.fillText(o.part, x, cy); x += wPart + gap;
+  g.font = small; g.fillText(o.date, x + (wSmall - tw(small, o.date)) / 2, cy - H * 0.22);
+  g.fillText(o.coo, x + (wSmall - tw(small, o.coo)) / 2, cy + H * 0.22); x += wSmall + gap;
+  if (word){ g.font = wordF; g.fillText(word, x, cy); x += wWord + gap * 0.4; }
+  const arrow = (ax) => {                        // filled arrow, shaft + head
+    const up = o.arrow === 'up', top = cy - H * 0.5, bot = cy + H * 0.5, cx = ax + arrowW / 2;
+    const tip = up ? top : bot, base = up ? bot : top, neck = up ? top + H * 0.42 : bot - H * 0.42;
+    g.beginPath();
+    g.moveTo(cx, tip); g.lineTo(ax, neck); g.lineTo(cx - arrowW * 0.16, neck); g.lineTo(cx - arrowW * 0.16, base);
+    g.lineTo(cx + arrowW * 0.16, base); g.lineTo(cx + arrowW * 0.16, neck); g.lineTo(ax + arrowW, neck); g.closePath(); g.fill();
+  };
+  arrow(x); x += arrowW + gap * 0.5;
+  g.font = lab; g.fillText(o.label, x, cy); x += wLab + gap * 0.5;
+  arrow(x);
+  if (inkCache.tex) inkCache.tex.dispose();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  inkCache = { key, tex, w: W / S, h: Hc / S };
+  return inkCache;
+}
+const inkMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+
+// ---------- foam strips ----------
+// Foam is only ever on the sides / ends: either one band face, or wrapped around all four.
+const FOAM_DEFAULT = { where:'all', w:10, t:6, off:0, len:0, pos:0, link:'', gap:'', gl:150, gp:0 };
+const GAPS = { '':'No gap', side0:'Side A (front)', side1:'Side B (back)', end0:'End A (right)', end1:'End B (left)' };
+const LINKS = { '':'Not linked', A:'Link group A', B:'Link group B', C:'Link group C', D:'Link group D' };
+let FOAMS = [];
+const WHERE = { all:'All around (sides + ends)', side0:'Side A (front)', side1:'Side B (back)', end0:'End A (right)', end1:'End B (left)' };
+const FOAM_FIELDS = {
+  w:   ['Foam width (height on band)', 'mm', 1, 60, 0.5],
+  t:   ['Foam thickness', 'mm', 0.5, 40, 0.5],
+  off: ['Height from band bottom', 'mm', -30, 60, 0.5],
+  len: ['Length (0 = full)', 'mm', 0, 600, 0.5],
+  pos: ['Position from centre', 'mm', -300, 300, 0.5],
+  gl:  ['Gap length', 'mm', 1, 600, 0.5],
+  gp:  ['Gap position from centre', 'mm', -300, 300, 0.5],
+};
+function foamCard(f, i){
+  const opt = (o, v) => Object.entries(o).map(([k, t]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${t}</option>`).join('');
+  const sel = (k, o) => `<select data-i="${i}" data-k="${k}" style="width:100%;background:#141821;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit">${opt(o, f[k])}</select>`;
+  const num = (k) => {
+    const d = FOAM_FIELDS[k];
+    return `<div class="field"><label>${d[0]} <span>${d[1]}</span></label>
+      <div class="row"><input type="range" data-i="${i}" data-k="${k}" min="${d[2]}" max="${d[3]}" step="${d[4]}" value="${f[k]}"><input type="number" data-i="${i}" data-k="${k}" step="${d[4]}" value="${f[k]}"></div></div>`;
+  };
+  return `<div class="foam"><div class="hd">Foam ${i + 1}<button data-del="${i}">Remove</button></div>
+    <div class="field"><label>Placed on</label>${sel('where', WHERE)}</div>
+    ${num('w')}${num('t')}${num('off')}
+    ${f.where === 'all' ? `<div class="field"><label>Gap on</label>${sel('gap', GAPS)}</div>` + (f.gap ? num('gl') + num('gp') + '<div class="sub" style="margin:-4px 0 4px">The foam on that side is left open for the gap length; the rest of the wrap and its corners stay.</div>' : '') : ''}
+    ${f.where !== 'all' ? `<div class="field"><label>Link</label>${sel('link', LINKS)}</div>` : ''}
+    ${f.where !== 'all' ? num('len') + (f.link ? '' : num('pos')) : ''}
+    ${f.link ? '<div class="sub" style="margin:-4px 0 4px">Linked strips share width, thickness and height, join at shared corners, and run from that corner. Length 0 = full.</div>' : ''}
+  </div>`;
+}
+function renderFoams(){ document.getElementById('foamList').innerHTML = FOAMS.map(foamCard).join(''); if (typeof applyNeeds === 'function') applyNeeds(); }
+
+function clearGroup(g){
+  g.traverse(o => { if (o !== g && o.geometry) o.geometry.dispose(); });
+  g.clear();
+}
+
+// ---------- pleat profile ----------
+// Centreline runs through rounded folds (radius rc = inside radius + t/2) joined by straight
+// flanks. The two media faces are the centreline offset by ±t/2, so every fold is a pair of
+// concentric arcs: inside radius r, outside radius r + t. Pleat height is the outer envelope.
+function pleatProfile(x0, yBot, L, ph, pc, pp, t, r){
+  const ARC_SEG = 10;
+  const yTop = yBot + ph;
+  let warn = '';
+  if (ph < 2 * (r + t)) warn = 'Pleat height is too small for this radius and thickness.';
+  const rc = r + t / 2;
+
+  // folds: interior vertices i = 1 .. 2pc-1 (odd = bottom, even = top); ends i = 0 and 2pc are cut ends (top)
+  const nodes = [];
+  for (let i = 0; i <= 2 * pc; i++){
+    const x = x0 + i * pp / 2;
+    if (i === 0 || i === 2 * pc) nodes.push({ end: true, top: true, c: [x, yTop - r - t], rad: rc });  // half fold, cut at filter end
+    else if (i % 2) nodes.push({ top: false, c: [x, yBot + r + t], rad: rc });
+    else            nodes.push({ top: true,  c: [x, yTop - r - t], rad: rc });
+  }
+
+  // tangent between consecutive nodes. Path leaves n1 at c1 + r1*u and reaches n2 at c2 - r2*u.
+  const segs = [];
+  for (let k = 0; k < nodes.length - 1; k++){
+    const n1 = nodes[k], n2 = nodes[k + 1];
+    const D = [n2.c[0] - n1.c[0], n2.c[1] - n1.c[1]];
+    const d = Math.hypot(D[0], D[1]);
+    const Dh = [D[0] / d, D[1] / d], Dp = [-Dh[1], Dh[0]];
+    let a = (n1.rad + n2.rad) / d;
+    if (a >= 0.999){ a = 0.999; warn = warn || 'Fold radius + thickness too large for this pitch.'; }
+    const descending = D[1] < 0;
+    const b = (descending ? 1 : -1) * Math.sqrt(1 - a * a);
+    const u = [a * Dh[0] + b * Dp[0], a * Dh[1] + b * Dp[1]];
+    const p1 = [n1.c[0] + n1.rad * u[0], n1.c[1] + n1.rad * u[1]];
+    const p2 = [n2.c[0] - n2.rad * u[0], n2.c[1] - n2.rad * u[1]];
+    segs.push({ p1, p2, u });
+  }
+
+  // walk the path for each face: s = +1 upper face, -1 lower face
+  function face(s){
+    const out = [];
+    for (let k = 0; k < nodes.length; k++){
+      const n = nodes[k];
+      // arrival point = c - rc*uin, departure = c + rc*uout
+      // end folds are cut vertically through the fold apex (x = filter end)
+      let th0 = k === 0 ? Math.PI / 2 : Math.atan2(-segs[k - 1].u[1], -segs[k - 1].u[0]);
+      let th1 = k === nodes.length - 1 ? Math.PI / 2 : Math.atan2(segs[k].u[1], segs[k].u[0]);
+      if (n.top){ while (th0 <= th1) th0 += 2 * Math.PI; }   // clockwise over the top
+      else      { while (th1 <= th0) th1 += 2 * Math.PI; }   // counter-clockwise under the bottom
+      const R = n.top ? rc + s * t / 2 : rc - s * t / 2;
+      for (let j = 0; j <= ARC_SEG; j++){
+        const th = th0 + (th1 - th0) * j / ARC_SEG;
+        out.push([n.c[0] + R * Math.cos(th), n.c[1] + R * Math.sin(th)]);
+      }
+    }
+    return out;
+  }
+  const upper = face(1), lower = face(-1), mid = face(0);
+  // the two halves of the media thickness, for two-layer (HEPA) media
+  const layers = { upper: upper.concat(mid.slice().reverse()), lower: mid.concat(lower.slice().reverse()) };
+  const outline = upper.concat(lower.reverse());
+
+  // centreline length and fold apex lines
+  let length = 0;
+  for (const sg of segs) length += Math.hypot(sg.p2[0] - sg.p1[0], sg.p2[1] - sg.p1[1]);
+  const apexes = [];
+  for (const k of [0, nodes.length - 1]){
+    const u = k === 0 ? segs[0].u : segs[segs.length - 1].u;
+    length += rc * Math.acos(Math.max(-1, Math.min(1, u[1])));   // half fold: apex to tangent point
+  }
+  for (let k = 1; k < nodes.length - 1; k++){
+    const n = nodes[k], uin = segs[k - 1].u, uout = segs[k].u;
+    const ang = Math.acos(Math.max(-1, Math.min(1, -(uin[0] * uout[0] + uin[1] * uout[1]))));
+    length += rc * ang;
+    apexes.push([n.c[0], n.top ? n.c[1] + r + t : n.c[1] - r - t]);
+  }
+  // included angle between flanks (from an interior flank)
+  const fs = segs[Math.min(1, segs.length - 1)];
+  const fdx = Math.abs(fs.p2[0] - fs.p1[0]), fdy = Math.abs(fs.p2[1] - fs.p1[1]);
+  const angle = 2 * Math.atan2(fdx, fdy) * 180 / Math.PI;
+
+  return { outline, apexes, length, angle, warn, layers };
+}
+
+// ---------- build ----------
+function build(){
+  clearGroup(filter);
+  applyLook();
+  const { ph, pc, pp, mw } = P;
+  const L = pc * pp;                       // filter length (X)
+  const W = mw;                            // media width (Z)
+  const y0 = 0;                            // pleat bottom at y=0; each band is offset from it
+  const x0 = -L / 2, z0 = -W / 2;
+  const edgesOf = v => v === 'both' ? [-1, 1] : v === 'bottom' ? [-1] : [1];   // +1 top, -1 bottom
+  const flapEndsOf = b => edgesOf(b.ends), foldEndsOf = b => edgesOf(b.fends);
+
+  // thick media profile with rounded folds (cut ends facing up)
+  const prof = pleatProfile(x0, y0, L, ph, pc, pp, P.mt, P.fr);
+  // media orientation: profile is built with the cut ends up; mirror it top-to-bottom for cut ends down
+  const cutDown = $('s_cutend').value === 'bottom';
+  if (cutDown){
+    prof.outline = prof.outline.map(([x, y]) => [x, y0 + ph - (y - y0)]);
+    for (const k of ['upper', 'lower']) prof.layers[k] = prof.layers[k].map(([x, y]) => [x, y0 + ph - (y - y0)]);
+    prof.apexes = prof.apexes.map(([x, y]) => [x, y0 + ph - (y - y0)]);
+  }
+  const extrude = (outline, mat) => {
+    const g = new THREE.ExtrudeGeometry(new THREE.Shape(outline.map(([x, y]) => new THREE.Vector2(x, y))), { depth: W, bevelEnabled: false, curveSegments: 1 });
+    g.translate(0, 0, z0);
+    filter.add(new THREE.Mesh(g, mat));
+  };
+  if ($('s_mcol').value === 'hepa'){
+    // carbon goes on whichever layer faces the top of the filter (the upper layer flips down when cut ends are on the bottom)
+    extrude(prof.layers.upper, cutDown ? hepaWhiteMat : hepaCarbonMat);
+    extrude(prof.layers.lower, cutDown ? hepaCarbonMat : hepaWhiteMat);
+  } else extrude(prof.outline, mediaMat);
+
+  // fold apex lines + end profiles
+  if (document.getElementById('c_edges').checked){
+    const lp = [];
+    for (const [x, y] of prof.apexes) lp.push(x,y,z0, x,y,z0+W);
+    const ol = prof.outline;
+    for (let i = 0; i < ol.length; i++){
+      const a = ol[i], b = ol[(i + 1) % ol.length];
+      for (const z of [z0, z0+W]) lp.push(a[0],a[1],z, b[0],b[1],z);
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+    filter.add(new THREE.LineSegments(lg, edgeMat));
+  }
+
+  // glue beads: strands running across the pleat tips, centred across the width.
+  // Each bead rests on the fold tips and dips into the gap between them.
+  const glueOn = document.getElementById('c_glue').checked;
+  let glueWarn = '';
+  if (glueOn){
+    const gSel = document.getElementById('s_glue').value;
+    const faces = gSel === 'both' ? [1, -1] : gSel === 'bottom' ? [-1] : [1];
+    const n = P.gn, rad = P.gd / 2, dip = Math.min(P.gg, ph * 0.8);
+    const span = (n - 1) * P.gs + P.gd;
+    if (span > W) glueWarn = 'Glue beads (' + fmt(span) + ' mm) are wider than the media.';
+    const SEG = 12;
+    for (const f of faces){
+      for (let j = 0; j < n; j++){
+        const z = (j - (n - 1) / 2) * P.gs;
+        const pts = [];
+        for (let i = 0; i <= pc * SEG; i++){
+          const x = x0 + i * pp / SEG;
+          const frac = (x - x0) / pp - ((f > 0) !== cutDown ? 0 : 0.5);   // 0 at a fold tip on this face
+          const sag = dip * (1 - Math.cos(2 * Math.PI * frac)) / 2;
+          const y = f > 0 ? ph + rad * 0.6 - sag : -rad * 0.6 + sag;
+          pts.push(new THREE.Vector3(x, y, z));
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const tg = new THREE.TubeGeometry(curve, pts.length * 2, rad, 8, false);
+        filter.add(new THREE.Mesh(tg, glueMat));
+        for (const end of [0, 1]){                                   // round caps
+          const cap = new THREE.Mesh(new THREE.SphereGeometry(rad, 10, 8), glueMat);
+          cap.position.copy(pts[end ? pts.length - 1 : 0]);
+          filter.add(cap);
+        }
+      }
+    }
+  }
+  document.getElementById('glueOpts').style.display = glueOn ? '' : 'none';
+
+  // ---- bands ----
+  const ghost = $('c_ghost').checked;
+  bandMat.transparent = ghost; bandMat.opacity = ghost ? 0.25 : 1; bandMat.depthWrite = !ghost; bandMat.needsUpdate = true;
+  const sideOn = isOn('side'), endOn = isOn('end');
+  const SB = GROUPS.side.bands, EB = GROUPS.end.bands;
+  const sideT = [sideOn ? SB[0].bt : 0, sideOn ? SB[1].bt : 0];       // thickness at +Z, -Z
+  const deg = THREE.MathUtils.degToRad;
+
+  // One band panel. Local frame: u = along the band, v = up, w = outward normal.
+  // Band lies on the plane w = 0 (inner face) .. w = bt (outer face).
+  // place(obj) maps the local frame into the world for this band.
+  const tabOn = $('c_tab').checked, tabAt = $('s_tabon').value;
+  let tabDrawn = false, tabWarn = '';
+  const inkOn = $('c_ink').checked, inkAt = $('s_inkon').value;
+  let inkDrawn = false;
+  function addPanel(b, len, place, id){
+    const yb = -b.ob, yt = ph + b.ot, h = yt - yb;
+    if (h <= 0) return;
+    const root = new THREE.Group();
+    const add = (geo, parent, pos) => {
+      const m = new THREE.Mesh(mmUV(geo), bandMat); m.position.copy(pos); parent.add(m);
+      const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat); e.position.copy(pos); parent.add(e);
+    };
+    add(new THREE.BoxGeometry(len, h, b.bt), root, new THREE.Vector3(0, (yb + yt) / 2, b.bt / 2));
+    // extension hinged on the top/bottom edge; dir = +1 folds outward, -1 folds inward
+    const hinge = (edge, length, angle, dir) => {
+      const yh = edge > 0 ? yt : yb;
+      const hg = new THREE.Group();
+      hg.position.set(0, yh, dir > 0 ? b.bt : 0);                 // hinge on the face it folds toward
+      hg.rotation.x = edge * dir * deg(angle);                      // +w is outward
+      add(new THREE.BoxGeometry(len, length, b.bt), hg, new THREE.Vector3(0, edge * length / 2, dir > 0 ? -b.bt / 2 : b.bt / 2));
+      root.add(hg);
+      const sl = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-len / 2, yh, b.bt + 0.05), new THREE.Vector3(len / 2, yh, b.bt + 0.05)]);
+      root.add(new THREE.Line(sl, scoreMat));
+    };
+    if (b.scored) for (const e of flapEndsOf(b)) hinge(e, b.fx, b.fa, 1);
+    if (b.fold)   for (const e of foldEndsOf(b)) hinge(e, b.ol, b.oa, -1);
+
+    // pull tab: strip glued to the outer face, then a free length running off past the junction
+    if (tabOn && tabAt === id){
+      tabDrawn = true;
+      const TT = 0.6;                                           // tab strip thickness
+      const dir = +$('s_tabdir').value;
+      const uj = dir * (len / 2 - P.tp);                        // where the tab leaves the band
+      const yc = (yb + yt) / 2 + P.tv;
+      if (P.tw > h) tabWarn = 'Pull tab is wider than the band height.';
+      if (P.tp > len) tabWarn = 'Pull tab position is past the end of the band.';
+      add(new THREE.BoxGeometry(P.tg, P.tw, TT), root, new THREE.Vector3(uj - dir * P.tg / 2, yc, b.bt + TT / 2));
+      if (P.tf > 0){
+        const fg = new THREE.Group();
+        fg.position.set(uj, yc, b.bt);
+        fg.rotation.y = dir * deg(P.ta);                        // bends inward, toward the filter
+        add(new THREE.BoxGeometry(P.tf, P.tw, TT), fg, new THREE.Vector3(dir * P.tf / 2, 0, TT / 2));
+        root.add(fg);
+      }
+    }
+    // inkjet print on the outer face
+    if (inkOn && inkAt === id){
+      inkDrawn = true;
+      const ink = inkjetTexture({ part: $('i_part').value, date: $('i_date').value, coo: $('i_coo').value, epa: $('i_epa').value, word: $('i_word').value,
+        arrow: $('s_arrow').value, label: $('s_inklabel').value, h: P.kh });
+      inkMat.map = ink.tex; inkMat.needsUpdate = true;
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(ink.w, ink.h), inkMat);
+      pl.userData.noExport = true;
+      pl.position.set(P.kx, (yb + yt) / 2 + P.ky, b.bt + 0.05);
+      if ($('s_orient').value === 'down') pl.rotation.z = Math.PI;
+      root.add(pl);
+    }
+    place(root);
+    filter.add(root);
+  }
+
+  // side bands: Side A at +Z (front), Side B at -Z (back); run the pleat-pack length
+  if (sideOn){
+    addPanel(SB[0], L, r => { r.position.z =  W / 2; }, 'side0');
+    addPanel(SB[1], L, r => { r.position.z = -W / 2; r.rotation.y = Math.PI; }, 'side1');
+  }
+  // end bands: End A at +X (right), End B at -X (left); span the media plus side bands
+  if (endOn){
+    const span = W + sideT[0] + sideT[1], zc = (sideT[0] - sideT[1]) / 2;
+    addPanel(EB[0], span, r => { r.position.set( L / 2, 0, zc); r.rotation.y =  Math.PI / 2; }, 'end0');
+    addPanel(EB[1], span, r => { r.position.set(-L / 2, 0, zc); r.rotation.y = -Math.PI / 2; }, 'end1');
+  }
+
+  const active = [...(sideOn ? SB : []), ...(endOn ? EB : [])];
+  const minY = Math.min(0, ...active.map(b => -b.ob));
+  const maxY = Math.max(ph, ...active.map(b => ph + b.ot));
+
+  // ---- foam wrapped around all four sides (band outer faces), corners closed ----
+  const ox0 = -L / 2 - (endOn ? EB[1].bt : 0), ox1 = L / 2 + (endOn ? EB[0].bt : 0);
+  const oz0 = -W / 2 - sideT[1],               oz1 = W / 2 + sideT[0];
+  let foamWarn = '', foamOut = 0;
+  const foamBox = (x0, x1, y0, y1, z0, z1) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0), foamMat);
+    m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    filter.add(m);
+  };
+  // single-face strips, in world coordinates
+  const FACE = {
+    side0: { on: sideOn, yb: -SB[0].ob, along: 'x', normal: oz1, sgn:  1 },
+    side1: { on: sideOn, yb: -SB[1].ob, along: 'x', normal: oz0, sgn: -1 },
+    end0:  { on: endOn,  yb: -EB[0].ob, along: 'z', normal: ox1, sgn:  1 },
+    end1:  { on: endOn,  yb: -EB[1].ob, along: 'z', normal: ox0, sgn: -1 },
+  };
+  const range = { x: [ox0, ox1], z: [oz0, oz1] };
+  const isSide = id => id.startsWith('side');
+  const partnersOf = f => f.link ? FOAMS.filter(p => p !== f && p.link === f.link && p.where !== 'all' && isSide(p.where) !== isSide(f.where) && FACE[p.where].on) : [];
+  // the slab occupying [n0, n1] outward from a face, [a0, a1] along it, [y0, y1] high
+  const slab = (id, a0, a1, y0, y1, t) => {
+    const F = FACE[id], n0 = F.sgn > 0 ? F.normal : F.normal - t, n1 = n0 + t;
+    if (F.along === 'x') foamBox(a0, a1, y0, y1, n0, n1); else foamBox(n0, n1, y0, y1, a0, a1);
+  };
+  const cornersDone = new Set();
+  for (const f of FOAMS){
+    if (f.where === 'all') continue;
+    const F = FACE[f.where];
+    if (!F.on){ foamWarn = 'Foam on ' + WHERE[f.where] + ': turn on that band to show it.'; continue; }
+    const [lo, hi] = range[F.along];
+    const y0 = F.yb + f.off, y1 = y0 + f.w;
+    const ends = [...new Set(partnersOf(f).map(p => FACE[p.where].normal))];   // corner positions along this face
+    let a0, a1;
+    if (ends.length >= 2){ a0 = lo; a1 = hi; }
+    else if (ends.length === 1){
+      const ln = f.len > 0 ? Math.min(f.len, hi - lo) : hi - lo;
+      if (ends[0] >= hi) { a0 = hi - ln; a1 = hi; } else { a0 = lo; a1 = lo + ln; }
+    } else {
+      const ln = f.len > 0 ? f.len : hi - lo, c = (lo + hi) / 2 + f.pos;
+      a0 = c - ln / 2; a1 = c + ln / 2;
+    }
+    slab(f.where, a0, a1, y0, y1, f.t);
+    // fill the outside corner with each linked partner
+    for (const p of partnersOf(f)){
+      const key = [f.where, p.where].sort().join() + f.link;
+      if (cornersDone.has(key)) continue;
+      cornersDone.add(key);
+      const S = isSide(f.where) ? f : p, E = S === f ? p : f;
+      const FS = FACE[S.where], FE = FACE[E.where];
+      const x0 = FE.sgn > 0 ? FE.normal : FE.normal - E.t, z0 = FS.sgn > 0 ? FS.normal : FS.normal - S.t;
+      foamBox(x0, x0 + E.t, y0, y1, z0, z0 + S.t);
+    }
+  }
+  for (const f of FOAMS){
+    if (f.where !== 'all') continue;
+    foamOut = Math.max(foamOut, f.t);
+    const y0 = minY + f.off, y1 = y0 + f.w, t = f.t;
+    // run [a0, a1] along a face, minus the gap if this face has one
+    const runs = (face, a0, a1, mid) => {
+      if (f.gap !== face || !(f.gl > 0)) return [[a0, a1]];
+      const g0 = mid + f.gp - f.gl / 2, g1 = mid + f.gp + f.gl / 2;
+      return [[a0, Math.min(a1, g0)], [Math.max(a0, g1), a1]].filter(([p, q]) => q - p > 0.01);
+    };
+    const mx = (ox0 + ox1) / 2, mz = (oz0 + oz1) / 2;
+    for (const [p, q] of runs('side0', ox0 - t, ox1 + t, mx)) foamBox(p, q, y0, y1, oz1, oz1 + t);   // front
+    for (const [p, q] of runs('side1', ox0 - t, ox1 + t, mx)) foamBox(p, q, y0, y1, oz0 - t, oz0);   // back
+    for (const [p, q] of runs('end0', oz0, oz1, mz)) foamBox(ox1, ox1 + t, y0, y1, p, q);            // right
+    for (const [p, q] of runs('end1', oz0, oz1, mz)) foamBox(ox0 - t, ox0, y0, y1, p, q);            // left
+  }
+
+  // ---- dimensions ----
+  dimsGroup.traverse(o => { if (o !== dimsGroup && o.geometry) o.geometry.dispose(); });
+  dimsGroup.clear();
+  const dimsOn = $('c_dims').checked;
+  $('dimOpts').style.display = dimsOn ? '' : 'none';
+  if (dimsOn){
+    const V = (x, y, z) => new THREE.Vector3(x, y, z);
+    const D = Math.max(L, W) * 0.07, segs = [];
+    const label = (pos, html) => {
+      const el = document.createElement('div'); el.className = 'dimlbl'; el.innerHTML = html;
+      const o = new CSS2DObject(el); o.position.copy(pos); dimsGroup.add(o);
+    };
+    // dimension between a and b, pushed out along dir by off, with extension lines and tick marks
+    const dim = (a, b, dir, off, value, name) => {
+      const A = a.clone().addScaledVector(dir, off), B = b.clone().addScaledVector(dir, off);
+      const e = D * 0.15, along = B.clone().sub(A).normalize(), tick = along.clone().add(dir).normalize().multiplyScalar(D * 0.12);
+      segs.push(a, A.clone().addScaledVector(dir, e), b, B.clone().addScaledVector(dir, e), A, B,
+                A.clone().sub(tick), A.clone().add(tick), B.clone().sub(tick), B.clone().add(tick));
+      label(A.clone().add(B).multiplyScalar(0.5), `<b>${fmt(value, 2)}</b> ${name}`);
+    };
+    const leader = (p, dir, html) => { const q = p.clone().addScaledVector(dir.clone().normalize(), D); segs.push(p, q); label(q, html); };
+    const up = V(0, 1, 0), px = V(1, 0, 0), nx = V(-1, 0, 0), pz = V(0, 0, 1), nz = V(0, 0, -1);
+    const SBa = SB[0], EBa = EB[0];
+
+    if ($('c_dim_o').checked){
+      // outside of the foam, where there is any
+      const ft = k => Math.max(0, ...FOAMS.filter(f => f.where === 'all' || (f.where === k && FACE[k].on)).map(f => f.t));
+      const X0 = ox0 - ft('end1'), X1 = ox1 + ft('end0'), Z0 = oz0 - ft('side1'), Z1 = oz1 + ft('side0');
+      dim(V(X0, minY, Z1), V(X1, minY, Z1), pz, D * 1.4, X1 - X0, 'overall length');
+      dim(V(X1, minY, Z0), V(X1, minY, Z1), px, D * 1.4, Z1 - Z0, 'overall width');
+      dim(V(ox1, minY, oz0), V(ox1, maxY, oz0), px, D * 0.8, maxY - minY, 'filter height');
+    }
+    if ($('c_dim_p').checked){
+      dim(V(x0, maxY, oz1), V(x0 + L, maxY, oz1), up, D * 1.7, L, `pleat pack (${pc} × ${fmt(pp, 3)})`);
+      dim(V(ox0, ph, z0), V(ox0, ph, z0 + W), nx, D * 1.2, W, 'media width');
+      dim(V(ox0, 0, oz1), V(ox0, ph, oz1), nx, D * 0.8, ph, 'pleat height');
+      const xa = x0 + L - (cutDown ? 1.5 : 2) * pp;          // last full pitch at the right-hand end
+      dim(V(xa, ph, oz1), V(xa + pp, ph, oz1), up, D * 0.45, pp, 'pitch');
+      leader(V(x0 + L * 0.62, ph, 0), V(0.3, 1, 0), `<b>${pc}</b> pleats · <b>${fmt(P.mt, 2)}</b> thick · r <b>${fmt(P.fr, 2)}</b>`);
+    }
+    if ($('c_dim_b').checked){
+      if (sideOn){
+        const xs = L * 0.3;
+        dim(V(xs, -SBa.ob, oz1), V(xs, ph + SBa.ot, oz1), pz, D * 0.6, SBa.sb, 'side band');
+        leader(V(L * 0.12, ph + SBa.ot, W / 2 + SBa.bt / 2), V(0, 0.7, 1), `side band <b>${fmt(SBa.bt, 2)}</b> thick`);
+        if (!isSym('side')) dim(V(-xs, -SB[1].ob, oz0), V(-xs, ph + SB[1].ot, oz0), nz, D * 0.6, SB[1].sb, 'side band B');
+        for (const [i, b] of SB.entries()) if (b.scored) for (const e of flapEndsOf(b))
+          leader(V(L * 0.1, e > 0 ? ph + b.ot : -b.ob, (i ? -1 : 1) * (W / 2 + b.bt)), V(0, e, i ? -1 : 1), `score flap <b>${fmt(b.fx, 2)}</b> @ ${fmt(b.fa, 0)}°`);
+      }
+      if (endOn){
+        const zz = -W * 0.25;
+        dim(V(ox1, -EBa.ob, zz), V(ox1, ph + EBa.ot, zz), px, D * 0.6, EBa.sb, 'end band');
+        leader(V(L / 2 + EBa.bt / 2, ph + EBa.ot, W * 0.3), V(0.6, 1, 0), `end band <b>${fmt(EBa.bt, 2)}</b> thick`);
+        if (!isSym('end')) dim(V(ox0, -EB[1].ob, zz), V(ox0, ph + EB[1].ot, zz), nx, D * 0.6, EB[1].sb, 'end band B');
+        for (const [i, b] of EB.entries()){
+          const sx = i ? -1 : 1;
+          if (b.fold) for (const e of foldEndsOf(b)) leader(V(sx * (L / 2 - Math.min(b.ol, L / 2) / 2), e > 0 ? ph + b.ot : -b.ob, W * 0.1), V(0, e, 0), `fold-over <b>${fmt(b.ol, 2)}</b>`);
+          if (b.scored) for (const e of flapEndsOf(b)) leader(V(sx * (L / 2 + b.bt), e > 0 ? ph + b.ot : -b.ob, 0), V(sx, e, 0), `score flap <b>${fmt(b.fx, 2)}</b> @ ${fmt(b.fa, 0)}°`);
+        }
+      }
+    }
+    if ($('c_dim_x').checked){
+      for (const f of FOAMS){
+        const y = minY + f.off + f.w / 2, txt = `foam <b>${fmt(f.w, 2)}</b> wide × <b>${fmt(f.t, 2)}</b> thick`;
+        if (f.where === 'all') leader(V(-L * 0.3, y, oz1 + f.t), V(0, -1, 1), txt + (f.gap ? ` · gap <b>${fmt(f.gl, 2)}</b>` : ''));
+        else {
+          const F = FACE[f.where]; if (!F || !F.on) continue;
+          const n = F.normal + F.sgn * f.t, yy = F.yb + f.off + f.w / 2;
+          if (F.along === 'x') leader(V(f.link ? 0 : f.pos, yy, n), V(0, -0.5, F.sgn), txt);
+          else leader(V(n, yy, f.link ? 0 : f.pos), V(F.sgn, -0.5, 0), txt);
+        }
+      }
+      if (glueOn){
+        const faces = $('s_glue').value === 'both' ? [1, -1] : $('s_glue').value === 'bottom' ? [-1] : [1];
+        const yg = faces[0] > 0 ? ph : 0, z0b = -(P.gn - 1) / 2 * P.gs;
+        if (P.gn > 1) dim(V(x0 + L, yg, z0b), V(x0 + L, yg, z0b + P.gs), px, D * 0.5, P.gs, 'bead spacing');
+        leader(V(x0 + L * 0.2, yg, z0b), V(0, faces[0], 0), `<b>${P.gn}</b> glue beads Ø<b>${fmt(P.gd, 2)}</b>`);
+      }
+      if (tabOn && tabDrawn){
+        const id = tabAt, dir = +$('s_tabdir').value, span = W + sideT[0] + sideT[1];
+        const g = id.startsWith('side') ? SB[+id.slice(-1)] : EB[+id.slice(-1)];
+        const yc = (ph + g.ot - g.ob) / 2 + P.tv;
+        const pos = id === 'side0' ? V(dir * (L / 2 - P.tp), yc, W / 2 + g.bt) : id === 'side1' ? V(-dir * (L / 2 - P.tp), yc, -(W / 2 + g.bt))
+                  : id === 'end0' ? V(L / 2 + g.bt, yc, -dir * (span / 2 - P.tp)) : V(-(L / 2 + g.bt), yc, dir * (span / 2 - P.tp));
+        const out = id === 'side0' ? pz : id === 'side1' ? nz : id === 'end0' ? px : nx;
+        leader(pos, out.clone().add(up), `pull tab <b>${fmt(P.tg, 2)}</b> glued + <b>${fmt(P.tf, 2)}</b> free × <b>${fmt(P.tw, 2)}</b> wide`);
+      }
+    }
+    if (segs.length){
+      const lg = new THREE.BufferGeometry().setFromPoints(segs);
+      const ls = new THREE.LineSegments(lg, dimMat); ls.renderOrder = 999; dimsGroup.add(ls);
+    }
+  }
+
+  // grid
+  if (grid){ scene.remove(grid); grid.geometry.dispose(); grid = null; }
+  if (document.getElementById('c_grid').checked){
+    const size = Math.ceil(Math.max(L, W) * 1.6 / 50) * 50;
+    grid = new THREE.GridHelper(size, size / 10, 0x4a5366, 0x353c4b);
+    grid.position.y = minY - 0.2;
+    scene.add(grid);
+  }
+
+  // readouts
+  const angle = prof.angle;
+  const mediaLen = prof.length;
+  const flapOut = b => b.scored ? b.fx * Math.sin(deg(b.fa)) : 0;
+  const blank = b => fmt(b.sb + (b.scored ? flapEndsOf(b).length * b.fx : 0) + (b.fold ? foldEndsOf(b).length * b.ol : 0));
+  const pair = (gk) => { const bb = GROUPS[gk].bands; return (isSym(gk) ? blank(bb[0]) : 'A ' + blank(bb[0]) + ' / B ' + blank(bb[1])) + ' mm'; };
+  // foam thickness standing proud of each face
+  const fT = { side0:0, side1:0, end0:0, end1:0 };
+  for (const f of FOAMS) for (const k of Object.keys(fT))
+    if (f.where === 'all' || (f.where === k && FACE[k].on)) fT[k] = Math.max(fT[k], f.t);
+  const out = (on, b, k) => (on ? b.bt : 0) + Math.max(on ? flapOut(b) : 0, fT[k]);
+  set('o_wid',  fmt(W + out(sideOn, SB[0], 'side0') + out(sideOn, SB[1], 'side1')) + ' mm');
+  set('o_olen', fmt(L + out(endOn,  EB[0], 'end0')  + out(endOn,  EB[1], 'end1'))  + ' mm');
+  set('o_blank', sideOn ? pair('side') : '–');
+  set('o_eblank', pair('end'));
+  $('row_eblank').style.display = endOn ? '' : 'none';
+  for (const gk of ['side', 'end']){
+    const g = GROUPS[gk], b = g.bands[g.cur];
+    $(gk + '_body').style.display = isOn(gk) ? '' : 'none';
+    $(gk + '_scoredOpts').style.display = b.scored ? '' : 'none';
+    if (g.fold) $(gk + '_foldOpts').style.display = b.fold ? '' : 'none';
+  }
+  set('o_hgt', fmt(maxY - minY) + ' mm');
+  set('o_ang', fmt(angle, 1) + '°');
+  set('o_mlen', fmt(mediaLen) + ' mm');
+  set('o_area', fmt(mediaLen * W / 1e6, 4) + ' m²');
+  const bandWarn = [];
+  for (const gk of ['side', 'end']){
+    if (!isOn(gk)) continue;
+    const g = GROUPS[gk];
+    g.bands.forEach((b, i) => {
+      if (isSym(gk) && i) return;
+      const n = isSym(gk) ? g.label : g.short[i];
+      if (b.sb <= 0) bandWarn.push(n + ': offsets leave no band height.');
+      else if (b.ob < 0 || b.ot < 0) bandWarn.push(n + ' does not cover the full pleat height.');
+    });
+  }
+  if (tabOn && !tabDrawn) tabWarn = 'Pull tab: turn on the ' + (tabAt.startsWith('end') ? 'end' : 'side') + ' bands to show it.';
+  $('tabOpts').style.display = tabOn ? '' : 'none';
+  $('inkOpts').style.display = inkOn ? '' : 'none';
+  const inkWarn = inkOn && !inkDrawn ? 'Inkjet: turn on the ' + (inkAt.startsWith('end') ? 'end' : 'side') + ' bands to show it.' : '';
+  $('warn').textContent = prof.warn || glueWarn || tabWarn || foamWarn || inkWarn || bandWarn.join(' ');
+  if (typeof afterBuild === 'function') afterBuild();
+  return { L, W };
+}
+
+const set = (id, v) => document.getElementById(id).textContent = v;
+const fmt = (v, d = 1) => Number(v.toFixed(d)).toString();
+
+// ---------- camera ----------
+function frame(dir){
+  const { L, W } = { L: P.pc * P.pp, W: P.mw };
+  const r = Math.max(L, W, P.ph) * 1.25;
+  const c = new THREE.Vector3(0, P.ph / 2, 0);
+  const d = { iso:[1, 0.85, 1.15], side:[0, 0.05, 1], top:[0, 1, 0.0001] }[dir];
+  camera.position.copy(c).add(new THREE.Vector3(...d).normalize().multiplyScalar(r * 1.6));
+  controls.target.copy(c);
+  controls.update();
+}
+
+// ---------- inputs ----------
+const keys = ['ph','pc','pp','mw','mt','fr','fl','gn','gs','gd','gg','tg','tf','tw','tp','tv','ta','kh','kx','ky'];
+const bandKeys = ['sb','bt','ob','ot','fx','fa','ol','oa'];
+const hasKey = (gk, k) => !!$(gk + '_r_' + k);
+const targets = gk => isSym(gk) ? [0, 1] : [GROUPS[gk].cur];
+function syncInputs(){
+  for (const k of keys){
+    $('r_' + k).value = P[k];
+    $('n_' + k).value = P[k];
+  }
+  for (const gk of ['side', 'end']){
+    const g = GROUPS[gk], b = g.bands[g.cur];
+    for (const k of bandKeys){
+      if (!hasKey(gk, k)) continue;
+      if (k === 'ob' || k === 'ot'){               // offsets range: band must still touch the pleat pack
+        for (const t of ['r', 'n']){ const el = $(gk + '_' + t + '_' + k); el.min = -P.ph; el.max = b.sb; }
+      }
+      $(gk + '_r_' + k).value = b[k];
+      $(gk + '_n_' + k).value = b[k];
+    }
+    $(gk + '_c_scored').checked = b.scored;
+    $(gk + '_s_ends').value = b.ends;
+    if (g.fold){ $(gk + '_c_fold').checked = b.fold; $(gk + '_s_fends').value = b.fends; }
+    $(gk + '_tabs').style.display = isSym(gk) ? 'none' : '';
+    for (const i of [0, 1]) $(gk + '_t_' + i).classList.toggle('on', i === g.cur);
+  }
+}
+// keep the band height; clamp the offset that was set (key) to [-pleat height, band height] and derive the other
+function fitBand(b, key){
+  const other = key === 'ob' ? 'ot' : 'ob';
+  b[key] = +Math.min(b.sb, Math.max(-P.ph, b[key])).toFixed(2);
+  b[other] = +(b.sb - P.ph - b[key]).toFixed(2);
+}
+const valid = (k, v) => (k === 'tv' || k === 'kx' || k === 'ky') ? true : (k === 'fr' || k === 'fa' || k === 'oa' || k === 'gg' || k === 'tf' || k === 'tp' || k === 'ta') ? v >= 0 : (k === 'ob' || k === 'ot') ? true : v > 0;
+function bindPair(r, n, apply){
+  r.addEventListener('input', () => apply(r.value));
+  n.addEventListener('change', () => apply(n.value));
+}
+for (const k of keys){
+  bindPair($('r_' + k), $('n_' + k), v => {
+    v = parseFloat(v);
+    if (!isFinite(v) || !valid(k, v)) return;
+    if (k === 'pc' || k === 'gn') v = Math.max(1, Math.round(v));
+    P[k] = v;
+    if (k === 'ph') for (const g of Object.values(GROUPS)) for (const b of g.bands) fitBand(b, 'ob');   // band heights stay, offsets follow
+    // filter length = count x pitch
+    const locked = $('c_lock').checked;
+    if (k === 'fl' || (locked && k === 'pc')) P.pp = +(P.fl / P.pc).toFixed(3);
+    else if (locked && k === 'pp'){ P.pc = Math.max(1, Math.round(P.fl / P.pp)); P.pp = +(P.fl / P.pc).toFixed(3); }
+    P.fl = +(P.pc * P.pp).toFixed(2);
+    syncInputs(); build();
+  });
+}
+for (const gk of ['side', 'end']){
+  const g = GROUPS[gk];
+  for (const k of bandKeys){
+    if (!hasKey(gk, k)) continue;
+    bindPair($(gk + '_r_' + k), $(gk + '_n_' + k), v => {
+      v = parseFloat(v);
+      if (!isFinite(v) || !valid(k, v)) return;
+      for (const t of targets(gk)){
+        const b = g.bands[t];
+        b[k] = v;
+        // keep band height = pleat height + bottom offset + top offset
+        // band height is fixed by the blank: an offset slides the band, the other offset follows
+        if (k === 'sb') fitBand(b, 'ob');
+        else if (k === 'ob' || k === 'ot') fitBand(b, k);
+      }
+      syncInputs(); build();
+    });
+  }
+  const onBand = (id, prop, read) => $(id).addEventListener('change', e => {
+    for (const t of targets(gk)) g.bands[t][prop] = read(e.target); build();
+  });
+  onBand(gk + '_c_scored', 'scored', el => el.checked);
+  onBand(gk + '_s_ends', 'ends', el => el.value);
+  if (g.fold){
+    onBand(gk + '_c_fold', 'fold', el => el.checked);
+    onBand(gk + '_s_fends', 'fends', el => el.value);
+  }
+  $(gk + '_c_sym').addEventListener('change', e => {
+    if (e.target.checked) g.bands[1 - g.cur] = { ...g.bands[g.cur] };   // both take the one currently shown
+    syncInputs(); build();
+  });
+  for (const i of [0, 1]) $(gk + '_t_' + i).onclick = () => { g.cur = i; syncInputs(); build(); };
+  $(gk + '_c_on').addEventListener('change', build);
+}
+for (const id of ['c_dims','c_dim_o','c_dim_p','c_dim_b','c_dim_x','s_cutend','s_mcol','s_bcol','s_glue','c_glue','c_ghost','c_edges','c_grid','c_tab','s_tabon','s_tabdir','c_ink','s_inkon','s_arrow','s_inklabel','s_orient'])
+  $(id).addEventListener('change', build);
+for (const id of ['i_part','i_date','i_coo','i_epa','i_word'])
+  $(id).addEventListener('input', build);
+document.getElementById('b_iso').onclick = () => frame('iso');
+document.getElementById('b_side').onclick = () => frame('side');
+document.getElementById('b_top').onclick = () => frame('top');
+// foam list events
+$('b_foam_add').onclick = () => { FOAMS.push({ ...FOAM_DEFAULT }); renderFoams(); build(); };
+$('foamList').addEventListener('click', e => {
+  const d = e.target.dataset.del;
+  if (d !== undefined){ FOAMS.splice(+d, 1); renderFoams(); build(); }
+});
+const foamEdit = e => {
+  const el = e.target, i = el.dataset.i, k = el.dataset.k;
+  if (i === undefined) return;
+  const f = FOAMS[+i];
+  if (el.tagName === 'SELECT'){
+    f[k] = el.value;
+    if (f.where === 'all') f.link = '';
+    if (k === 'link' && f.link){                               // join a group: take its size
+      const m = FOAMS.find(o => o !== f && o.link === f.link);
+      if (m){ f.w = m.w; f.t = m.t; f.off = m.off; }
+    }
+    renderFoams(); build(); return;
+  }
+  const v = parseFloat(el.value);
+  if (!isFinite(v)) return;
+  if ((k === 'w' || k === 't') && v <= 0) return;
+  if (k === 'len' && v < 0) return;
+  if (k === 'gl' && v <= 0) return;
+  f[k] = v;
+  const shared = f.link && (k === 'w' || k === 't' || k === 'off');
+  if (shared) for (const o of FOAMS) if (o.link === f.link) o[k] = v;   // linked strips follow each other
+  for (const o of $('foamList').querySelectorAll(shared ? `[data-k="${k}"]` : `[data-i="${i}"][data-k="${k}"]`))
+    if (o !== el && FOAMS[+o.dataset.i][k] !== undefined) o.value = FOAMS[+o.dataset.i][k];
+  build();
+};
+$('foamList').addEventListener('input', e => { if (e.target.type === 'range') foamEdit(e); });
+$('foamList').addEventListener('change', e => { if (e.target.type !== 'range') foamEdit(e); });
+
+document.getElementById('b_reset').onclick = () => {
+  FOAMS = []; renderFoams(); setNeeds([]);
+  loadedId = null; loadedBatch = null; custMode = null; $('lib_save').textContent = 'Save current filter'; applyLock(); renderLib(); renderBatch();
+  Object.assign(P, DEFAULTS);
+  resetGroups();
+  for (const gk of ['side', 'end']){ $(gk + '_c_sym').checked = true; $(gk + '_c_on').checked = GROUPS[gk].on; }
+  syncInputs(); build(); frame('iso');
+};
+
+// ---------- resize / loop ----------
+function resize(){
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); labelRenderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+
+syncInputs();
+build();
+resize();
+frame('iso');
+// =====================================================================
+// Platform capabilities (downloads for STL, db for the part library).
+// Both resolve null when this view cannot use them; features then say so.
+// =====================================================================
+const capDownloads = (window.claude && claude.use) ? claude.use('downloads').catch(() => null) : Promise.resolve(null);
+const capDb        = (window.claude && claude.use) ? claude.use('db').catch(() => null)        : Promise.resolve(null);
+const status = (msg, cls = '') => { const el = $('d_status'); el.textContent = msg; el.className = 'note ' + cls; };
+
+// ---------- STL export ----------
+// .stl is not on the viewer's download allow-list, so the STL goes inside a .zip.
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = u8 => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipMulti(files){                          // several files, stored (no compression)
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const f of files){
+    const nm = enc.encode(f.name), crc = crc32(f.data), n = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30)), ch = new DataView(new ArrayBuffer(46));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint32(14, crc, true); lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint32(16, crc, true); ch.setUint32(20, n, true); ch.setUint32(24, n, true); ch.setUint16(28, nm.length, true); ch.setUint32(42, off, true);
+    parts.push(lh, nm, f.data); central.push(ch, nm); off += 30 + nm.length + n;
+  }
+  const cdSize = central.reduce((a, x) => a + x.byteLength, 0), end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...central, end], { type: 'application/zip' });
+}
+function zipStore(name, u8){                       // single file, stored (no compression)
+  const nm = new TextEncoder().encode(name), crc = crc32(u8), n = u8.length;
+  const lh = new DataView(new ArrayBuffer(30)), ch = new DataView(new ArrayBuffer(46)), end = new DataView(new ArrayBuffer(22));
+  lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint32(14, crc, true); lh.setUint32(18, n, true); lh.setUint32(22, n, true); lh.setUint16(26, nm.length, true);
+  ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint32(16, crc, true); ch.setUint32(20, n, true); ch.setUint32(24, n, true); ch.setUint16(28, nm.length, true);
+  const cdOff = 30 + nm.length + n;
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true); end.setUint32(12, 46 + nm.length, true); end.setUint32(16, cdOff, true);
+  return new Blob([lh, nm, u8, ch, nm, end], { type: 'application/zip' });
+}
+function buildSTL(){
+  filter.updateMatrixWorld(true);
+  const zUp = new THREE.Matrix4().makeRotationX(Math.PI / 2);   // Y-up viewer → Z-up CAD
+  const out = new THREE.Group();
+  filter.traverse(o => {
+    if (!o.isMesh || o.userData.noExport) return;
+    const m = new THREE.Mesh(o.geometry);
+    m.matrixAutoUpdate = false;
+    m.matrixWorld.multiplyMatrices(zUp, o.matrixWorld);
+    out.add(m);
+  });
+  const dv = new STLExporter().parse(out, { binary: true });
+  return new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+}
+const partName = () => (sheetVal('part') || $('i_part').value || 'filter').replace(/[^\w.\-]+/g, '_');
+$('b_stl').onclick = async () => {
+  const dl = await capDownloads;
+  if (!dl){ $('warn').textContent = 'STL export needs file downloads enabled for this page. It isn\'t available in this view yet.'; return; }
+  try {
+    const stl = buildSTL();
+    await dl.save({ filename: partName() + '-stl.zip', data: zipStore(partName() + '.stl', stl) });
+  } catch (e){
+    if (e && e.code === 'declined') return;
+    $('warn').textContent = 'STL export failed' + (e && e.code ? ' (' + e.code + ')' : '') + '.';
+  }
+};
+
+// ---------- filter info sheet ----------
+const SHEET_ROWS = [
+  ['part','Part number'], ['base','Base number'], ['prod','Production number'], ['aq','AirQualitee #'], ['cust','Customer / OE #'],
+  ['media','Media material #'], ['mtype','Media type'], ['sband','Side band material #'], ['eband','End band material #'],
+  ['foam','Foam material #'], ['glue','Glue'], ['screw','Screw #'], ['helix','Helix #'],
+  ['tol_len','Tolerance – length'], ['tol_wid','Tolerance – width'], ['tol_fh','Tolerance – filter height'],
+  ['tol_ph','Tolerance – pleat height'], ['tol_pc','Tolerance – pleats'], ['notes','Notes'],
+];
+let SHEET = {};          // key -> value for fixed rows
+let SHEET_EXTRA = [];    // [{label, value}] user rows
+const sheetVal = k => (SHEET[k] || '').trim();
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+function renderSheet(){
+  $('sheetInfo').innerHTML = '<tr><th colspan="3">Filter information</th></tr>' +
+    SHEET_ROWS.map(([k, l]) => `<tr><td class="lab">${l}</td><td colspan="2"><input data-sk="${k}" value="${esc(SHEET[k] || '')}"></td></tr>`).join('') +
+    SHEET_EXTRA.map((r, i) => `<tr><td class="lab" style="padding:0"><input data-xl="${i}" value="${esc(r.label)}" placeholder="Label"></td><td><input data-xv="${i}" value="${esc(r.value)}"></td><td class="x"><button data-xd="${i}">×</button></td></tr>`).join('');
+  renderCalc();
+  applyNeeds();
+  try { if (custMode) applyLock(); } catch {}
+}
+function calcRows(){
+  const t = id => $(id).textContent;
+  return [
+    ['Media width', fmt(P.mw) + ' mm'], ['Filter length (pack)', fmt(P.fl, 2) + ' mm'], ['Overall length', t('o_olen')],
+    ['Filter width', t('o_wid')], ['Filter height', t('o_hgt')], ['Pleat height', fmt(P.ph) + ' mm'],
+    ['# of pleats', String(P.pc)], ['Pleat pitch', fmt(P.pp, 3) + ' mm'], ['Pleat angle', t('o_ang')],
+    ['Media thickness', fmt(P.mt, 2) + ' mm'], ['Fold inside radius', fmt(P.fr, 2) + ' mm'],
+    ['Side bands', t('o_blank') === '–' ? 'None' : 'Blank ' + t('o_blank')],
+    ['End bands', isOn('end') ? 'Blank ' + t('o_eblank') : 'None'],
+    ['Unfolded media length', t('o_mlen')], ['Media area', t('o_area')],
+    ['Inkjet', $('c_ink').checked ? [$('i_part').value, $('i_date').value, $('i_coo').value, $('s_inklabel').value].join(' · ') : 'None'],
+  ];
+}
+function renderCalc(){
+  $('sheetCalc').innerHTML = '<tr><th colspan="2">From the model (calculated)</th></tr>' +
+    calcRows().map(([l, v]) => `<tr><td class="lab">${l}</td><td class="calc">${esc(v)}</td></tr>`).join('');
+}
+$('sheetInfo').addEventListener('input', e => {
+  const d = e.target.dataset;
+  if (d.sk) SHEET[d.sk] = e.target.value;
+  if (d.xl !== undefined) SHEET_EXTRA[+d.xl].label = e.target.value;
+  if (d.xv !== undefined) SHEET_EXTRA[+d.xv].value = e.target.value;
+  if (d.sk === 'part' && !$('lib_pn').dataset.touched) $('lib_pn').value = e.target.value;
+});
+$('sheetInfo').addEventListener('click', e => {
+  const d = e.target.dataset.xd;
+  if (d !== undefined){ SHEET_EXTRA.splice(+d, 1); renderSheet(); }
+});
+$('sh_add').onclick = () => { SHEET_EXTRA.push({ label: '', value: '' }); renderSheet(); };
+$('sh_copy').onclick = async () => {
+  const rows = [...SHEET_ROWS.map(([k, l]) => [l, SHEET[k] || '']), ...SHEET_EXTRA.map(r => [r.label, r.value]), ['', ''], ...calcRows()];
+  try { await navigator.clipboard.writeText(rows.map(r => r.map(c => String(c).replace(/\t|\n/g, ' ')).join('\t')).join('\n')); status('Sheet copied — paste into Excel.', 'ok'); }
+  catch { status('Copy was blocked by the browser.', 'err'); }
+};
+// keep calculated rows fresh after each rebuild
+function afterBuild(){ if (!$('drawer').classList.contains('closed')) renderCalc(); if (typeof applyNeeds === 'function') applyNeeds(); try { if (custMode) applyLock(); } catch {} try { if (window.__fvView) window.__fvView(); } catch {} }
+
+// ---------- save / load the whole configuration ----------
+function snapshotConfig(){
+  const ui = {};
+  for (const el of document.querySelectorAll('#panel input[id], #panel select[id], #panel textarea[id]')){
+    if (el.type === 'range' || el.type === 'number') continue;
+    ui[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  return {
+    P: { ...P },
+    groups: Object.fromEntries(Object.entries(GROUPS).map(([k, g]) => [k, { bands: g.bands.map(b => ({ ...b })), cur: g.cur }])),
+    foams: FOAMS.map(f => ({ ...f })),
+    ui,
+  };
+}
+function applyConfig(c){
+  if (!c) return;
+  Object.assign(P, DEFAULTS, c.P || {});
+  for (const [k, g] of Object.entries(c.groups || {})) if (GROUPS[k]){
+    GROUPS[k].bands = (g.bands || []).slice(0, 2).map(b => ({ ...BAND_DEFAULT, ...b }));
+    while (GROUPS[k].bands.length < 2) GROUPS[k].bands.push({ ...BAND_DEFAULT });
+    GROUPS[k].cur = g.cur ? 1 : 0;
+  }
+  FOAMS = (c.foams || []).map(f => ({ ...FOAM_DEFAULT, ...f }));
+  for (const [id, v] of Object.entries(c.ui || {})){
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  }
+  renderFoams(); syncInputs(); build(); frame('iso');
+}
+
+// ---------- part library (shared db collection "parts") ----------
+let libDb = null, libDocs = [];
+const pnId = pn => pn.trim().toUpperCase().replace(/[^A-Z0-9_\-.~:@+]+/g, '-').replace(/^\.+$/, '_').slice(0, 120);
+// ---------- library search: free text, attribute tokens and attribute filters ----------
+const bandsOf = (cfg, gk) => (cfg.groups?.[gk]?.bands || [BAND_DEFAULT, BAND_DEFAULT]).map(b => ({ ...BAND_DEFAULT, ...b }));
+function dimsOf(v){
+  const cfg = v.config || {}, P = { ...DEFAULTS, ...(cfg.P || {}) }, ui = cfg.ui || {};
+  const sideOn = ui.side_c_on !== false, endOn = !!ui.end_c_on;
+  const SB = bandsOf(cfg, 'side'), EB = bandsOf(cfg, 'end'), foams = cfg.foams || [];
+  const fT = w => Math.max(0, ...foams.filter(f => f.where === 'all' || f.where === w).map(f => +f.t || 0));
+  const act = [...(sideOn ? SB : []), ...(endOn ? EB : [])];
+  const L = P.pc * P.pp;
+  return {
+    P, ui, cfg, sideOn, endOn, SB, EB, foams,
+    len: L,
+    olen: L + (endOn ? EB[0].bt + EB[1].bt : 0) + fT('end0') + fT('end1'),
+    wid: P.mw + (sideOn ? SB[0].bt + SB[1].bt : 0) + fT('side0') + fT('side1'),
+    hgt: Math.max(P.ph, ...act.map(b => P.ph + b.ot)) - Math.min(0, ...act.map(b => -b.ob)),
+  };
+}
+const ATTRS = [
+  // text
+  { k:'part',  l:'Part number',        t:'text', al:['pn','part'],          g:(v,d)=>v.part },
+  { k:'base',  l:'Base number',        t:'text', al:['base','aq'],          g:v=>v.info?.base },
+  { k:'oe',    l:'Customer / OE #',    t:'text', al:['oe','cust','customer'], g:v=>v.info?.cust },
+  { k:'mtype', l:'Media type',         t:'text', al:['media','mtype','type'], g:v=>v.info?.mtype },
+  { k:'mnum',  l:'Media material #',   t:'text', al:['mediano','mnum'],     g:v=>v.info?.media },
+  { k:'sband', l:'Side band material #', t:'text', al:['sband'],            g:v=>v.info?.sband },
+  { k:'eband', l:'End band material #',  t:'text', al:['eband'],            g:v=>v.info?.eband },
+  { k:'foamno',l:'Foam material #',    t:'text', al:['foamno'],             g:v=>v.info?.foam },
+  { k:'notes', l:'Notes',              t:'text', al:['notes','note'],       g:v=>v.info?.notes },
+  { k:'epa',   l:'Inkjet EPA registration', t:'text', al:['epa'],           g:v=>v.config?.ui?.i_epa },
+  { k:'iword', l:'Inkjet extra word',  t:'text', al:['word','inkword'],     g:v=>v.config?.ui?.i_word },
+  // numbers
+  { k:'pc',  l:'Pleat count',          t:'num', al:['pleats','pc','count'],      g:(v,d)=>d.P.pc },
+  { k:'ph',  l:'Pleat height (mm)',    t:'num', al:['ph','pleatheight'],         g:(v,d)=>d.P.ph },
+  { k:'pp',  l:'Pleat pitch (mm)',     t:'num', al:['pitch','pp'],               g:(v,d)=>d.P.pp },
+  { k:'mw',  l:'Media width (mm)',     t:'num', al:['mw','mediawidth'],          g:(v,d)=>d.P.mw },
+  { k:'mt',  l:'Media thickness (mm)', t:'num', al:['mt','thickness'],           g:(v,d)=>d.P.mt },
+  { k:'len', l:'Filter length – pack (mm)', t:'num', al:['length','len','fl'],   g:(v,d)=>d.len },
+  { k:'olen',l:'Overall length (mm)',  t:'num', al:['olen','overall'],           g:(v,d)=>d.olen },
+  { k:'wid', l:'Filter width (mm)',    t:'num', al:['width','wid','fw'],         g:(v,d)=>d.wid },
+  { k:'hgt', l:'Filter height (mm)',   t:'num', al:['height','hgt','fh'],        g:(v,d)=>d.hgt },
+  { k:'sbh', l:'Side band height (mm)',t:'num', al:['sbh','sideband'],           g:(v,d)=>d.sideOn ? d.SB[0].sb : null },
+  { k:'ebh', l:'End band height (mm)', t:'num', al:['ebh','endband'],            g:(v,d)=>d.endOn ? d.EB[0].sb : null },
+  { k:'fn',  l:'Foam strips',          t:'num', al:['foams'],                    g:(v,d)=>d.foams.length },
+  { k:'nf',  l:'Values to check',      t:'num', al:['checks'],                   g:v=>(v.needs||[]).length },
+  // yes / no
+  { k:'sideon', l:'Has side bands', t:'bool', al:['sidebands'],  g:(v,d)=>d.sideOn },
+  { k:'endon',  l:'Has end bands',  t:'bool', al:['endbands'],   g:(v,d)=>d.endOn },
+  { k:'scored', l:'Scored band',    t:'bool', al:['scored'],     g:(v,d)=>[...(d.sideOn?d.SB:[]),...(d.endOn?d.EB:[])].some(b=>b.scored) },
+  { k:'fold',   l:'Fold over',      t:'bool', al:['fold','foldover'], g:(v,d)=>d.endOn && d.EB.some(b=>b.fold) },
+  { k:'foam',   l:'Has foam',       t:'bool', al:['foam'],       g:(v,d)=>d.foams.length > 0 },
+  { k:'tab',    l:'Pull tab',       t:'bool', al:['tab','pulltab'], g:(v,d)=>!!d.ui.c_tab },
+  { k:'glue',   l:'Glue beads',     t:'bool', al:['glue','beads'],  g:(v,d)=>!!d.ui.c_glue },
+  { k:'ink',    l:'Inkjet',         t:'bool', al:['ink','inkjet'],  g:(v,d)=>!!d.ui.c_ink },
+  { k:'flag',   l:'Flagged',        t:'bool', al:['flagged','flag'], g:v=>(v.needs||[]).length > 0 },
+  // choices
+  { k:'mcol', l:'Media colour',      t:'enum', al:['colour','color','mcol'], opts:['carbon','white','grey','hepa'], g:(v,d)=>d.ui.s_mcol || 'carbon' },
+  { k:'cut',  l:'Media orientation', t:'enum', al:['cut','cutends','orientation'], opts:['top','bottom'], g:(v,d)=>d.ui.s_cutend || 'top' },
+];
+const ATTR = Object.fromEntries(ATTRS.map(a => [a.k, a]));
+const aliasOf = w => ATTRS.find(a => a.k === w || a.al.includes(w));
+const OPS = { text:[['has','contains'],['=','is'],['!has','does not contain']], num:[['=','='],['between','between'],['>=','≥'],['<=','≤'],['>','>'],['<','<'],['!=','≠']], bool:[['yes','yes'],['no','no']], enum:[['=','is'],['!=','is not']] };
+let FILTERS = [];   // [{k, op, a, b}]
+let sortKey = 'part', sortDir = 1;
+
+function test(val, a, op, x, y){
+  if (a.t === 'bool') return op === 'no' ? !val : !!val;
+  if (a.t === 'num'){
+    if (val === null || val === undefined || !isFinite(val)) return false;
+    const n = parseFloat(x), m = parseFloat(y), tol = 0.005;
+    if (op === 'between') return isFinite(n) && isFinite(m) ? val >= Math.min(n, m) - tol && val <= Math.max(n, m) + tol : true;
+    if (!isFinite(n)) return true;
+    return op === '=' ? Math.abs(val - n) <= tol : op === '!=' ? Math.abs(val - n) > tol : op === '>' ? val > n : op === '<' ? val < n : op === '>=' ? val >= n - tol : val <= n + tol;
+  }
+  const s = String(val ?? '').toLowerCase(), q = String(x ?? '').toLowerCase().trim();
+  if (!q) return true;
+  return op === '=' ? s === q : op === '!=' ? s !== q : op === '!has' ? !s.includes(q) : s.includes(q);
+}
+// "pleats>28", "width:215", "height 25-30" (attribute word followed by a value), "carbon", "flagged"
+function parseQuery(q){
+  const out = { conds: [], words: [] }, toks = q.trim().split(/\s+/).filter(Boolean);
+  for (let i = 0; i < toks.length; i++){
+    let t = toks[i].toLowerCase(), m = t.match(/^([a-z]+)(>=|<=|!=|:|=|>|<)(.*)$/);
+    // "29 pleats", "215 width"
+    if (!m && /^[\d.]+(-[\d.]+)?$/.test(t) && i + 1 < toks.length){
+      const nx = toks[i + 1].toLowerCase(), na = aliasOf(nx);
+      if (na && na.t === 'num'){ m = [null, nx, ':', t]; i++; }
+    }
+    if (!m && aliasOf(t) && i + 1 < toks.length && /^[\d.]+(-[\d.]+)?$/.test(toks[i + 1]) && ATTRS.find(a => (a.k === t || a.al.includes(t)) && a.t === 'num')){ m = [null, t, ':', toks[++i]]; }
+    const a = m && aliasOf(m[1]);
+    if (a && m[3] !== ''){
+      let op = m[2] === ':' ? '=' : m[2], v = m[3], v2;
+      if (a.t === 'num' && /^[\d.]+-[\d.]+$/.test(v)){ [v, v2] = v.split('-'); op = 'between'; }
+      if (a.t === 'text' && op === '=') op = 'has';
+      if (a.t === 'bool') op = /^(n|no|false|0)$/.test(v) ? 'no' : 'yes';
+      out.conds.push({ a, op, x: v, y: v2 });
+      continue;
+    }
+    const b = aliasOf(t);
+    if (b && b.t === 'bool'){ out.conds.push({ a: b, op: 'yes' }); continue; }
+    const e = ATTRS.find(a => a.t === 'enum' && a.opts.includes(t));
+    if (e){ out.conds.push({ a: e, op: '=', x: t }); continue; }
+    out.words.push(t);
+  }
+  return out;
+}
+function libMatches(){
+  const q = parseQuery($('lib_find').value);
+  const list = libDocs.map(d => { const v = d.data(); return { d, v, dims: dimsOf(v) }; }).filter(({ v, dims }) => {
+    const get = a => a.g(v, dims);
+    for (const c of q.conds) if (!test(get(c.a), c.a, c.op, c.x, c.y)) return false;
+    for (const f of FILTERS){ const a = ATTR[f.k]; if (!test(get(a), a, f.op, f.a, f.b)) return false; }
+    if (q.words.length){
+      const hay = ATTRS.filter(a => a.t === 'text').map(a => String(get(a) ?? '')).join(' ').toLowerCase();
+      if (!q.words.every(w => hay.includes(w))) return false;
+    }
+    return true;
+  });
+  const a = ATTR[sortKey];
+  list.sort((x, y) => {
+    const p = a.g(x.v, x.dims), r = a.g(y.v, y.dims);
+    if (a.t === 'num') return sortDir * ((p ?? Infinity) - (r ?? Infinity));
+    return sortDir * String(p ?? '').localeCompare(String(r ?? ''), undefined, { numeric: true });
+  });
+  return { list, q };
+}
+const f1 = n => n === null || n === undefined || !isFinite(n) ? '–' : (+n.toFixed(2)).toString();
+function renderLib(){
+  const { list, q } = libMatches();
+  const shown = new Set([...q.conds.map(c => c.a.k), ...FILTERS.map(f => f.k), sortKey]);
+  $('lib_count').textContent = libDocs.length ? `${list.length} of ${libDocs.length} parts` : '';
+  $('lib_list').innerHTML = list.length ? list.slice(0, 300).map(({ d, v, dims }) => {
+    const when = v.updated ? new Date(v.updated).toLocaleString() : '';
+    const bits = [`${dims.P.pc} pleats`, `${f1(dims.P.ph)} mm pleat`, `${f1(dims.len)} × ${f1(dims.wid)} × ${f1(dims.hgt)} mm`];
+    const cs = custsOf(v);
+    if (cs.length) bits.push('Customer # ' + cs.map(c => `<span class="cchip${v.inkjets?.[c] ? ' ink' : ''}" title="${v.inkjets?.[c] ? 'has its own inkjet' : 'uses the base inkjet'}">${esc(c)}</span>`).join(''));
+    if (v.info?.mtype) bits.push(esc(v.info.mtype));
+    // show any searched / sorted attribute that isn't already in the summary
+    for (const k of shown) if (!['part','pc','ph','len','wid','hgt','oe','mtype'].includes(k)){
+      const a = ATTR[k], val = a.g(v, dims);
+      bits.push(`<span class="hit">${esc(a.l.replace(/ \(mm\)/, ''))}: ${esc(a.t === 'bool' ? (val ? 'yes' : 'no') : a.t === 'num' ? f1(val) : String(val ?? '–'))}</span>`);
+    }
+    return `<div class="lib-row${d.id === loadedId ? ' loaded' : ''}"><span class="pn">${esc(v.part || d.id)}${d.id === loadedId && custMode ? `<br><span class="note">as ${esc(custMode.cust)}</span>` : ''}</span>
+      <span class="meta">${bits.join(' · ')} · saved ${esc(when)}${needsLine(v.needs)}</span>
+      <button data-load="${esc(d.id)}">Load</button><button data-copy="${esc(d.id)}" title="Copy this part's settings to other filters">Copy…</button><button data-del="${esc(d.id)}">Delete</button></div>`;
+  }).join('') + (list.length > 300 ? `<div class="note">Showing the first 300 — narrow the search to see the rest.</div>` : '')
+    : `<div class="note">${libDocs.length ? 'No parts match.' : 'No parts saved yet.'}</div>`;
+}
+function renderFilters(){
+  const opt = (pairs, v) => pairs.map(([x, t]) => `<option value="${esc(x)}" ${x === v ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  $('lib_filters').innerHTML = FILTERS.map((f, i) => {
+    const a = ATTR[f.k];
+    const val = a.t === 'bool' ? '' : a.t === 'enum'
+      ? `<select class="tin" data-fi="${i}" data-fp="a">${opt(a.opts.map(o => [o, o]), f.a)}</select>`
+      : `<input class="tin" data-fi="${i}" data-fp="a" value="${esc(f.a ?? '')}" placeholder="${a.t === 'num' ? 'mm / number' : 'text'}">` +
+        (f.op === 'between' ? ` and <input class="tin" data-fi="${i}" data-fp="b" value="${esc(f.b ?? '')}">` : '');
+    return `<div class="fl-row"><select class="tin" data-fi="${i}" data-fp="k">${opt(ATTRS.map(x => [x.k, x.l]), f.k)}</select>
+      <select class="tin" data-fi="${i}" data-fp="op">${opt(OPS[a.t], f.op)}</select>${val}
+      <button data-fx="${i}" title="Remove filter">×</button></div>`;
+  }).join('');
+}
+$('lf_addfilter').onclick = () => { FILTERS.push({ k: 'pc', op: '=', a: '', b: '' }); renderFilters(); renderLib(); $('lib_filters').querySelector(`[data-fi="${FILTERS.length - 1}"][data-fp="a"]`)?.focus(); };
+$('lib_filters').addEventListener('input', e => {
+  const i = e.target.dataset.fi, p = e.target.dataset.fp; if (i === undefined) return;
+  const f = FILTERS[+i]; f[p] = e.target.value;
+  if (p === 'k'){ const a = ATTR[f.k]; f.op = OPS[a.t][0][0]; f.a = a.t === 'enum' ? a.opts[0] : ''; f.b = ''; renderFilters(); }
+  if (p === 'op') renderFilters();
+  renderLib();
+});
+$('lib_filters').addEventListener('click', e => { const i = e.target.dataset.fx; if (i !== undefined){ FILTERS.splice(+i, 1); renderFilters(); renderLib(); } });
+$('lib_sort').innerHTML = ATTRS.filter(a => a.t !== 'bool').map(a => `<option value="${a.k}">${esc(a.l)}</option>`).join('');
+$('lib_sort').onchange = e => { sortKey = e.target.value; renderLib(); };
+$('lib_sortdir').onclick = () => { sortDir = -sortDir; $('lib_sortdir').textContent = sortDir > 0 ? '↑' : '↓'; renderLib(); };
+$('lib_clearsearch').onclick = () => { $('lib_find').value = ''; FILTERS = []; renderFilters(); renderLib(); };
+async function initLib(){
+  libDb = await capDb;
+  if (!libDb){
+    $('lib_msg').innerHTML = '<span class="err">The part library needs shared storage enabled for this page. It isn\'t available in this view yet.</span>';
+    $('lib_save').disabled = true;
+    return;
+  }
+  $('lib_msg').textContent = 'Loading parts…';
+  const timer = setTimeout(() => { $('lib_msg').textContent = 'The part library can\'t be reached yet.'; }, 10000);
+  libDb.collection('parts').orderBy('part').onSnapshot(snap => {
+    if (!snap.metadata.fromCache){ clearTimeout(timer); $('lib_msg').textContent = ''; }
+    libDocs = snap.docs; renderLib(); if (typeof renderExport === 'function' && $('pane_export').style.display !== 'none') renderExport();
+  }, err => { clearTimeout(timer); $('lib_msg').innerHTML = `<span class="err">Part library unavailable (${esc(err.code)}).</span>`; });
+}
+$('lib_pn').addEventListener('input', () => { $('lib_pn').dataset.touched = '1'; });
+$('lib_find').addEventListener('input', renderLib);
+$('lib_find').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const typed = e.target.value.trim(), d = libDocs.find(x => x.id === pnId(typed));
+  const byCust = !d && libDocs.find(x => custsOf(x.data()).some(c => c.toUpperCase() === typed.toUpperCase()));
+  if (d){ openLoadPicker(d); }
+  else if (byCust){ loadPart(byCust, custsOf(byCust.data()).find(c => c.toUpperCase() === typed.toUpperCase())); }
+  else { $('lib_msg').textContent = 'No part ' + e.target.value + ' in the library.'; }
+});
+let loadedId = null, loadedBatch = null;   // the library part / batch row currently in the viewer
+// ---------- customer part numbers: own inkjet, every other spec locked to the base part ----------
+const INK_UI = ['c_ink', 's_inkon', 'i_part', 'i_date', 'i_coo', 'i_epa', 'i_word', 's_arrow', 's_inklabel', 's_orient'];
+const INK_P = ['kh', 'kx', 'ky'];
+let custMode = null;                         // { base: library id, cust: customer part number }
+const custsOf = v => [...new Set(String(v.info?.cust || '').split(/[,;\n]+/).map(t => t.trim()).filter(Boolean))];
+function inkSnapshot(){
+  const ui = {}; for (const id of INK_UI){ const el = $(id); ui[id] = el.type === 'checkbox' ? el.checked : el.value; }
+  return { ui, P: Object.fromEntries(INK_P.map(k => [k, P[k]])) };
+}
+function applyInk(o){
+  for (const [id, v] of Object.entries(o.ui || {})){ const el = $(id); if (el) { if (el.type === 'checkbox') el.checked = !!v; else el.value = v; } }
+  Object.assign(P, o.P || {});
+}
+// everything except the inkjet section and the view controls is read-only for a customer part
+const LOCK_ALLOW = new Set(['b_new', 'c_ink', 'c_ghost', 'c_edges', 'c_grid', 'c_dims', 'c_dim_o', 'c_dim_p', 'c_dim_b', 'c_dim_x', 'b_iso', 'b_side', 'b_top', 'b_stl', 'b_reset', 'needsClear', 'modeBase']);
+function applyLock(){
+  const on = !!custMode;
+  for (const el of document.querySelectorAll('#panel input, #panel select, #panel textarea, #panel button, #sheetInfo input, #sheetInfo button, #sh_add')){
+    if (el.closest('#inkOpts') || el.closest('#modeBox') || el.closest('#needsChips') || LOCK_ALLOW.has(el.id)) continue;
+    el.disabled = on;
+  }
+  const box = $('modeBox');
+  if (!on){ box.style.display = 'none'; return; }
+  const d = libDocs.find(x => x.id === custMode.base), v = d ? d.data() : {};
+  box.style.display = 'block';
+  box.innerHTML = `Customer part <b>${esc(custMode.cust)}</b> · specs locked to base <b>${esc(v.part || custMode.base)}</b>.<br>
+    <span class="locked-note">Only the inkjet can be changed here; "Save" stores it as ${esc(custMode.cust)}'s inkjet${v.inkjets?.[custMode.cust] ? '' : ' (currently using the base inkjet with the customer part number)'}.</span><br>
+    <button id="modeBase">Switch to base part</button>`;
+  $('modeBase').onclick = () => { if (d) loadPart(d); };
+}
+function loadPart(d, cust){
+  loadedId = d.id; loadedBatch = null;
+  const v = d.data();
+  SHEET = { ...(v.info || {}) }; SHEET_EXTRA = (v.extra || []).map(r => ({ ...r }));
+  custMode = cust ? { base: d.id, cust } : null;
+  setNeeds(v.needs);
+  applyConfig(v.config);
+  if (cust){
+    const own = v.inkjets?.[cust];
+    if (own) applyInk(own); else $('i_part').value = cust;   // no inkjet of its own yet: base inkjet with the customer number
+    syncInputs(); build();
+  }
+  $('lib_pn').value = cust || v.part || d.id;
+  $('lib_save').textContent = cust ? `Save ${cust} inkjet` : 'Save current filter';
+  renderSheet(); applyLock();
+  status('Loaded ' + (cust ? `${cust} (base ${v.part || d.id})` : (v.part || d.id)) + '.', 'ok');
+  renderLib(); if (typeof renderBatch === 'function') renderBatch();
+}
+// choose base or a customer number when a part has customer numbers
+function openLoadPicker(d){
+  const v = d.data(), cs = custsOf(v);
+  if (!cs.length) return loadPart(d);
+  $('pickTitle').textContent = `Load ${v.part || d.id} as…`;
+  $('pickSub').textContent = 'Customer part numbers use the base specs; only their inkjet can differ.';
+  $('pickList').innerHTML = `<button class="opt" data-pick=""><b>${esc(v.part || d.id)}</b><span class="s">Base part · all specs editable</span></button>` +
+    cs.map(c => `<button class="opt" data-pick="${esc(c)}"><b>${esc(c)}</b><span class="s">Customer part · ${v.inkjets?.[c] ? 'its own inkjet' : 'base inkjet with this part number (not customized yet)'}</span></button>`).join('');
+  $('pickModal').style.display = 'flex';
+  $('pickList').onclick = e => { const b = e.target.closest('[data-pick]'); if (!b) return; $('pickModal').style.display = 'none'; loadPart(d, b.dataset.pick || null); };
+}
+$('pickCancel').onclick = () => { $('pickModal').style.display = 'none'; };
+
+// ---------- new filter ----------
+function openNew(){
+  $('nf_from').innerHTML = `<option value="__blank__">Blank filter (default settings)</option><option value="${CURRENT}">Copy of the filter in the viewer</option>` +
+    libDocs.map(d => `<option value="${esc(d.id)}">Copy of ${esc(d.data().part || d.id)}</option>`).join('');
+  $('nf_pn').value = ''; $('nf_oe').value = ''; $('nf_msg').textContent = '';
+  $('nf_save').checked = !!libDb; $('nf_save').disabled = !libDb;
+  $('newModal').style.display = 'flex'; setTimeout(() => $('nf_pn').focus(), 0);
+}
+$('b_new').onclick = openNew;
+$('lib_new').onclick = openNew;
+$('nf_cancel').onclick = () => { $('newModal').style.display = 'none'; };
+$('newModal').addEventListener('click', e => { if (e.target.id === 'newModal') $('newModal').style.display = 'none'; });
+$('nf_pn').addEventListener('keydown', e => { if (e.key === 'Enter') $('nf_go').click(); });
+$('nf_go').onclick = async () => {
+  const pn = $('nf_pn').value.trim(), oe = $('nf_oe').value.trim(), from = $('nf_from').value;
+  if (!pn){ $('nf_msg').innerHTML = '<span class="err">Enter a part number for the new filter.</span>'; return; }
+  const id = pnId(pn);
+  if (!id){ $('nf_msg').innerHTML = '<span class="err">That part number has no usable characters.</span>'; return; }
+  if (libDocs.some(d => d.id === id)){ $('nf_msg').innerHTML = `<span class="err">${esc(pn)} is already in the library — load it instead, or pick another number.</span>`; return; }
+  // settings to start from
+  let cfg, info = {};
+  if (from === '__blank__') cfg = clone(BASELINE);
+  else if (from === CURRENT){ const cur = entryFromCurrent(); cfg = cur.config; info = { ...cur.info }; }
+  else { const v = libDocs.find(d => d.id === from)?.data() || {}; cfg = { ...clone(BASELINE), ...clone(v.config || {}) }; info = { ...(v.info || {}) }; }
+  // a new part keeps the copied materials and tolerances, but gets its own identity
+  for (const k of ['part', 'base', 'prod', 'aq', 'cust', 'notes']) delete info[k];
+  info.part = pn; if (oe) info.cust = oe;
+  cfg.ui = { ...(cfg.ui || {}), i_part: pn };
+  // load it into the viewer as a fresh, unsaved filter
+  custMode = null; loadedId = null; loadedBatch = null;
+  SHEET = info; SHEET_EXTRA = [];
+  setNeeds([]); applyConfig(cfg); renderSheet(); applyLock();
+  $('lib_pn').value = pn; $('lib_pn').dataset.touched = ''; $('lib_save').textContent = 'Save current filter'; $('lib_save').dataset.armed = '';
+  $('newModal').style.display = 'none';
+  if ($('nf_save').checked && libDb){
+    try {
+      await libDb.collection('parts').doc(id).set({ part: pn, info: { ...SHEET }, extra: [], config: snapshotConfig(), needs: [], inkjets: {}, updated: Date.now() });
+      loadedId = id; status(`Created ${pn} and saved it to the library.`, 'ok');
+    } catch (er){ status(`Created ${pn}, but saving failed (${er.code || 'error'}) — use Save to try again.`, 'err'); }
+  } else status(`Created ${pn} — set it up, then click "Save current filter" in the Part library.`, 'ok');
+  renderLib(); if (typeof renderBatch === 'function') renderBatch();
+};
+
+// ---------- copy settings between filters ----------
+// every copyable variable, grouped. kind: P (number) | ui (control) | band (both A and B) | foams | info
+const BANDF = [['sb','height'],['bt','thickness'],['ob','offset below pleat'],['ot','offset above pleat'],['scored','scored (flap)'],['fx','score flap length'],['fa','score flap angle'],['ends','score flap edge']];
+const COPY_GROUPS = [
+  { k:'pleats', l:'Pleats & media', items:[['P','ph','Pleat height'],['P','pc','Pleat count'],['P','pp','Pleat pitch'],['P','mw','Media width'],['P','mt','Media thickness'],['P','fr','Fold inside radius'],['ui','s_cutend','Media orientation']] },
+  { k:'colour', l:'Colours', items:[['ui','s_mcol','Media colour'],['ui','s_bcol','Band colour']] },
+  { k:'side', l:'Side bands', items:[['ui','side_c_on','Show side bands'],['ui','side_c_sym','Symmetrical'], ...BANDF.map(([k, l]) => ['band', 'side.' + k, 'Side band ' + l])] },
+  { k:'end', l:'End bands & fold-overs', items:[['ui','end_c_on','Show end bands'],['ui','end_c_sym','Symmetrical'], ...BANDF.map(([k, l]) => ['band', 'end.' + k, 'End band ' + l]),
+      ['band','end.fold','Fold over'],['band','end.ol','Fold-over length'],['band','end.oa','Fold-over angle'],['band','end.fends','Fold-over edge']] },
+  { k:'foam', l:'Foam', items:[['foams','all','All foam strips (incl. gaps & links)']] },
+  { k:'tab', l:'Pull tab', items:[['ui','c_tab','Pull tab on/off'],['ui','s_tabon','On band'],['ui','s_tabdir','Free end points'],['P','tg','Glue-on length'],['P','tf','Free length'],['P','tw','Strip width'],['P','tp','Position from band end'],['P','tv','Height offset'],['P','ta','Free end angle']] },
+  { k:'glue', l:'Glue beads', items:[['ui','c_glue','Glue beads on/off'],['ui','s_glue','Applied to'],['P','gn','Bead count'],['P','gs','Bead spacing'],['P','gd','Bead diameter'],['P','gg','Bead dip']] },
+  { k:'ink', l:'Inkjet', items:[['ui','c_ink','Inkjet on/off'],['ui','s_inkon','Printed on'],['ui','i_part','Part number',true],['ui','i_date','Date code'],['ui','i_coo','Country of origin'],['ui','i_epa','EPA registration'],['ui','i_word','Extra word'],['ui','s_arrow','Arrow direction'],['ui','s_inklabel','Arrow text'],['ui','s_orient','Orientation'],['P','kh','Text height'],['P','kx','Horizontal position'],['P','ky','Vertical position']] },
+  { k:'info', l:'Info sheet', items: SHEET_ROWS.filter(([k]) => k !== 'part').map(([k, l]) => ['info', k, l, true]) },
+].map(g => ({ ...g, items: g.items.map(([kind, key, l, off]) => ({ id: g.k + ':' + kind + ':' + key, kind, key, l, off })) }));
+const ALL_ITEMS = COPY_GROUPS.flatMap(g => g.items.map(it => ({ ...it, g })));
+$('cpGroups').innerHTML = COPY_GROUPS.map(g => `<div class="cg" data-g="${g.k}">
+  <div class="cg-h"><label class="chk"><input type="checkbox" data-cgh="${g.k}"> ${esc(g.l)} <span class="cnt" data-cnt="${g.k}"></span></label><button data-exp="${g.k}" title="Show variables">▸</button></div>
+  <div class="cg-items">${g.items.map(it => `<label class="chk"><input type="checkbox" data-ci="${esc(it.id)}" ${it.off ? '' : 'checked'}> ${esc(it.l)}</label>`).join('')}</div></div>`).join('');
+function syncCopyHeads(){
+  for (const g of COPY_GROUPS){
+    const boxes = [...document.querySelectorAll(`.cg[data-g="${g.k}"] [data-ci]`)], n = boxes.filter(b => b.checked).length;
+    const h = document.querySelector(`[data-cgh="${g.k}"]`); h.checked = n === boxes.length; h.indeterminate = n > 0 && n < boxes.length;
+    document.querySelector(`[data-cnt="${g.k}"]`).textContent = `${n}/${boxes.length}`;
+  }
+}
+$('cpGroups').addEventListener('change', e => {
+  const g = e.target.dataset.cgh;
+  if (g) for (const b of document.querySelectorAll(`.cg[data-g="${g}"] [data-ci]`)) b.checked = e.target.checked;
+  syncCopyHeads();
+});
+$('cpGroups').addEventListener('click', e => {
+  const g = e.target.dataset.exp; if (!g) return;
+  const el = document.querySelector(`.cg[data-g="${g}"]`); el.classList.toggle('open'); e.target.textContent = el.classList.contains('open') ? '▾' : '▸';
+});
+$('cpSelAll').onclick = () => { for (const b of document.querySelectorAll('[data-ci]')) b.checked = true; syncCopyHeads(); };
+$('cpSelNone').onclick = () => { for (const b of document.querySelectorAll('[data-ci]')) b.checked = false; syncCopyHeads(); };
+$('cpExpand').onclick = () => {
+  const open = !document.querySelector('.cg.open');
+  for (const el of document.querySelectorAll('.cg')){ el.classList.toggle('open', open); el.querySelector('[data-exp]').textContent = open ? '▾' : '▸'; }
+  $('cpExpand').textContent = open ? 'Collapse all' : 'Expand all';
+};
+syncCopyHeads();
+function copyInto(src, dst, ids){       // src/dst: { info, config }; ids: checked item ids. Returns the new dst
+  const out = clone(dst), sc = { ...clone(BASELINE), ...clone(src.config || {}) };
+  out.config = { ...clone(BASELINE), ...out.config }; out.config.P ||= {}; out.config.ui ||= {}; out.info ||= {};
+  out.config.groups ||= clone(BASELINE.groups);
+  const set = new Set(ids), touched = { side: new Set(), end: new Set() };
+  for (const it of ALL_ITEMS) if (set.has(it.id)){
+    if (it.kind === 'P' && sc.P?.[it.key] !== undefined) out.config.P[it.key] = sc.P[it.key];
+    if (it.kind === 'ui' && sc.ui?.[it.key] !== undefined) out.config.ui[it.key] = sc.ui[it.key];
+    if (it.kind === 'info' && src.info?.[it.key] !== undefined) out.info[it.key] = src.info[it.key];
+    if (it.kind === 'foams') out.config.foams = clone(sc.foams || []);
+    if (it.kind === 'band'){
+      const [gk, k] = it.key.split('.'), sb = sc.groups?.[gk]?.bands || [], db = (out.config.groups[gk] ||= clone(BASELINE.groups[gk])).bands;
+      for (const i of [0, 1]) if (sb[i] && db[i] && sb[i][k] !== undefined){ db[i][k] = sb[i][k]; touched[gk].add(k); }
+    }
+  }
+  const P_ = out.config.P, ph = P_.ph ?? DEFAULTS.ph;
+  P_.fl = +((P_.pc ?? DEFAULTS.pc) * (P_.pp ?? DEFAULTS.pp)).toFixed(2);
+  // bands keep their heights; fit offsets to the pleat height, honouring whichever offset was copied
+  for (const gk of ['side', 'end']) for (const b of out.config.groups?.[gk]?.bands || []){
+    const key = touched[gk].has('ot') && !touched[gk].has('ob') ? 'ot' : 'ob', other = key === 'ob' ? 'ot' : 'ob';
+    b[key] = +Math.min(b.sb, Math.max(-ph, b[key])).toFixed(2); b[other] = +(b.sb - ph - b[key]).toFixed(2);
+  }
+  return out;
+}
+const CURRENT = '__current__';
+function sourceEntry(id){
+  if (id === CURRENT) return entryFromCurrent();
+  const v = libDocs.find(x => x.id === id)?.data();
+  return v && { info: v.info || {}, config: v.config || {} };
+}
+function renderCopyTargets(){
+  const from = $('cpFrom').value, q = parseQuery($('cpFind').value);
+  const keep = new Set([...document.querySelectorAll('#cpTargets input:checked')].map(i => i.value));
+  const rows = libDocs.filter(d => d.id !== from).filter(d => {
+    const v = d.data(), dims = dimsOf(v), get = a => a.g(v, dims);
+    for (const c of q.conds) if (!test(get(c.a), c.a, c.op, c.x, c.y)) return false;
+    if (q.words.length){ const hay = ATTRS.filter(a => a.t === 'text').map(a => String(get(a) ?? '')).join(' ').toLowerCase(); if (!q.words.every(w => hay.includes(w))) return false; }
+    return true;
+  });
+  $('cpTargets').innerHTML = rows.slice(0, 400).map(d => { const v = d.data();
+    return `<label><input type="checkbox" value="${esc(d.id)}" ${keep.has(d.id) ? 'checked' : ''}> <b>${esc(v.part || d.id)}</b> <span class="note">${v.config?.P?.pc ?? '?'} pleats · ${esc(v.info?.mtype || '')}</span></label>`; }).join('')
+    || '<div class="note">No parts match.</div>';
+}
+function openCopy(fromId){
+  $('cpFrom').innerHTML = `<option value="${CURRENT}">The filter in the viewer${loadedId ? ' (' + esc(custMode ? custMode.cust : (libDocs.find(x => x.id === loadedId)?.data().part || loadedId)) + ')' : ''}</option>` +
+    libDocs.map(d => `<option value="${esc(d.id)}">${esc(d.data().part || d.id)}</option>`).join('');
+  $('cpFrom').value = fromId || CURRENT;
+  const toLib = fromId === undefined || fromId === CURRENT ? true : false;
+  document.querySelector(`input[name=cpTo][value=${toLib ? 'lib' : 'current'}]`).checked = true;
+  $('cpLibBox').style.display = toLib ? '' : 'none';
+  $('cpFind').value = ''; $('cpTargets').innerHTML = ''; $('cpMsg').textContent = '';
+  if (!libDb){ document.querySelector('input[name=cpTo][value=current]').checked = true; $('cpLibBox').style.display = 'none'; }
+  renderCopyTargets();
+  $('copyModal').style.display = 'flex';
+}
+$('lib_copy').onclick = () => openCopy(CURRENT);
+$('lib_list').addEventListener('click', e => { const id = e.target.dataset.copy; if (id) openCopy(id); });
+for (const r of document.querySelectorAll('input[name=cpTo]')) r.onchange = () => { $('cpLibBox').style.display = r.value === 'lib' && r.checked ? '' : 'none'; renderCopyTargets(); };
+$('cpFrom').onchange = renderCopyTargets;
+$('cpFind').oninput = renderCopyTargets;
+$('cpAll').onclick = () => { for (const i of document.querySelectorAll('#cpTargets input')) i.checked = true; };
+$('cpNone').onclick = () => { for (const i of document.querySelectorAll('#cpTargets input')) i.checked = false; };
+$('cpCancel').onclick = () => { $('copyModal').style.display = 'none'; };
+$('copyModal').addEventListener('click', e => { if (e.target.id === 'copyModal') $('copyModal').style.display = 'none'; });
+$('cpApply').onclick = async () => {
+  const keys = [...document.querySelectorAll('#cpGroups [data-ci]:checked')].map(i => i.dataset.ci);
+  if (!keys.length){ $('cpMsg').innerHTML = '<span class="err">Tick at least one setting to copy.</span>'; return; }
+  const src = sourceEntry($('cpFrom').value);
+  if (!src){ $('cpMsg').innerHTML = '<span class="err">That source part is no longer in the library.</span>'; return; }
+  const names = COPY_GROUPS.map(g => { const n = g.items.filter(it => keys.includes(it.id)).length; return n ? (n === g.items.length ? g.l : `${g.l} (${n} of ${g.items.length})`) : ''; }).filter(Boolean).join(', ');
+  if (document.querySelector('input[name=cpTo]:checked').value === 'current'){
+    if ($('cpFrom').value === CURRENT){ $('cpMsg').innerHTML = '<span class="err">Pick a different filter to copy from.</span>'; return; }
+    if (custMode && keys.some(k => !k.startsWith('ink:'))){ $('cpMsg').innerHTML = `<span class="err">${esc(custMode.cust)} is a customer part — only its inkjet can change. Switch to the base part to copy other settings.</span>`; return; }
+    const out = copyInto(src, entryFromCurrent(), keys);
+    SHEET = { ...SHEET, ...out.info }; applyConfig(out.config); renderSheet(); if (custMode) applyLock();
+    status(`Copied ${names} into the filter in the viewer — save it to keep the change.`, 'ok');
+    $('copyModal').style.display = 'none';
+    return;
+  }
+  const ids = [...document.querySelectorAll('#cpTargets input:checked')].map(i => i.value);
+  if (!ids.length){ $('cpMsg').innerHTML = '<span class="err">Tick the parts to copy into.</span>'; return; }
+  $('cpApply').disabled = true; let n = 0, fail = 0;
+  for (const id of ids){
+    const d = libDocs.find(x => x.id === id); if (!d) continue;
+    const v = d.data(), out = copyInto(src, { info: v.info || {}, config: v.config || {} }, keys);
+    try { await libDb.collection('parts').doc(id).set({ ...v, info: out.info, config: out.config, updated: Date.now() }); n++; }
+    catch (er){ fail++; }
+    $('cpMsg').textContent = `Copying… ${n} of ${ids.length}`;
+  }
+  $('cpApply').disabled = false;
+  $('cpMsg').innerHTML = `<span class="${fail ? 'err' : 'ok'}">Copied ${esc(names)} into ${n} part${n === 1 ? '' : 's'}${fail ? `; ${fail} failed` : ''}.</span>`;
+  status(`Copied settings into ${n} part${n === 1 ? '' : 's'}.`, fail ? 'err' : 'ok');
+  if (loadedId && ids.includes(loadedId)){ const d = libDocs.find(x => x.id === loadedId); if (d) loadPart(d, custMode?.cust); }
+};
+$('pickModal').addEventListener('click', e => { if (e.target.id === 'pickModal') $('pickModal').style.display = 'none'; });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('pickModal').style.display = 'none'; });
+$('lib_list').addEventListener('click', async e => {
+  const ld = e.target.dataset.load, del = e.target.dataset.del;
+  if (ld){ const d = libDocs.find(x => x.id === ld); if (d) openLoadPicker(d); }
+  if (del){
+    if (e.target.dataset.armed !== '1'){ e.target.dataset.armed = '1'; e.target.textContent = 'Confirm delete'; return; }
+    try { await libDb.collection('parts').doc(del).delete(); status('Deleted ' + del + '.', 'ok'); }
+    catch (er){ status('Delete failed (' + (er.code || 'error') + ').', 'err'); }
+  }
+});
+let saving = false;
+$('lib_save').onclick = async () => {
+  if (!libDb || saving) return;
+  if (custMode){                                   // customer part: store only its inkjet on the base record
+    const d = libDocs.find(x => x.id === custMode.base);
+    if (!d){ status('The base part is no longer in the library.', 'err'); return; }
+    const v = d.data(); saving = true;
+    try {
+      await libDb.collection('parts').doc(custMode.base).set({ ...v, inkjets: { ...(v.inkjets || {}), [custMode.cust]: inkSnapshot() }, updated: Date.now() });
+      status(`Saved ${custMode.cust}'s inkjet (base ${v.part || custMode.base}).`, 'ok'); applyLock(); renderLib();
+    } catch (er){ status('Save failed (' + (er.code || 'error') + ').', 'err'); }
+    finally { saving = false; }
+    return;
+  }
+  const pn = $('lib_pn').value.trim() || sheetVal('part');
+  if (!pn){ $('lib_msg').textContent = 'Enter a part number to save under.'; return; }
+  const id = pnId(pn);
+  if (!id){ $('lib_msg').textContent = 'That part number has no usable characters.'; return; }
+  const exists = libDocs.some(x => x.id === id);
+  if (exists && $('lib_save').dataset.armed !== id){
+    $('lib_save').dataset.armed = id; $('lib_save').textContent = 'Overwrite ' + pn + '?'; return;
+  }
+  $('lib_save').dataset.armed = ''; $('lib_save').textContent = 'Save current filter';
+  if (!SHEET.part) SHEET.part = pn;
+  saving = true;
+  try {
+    const prev = libDocs.find(x => x.id === id)?.data();
+    await libDb.collection('parts').doc(id).set({ part: pn, info: { ...SHEET }, extra: SHEET_EXTRA.map(r => ({ ...r })), config: snapshotConfig(), needs: [...NEEDS], inkjets: prev?.inkjets || {}, updated: Date.now() });
+    loadedId = id; renderLib();
+    status('Saved ' + pn + '.' + (NEEDS.size ? ` ${NEEDS.size} value${NEEDS.size === 1 ? '' : 's'} still flagged.` : ''), NEEDS.size ? 'err' : 'ok'); renderSheet();
+  } catch (er){
+    status(er.code === 'invalid_argument' ? 'You don\'t have permission to save parts here.' : 'Save failed (' + (er.code || 'error') + ').', 'err');
+  } finally { saving = false; }
+};
+
+// ---------- drawer ----------
+function openPane(which){
+  const d = $('drawer'), same = !d.classList.contains('closed') && $('pane_' + which).style.display !== 'none';
+  if (same){ d.classList.add('closed'); } else {
+    d.classList.remove('closed');
+    for (const w of ['sheet', 'lib', 'batch', 'export']){ $('pane_' + w).style.display = w === which ? '' : 'none'; $('d_' + w).classList.toggle('on', w === which); }
+    if (which === 'sheet') renderSheet();
+  }
+  if (d.classList.contains('closed')) for (const w of ['sheet', 'lib', 'batch', 'export']) $('d_' + w).classList.remove('on');
+}
+$('d_sheet').onclick = () => openPane('sheet');
+$('d_lib').onclick = () => openPane('lib');
+$('d_batch').onclick = () => openPane('batch');
+$('d_export').onclick = () => { openPane('export'); renderExport(); };
+$('d_close').onclick = () => { $('drawer').classList.add('closed'); for (const w of ['sheet', 'lib', 'batch', 'export']) $('d_' + w).classList.remove('on'); };
+renderSheet();
+initLib();
+
+// =====================================================================
+// Flags: values that need checking after an import
+// keys: P.x | ui.<id> | band.<side|end>.<0|1>.<k> | foam.<n>.<k> | info.<k>
+// =====================================================================
+let NEEDS = new Set();
+const needLabel = k => (typeof KEYLABEL !== 'undefined' && KEYLABEL[k]) || k;
+function needsLine(list){
+  if (!list || !list.length) return '';
+  const names = list.map(needLabel);
+  return `<br><span class="warnline">⚠ ${list.length} to check: ${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ', …' : ''}</span>`;
+}
+function setNeeds(list){ NEEDS = new Set(list || []); applyNeeds(); }
+const BAND_EL = { sb:'n_sb', bt:'n_bt', ob:'n_ob', ot:'n_ot', fx:'n_fx', fa:'n_fa', ol:'n_ol', oa:'n_oa', scored:'c_scored', ends:'s_ends', fold:'c_fold', fends:'s_fends' };
+const wrapOf = el => el && (el.closest('.field') || el.closest('label.chk') || el.closest('td') || el);
+// returns { el, tab } : the element to highlight now, and a tab/button to mark when it isn't on screen
+function needTarget(key){
+  const [t, a, b, c] = key.split('.');
+  if (t === 'P') return { el: wrapOf($('n_' + a)) };
+  if (t === 'ui') return { el: wrapOf($(a)) };
+  if (t === 'foam') return { el: wrapOf(document.querySelector(`#foamList [data-i="${a}"][data-k="${b}"]`)) };
+  if (t === 'info') return { el: wrapOf(document.querySelector(`#sheetInfo input[data-sk="${a}"]`)), tab: $('d_sheet') };
+  if (t === 'band'){
+    const gk = a, idx = isSym(gk) ? 0 : +b, el = $(gk + '_' + BAND_EL[c]);
+    const shown = isSym(gk) || GROUPS[gk].cur === idx;
+    return { el: shown ? wrapOf(el) : null, tab: isSym(gk) ? null : $(gk + '_t_' + idx), group: $(gk + '_c_on') };
+  }
+  return {};
+}
+function applyNeeds(){
+  try { if (!NEEDS) return; } catch { return; }   // called by the first build, before this section has run
+  for (const x of document.querySelectorAll('.need')) x.classList.remove('need');
+  for (const x of document.querySelectorAll('.need-tab')) x.classList.remove('need-tab');
+  for (const k of NEEDS){
+    const t = needTarget(k);
+    if (t.el) t.el.classList.add('need');
+    if (t.tab && (!t.el || t.tab.id === 'd_sheet')) t.tab.classList.add('need-tab');
+    if (t.group && !t.group.checked) wrapOf(t.group).classList.add('need');
+  }
+  const box = $('needsBox');
+  box.style.display = NEEDS.size ? 'block' : 'none';
+  $('needsTitle').textContent = `⚠ ${NEEDS.size} value${NEEDS.size === 1 ? '' : 's'} to check`;
+  $('needsChips').innerHTML = [...NEEDS].map(k => `<button data-need="${esc(k)}">${esc(needLabel(k))}</button>`).join('');
+}
+// jump to a flagged value
+$('needsChips').addEventListener('click', e => {
+  const k = e.target.dataset.need; if (!k) return;
+  const [t, a, b] = k.split('.');
+  if (t === 'band' && !isSym(a) && GROUPS[a].cur !== +b){ GROUPS[a].cur = +b; syncInputs(); build(); }
+  if (t === 'info' && ($('drawer').classList.contains('closed') || $('pane_sheet').style.display === 'none')) openPane('sheet');
+  const tg = needTarget(k);
+  const el = tg.el || (tg.group && wrapOf(tg.group));
+  if (el){ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); const inp = el.querySelector('input[type=number], input[type=text], input:not([type]), select'); if (inp) inp.focus({ preventScroll: true }); }
+});
+$('needsClear').onclick = () => setNeeds([]);
+// editing a flagged value clears its flag
+function keyOfInput(el){
+  if (el.dataset.sk) return ['info.' + el.dataset.sk];
+  if (el.dataset.i !== undefined && el.closest('#foamList')) return [`foam.${el.dataset.i}.${el.dataset.k}`];
+  const id = el.id || '';
+  let m = id.match(/^(side|end)_(?:[rn]_(\w+)|(c_scored|s_ends|c_fold|s_fends))$/);
+  if (m){
+    const gk = m[1], k = m[2] || Object.keys(BAND_EL).find(x => BAND_EL[x] === m[3]);
+    const keys = isSym(gk) ? [0, 1] : [GROUPS[gk].cur];
+    const extra = (k === 'sb' || k === 'ob' || k === 'ot') ? ['sb', 'ob', 'ot'] : [k];   // linked height / offsets
+    return keys.flatMap(i => extra.map(x => `band.${gk}.${i}.${x}`));
+  }
+  m = id.match(/^[rn]_(\w+)$/);
+  if (m) return ['P.' + m[1]];
+  return id ? ['ui.' + id] : [];
+}
+for (const ev of ['input', 'change']) document.addEventListener(ev, e => {
+  if (!NEEDS.size || !e.target.matches('input, select, textarea')) return;
+  const ks = keyOfInput(e.target).filter(k => NEEDS.has(k));
+  if (!ks.length) return;
+  ks.forEach(k => NEEDS.delete(k));
+  applyNeeds();
+}, true);
+
+// =====================================================================
+// Batch sheet: one row per filter, one column per setting
+// =====================================================================
+const BASELINE = (() => { const c = snapshotConfig(); c.P = { ...DEFAULTS }; for (const g of Object.values(c.groups)) { g.bands = [{ ...BAND_DEFAULT }, { ...BAND_DEFAULT }]; g.cur = 0; } c.foams = []; return c; })();
+const clone = o => JSON.parse(JSON.stringify(o));
+const optsOf = id => [...$(id).options].map(o => [o.value, o.text]);
+const COLS = [];
+// type: text | num | int | bool | enum ; phase 2 = applied after Side/End A is copied to B
+// each column carries a key naming the viewer setting it fills, used to flag fields that need checking
+let _k = null;
+const col = (h, type, get, set, extra = {}) => { COLS.push({ h, type, get, set, key: _k, ...extra }); _k = null; };
+const ui = id => { _k = 'ui.' + id; return [e => e.config.ui[id], (e, v) => { e.config.ui[id] = v; }]; };
+const pk = k => { _k = 'P.' + k; return [e => e.config.P[k], (e, v) => { e.config.P[k] = v; }]; };
+
+for (const [k, l] of SHEET_ROWS) col(l, 'text', e => e.info[k] || '', (e, v) => { e.info[k] = v; }, { group: 'Info', key: 'info.' + k });
+col('Pleat height (mm)', 'num', ...pk('ph'), { group: 'Pleats' });
+col('Pleat count', 'int', ...pk('pc'), { group: 'Pleats' });
+col('Pleat pitch (mm)', 'num', ...pk('pp'), { group: 'Pleats', help: 'Filter length = count × pitch' });
+col('Media width (mm)', 'num', ...pk('mw'), { group: 'Pleats' });
+col('Media thickness (mm)', 'num', ...pk('mt'), { group: 'Pleats' });
+col('Fold inside radius (mm)', 'num', ...pk('fr'), { group: 'Pleats' });
+col('Media orientation', 'enum', ...ui('s_cutend'), { opts: optsOf('s_cutend'), group: 'Pleats' });
+col('Media colour', 'enum', ...ui('s_mcol'), { opts: optsOf('s_mcol'), group: 'Display' });
+col('Band colour', 'enum', ...ui('s_bcol'), { opts: optsOf('s_bcol'), group: 'Display' });
+for (const gk of ['side', 'end']){
+  const G = gk === 'side' ? 'Side' : 'End';
+  col(`${G} bands`, 'bool', ...ui(gk + '_c_on'), { group: G + ' bands' });
+  for (const [i, X] of [[0, 'A'], [1, 'B']]){
+    const b = e => e.config.groups[gk].bands[i];
+    const extra = { group: `${G} band ${X}`, phase: i ? 2 : 1, side: i ? gk : null };
+    const bk = (k) => { _k = `band.${gk}.${i}.${k}`; return [e => b(e)[k], (e, v) => { b(e)[k] = v; }]; };
+    col(`${G} ${X} height (mm)`, 'num', e => b(e).sb, (e, v) => { (e._h ||= {})[gk + i] = v; }, { ...extra, key: `band.${gk}.${i}.sb`, help: 'Optional. Sets the top offset so the band is this tall.' });
+    col(`${G} ${X} thickness (mm)`, 'num', ...bk('bt'), extra);
+    col(`${G} ${X} offset below pleat (mm)`, 'num', ...bk('ob'), extra);
+    col(`${G} ${X} offset above pleat (mm)`, 'num', ...bk('ot'), extra);
+    col(`${G} ${X} scored`, 'bool', ...bk('scored'), extra);
+    col(`${G} ${X} score flap length (mm)`, 'num', ...bk('fx'), extra);
+    col(`${G} ${X} score flap angle (deg)`, 'num', ...bk('fa'), extra);
+    col(`${G} ${X} score flap edge`, 'enum', ...bk('ends'), { ...extra, opts: [['top','Top'],['bottom','Bottom'],['both','Both']] });
+    if (gk === 'end'){
+      col(`${G} ${X} fold over`, 'bool', ...bk('fold'), extra);
+      col(`${G} ${X} fold-over length (mm)`, 'num', ...bk('ol'), extra);
+      col(`${G} ${X} fold-over angle (deg)`, 'num', ...bk('oa'), extra);
+      col(`${G} ${X} fold-over edge`, 'enum', ...bk('fends'), { ...extra, opts: [['top','Top'],['bottom','Bottom'],['both','Both']] });
+    }
+  }
+}
+col('Pull tab', 'bool', ...ui('c_tab'), { group: 'Pull tab' });
+col('Pull tab band', 'enum', ...ui('s_tabon'), { opts: optsOf('s_tabon'), group: 'Pull tab' });
+col('Pull tab free end points', 'enum', e => e.config.ui.s_tabdir === '-1' ? 'left' : 'right', (e, v) => { e.config.ui.s_tabdir = v === 'left' ? '-1' : '1'; }, { opts: [['right','Right'],['left','Left']], group: 'Pull tab', key: 'ui.s_tabdir' });
+col('Pull tab glue-on length (mm)', 'num', ...pk('tg'), { group: 'Pull tab' });
+col('Pull tab free length (mm)', 'num', ...pk('tf'), { group: 'Pull tab' });
+col('Pull tab strip width (mm)', 'num', ...pk('tw'), { group: 'Pull tab' });
+col('Pull tab position from band end (mm)', 'num', ...pk('tp'), { group: 'Pull tab' });
+col('Pull tab height offset (mm)', 'num', ...pk('tv'), { group: 'Pull tab' });
+col('Pull tab free end angle (deg)', 'num', ...pk('ta'), { group: 'Pull tab' });
+col('Glue beads', 'bool', ...ui('c_glue'), { group: 'Glue beads' });
+col('Glue beads on', 'enum', ...ui('s_glue'), { opts: optsOf('s_glue'), group: 'Glue beads' });
+col('Glue bead count', 'int', ...pk('gn'), { group: 'Glue beads' });
+col('Glue bead spacing (mm)', 'num', ...pk('gs'), { group: 'Glue beads' });
+col('Glue bead diameter (mm)', 'num', ...pk('gd'), { group: 'Glue beads' });
+col('Glue bead dip (mm)', 'num', ...pk('gg'), { group: 'Glue beads' });
+col('Inkjet', 'bool', ...ui('c_ink'), { group: 'Inkjet' });
+col('Inkjet band', 'enum', ...ui('s_inkon'), { opts: optsOf('s_inkon'), group: 'Inkjet' });
+col('Inkjet part number', 'text', ...ui('i_part'), { group: 'Inkjet', help: 'Blank = Part number' });
+col('Inkjet date code', 'text', ...ui('i_date'), { group: 'Inkjet' });
+col('Inkjet country of origin', 'text', ...ui('i_coo'), { group: 'Inkjet' });
+col('Inkjet EPA registration', 'text', ...ui('i_epa'), { group: 'Inkjet', help: 'Several lines: put each on its own line in the cell (Alt+Enter) or separate with |' });
+col('Inkjet extra word', 'text', ...ui('i_word'), { group: 'Inkjet', help: 'e.g. HEPA' });
+col('Inkjet arrow', 'enum', ...ui('s_arrow'), { opts: optsOf('s_arrow'), group: 'Inkjet' });
+col('Inkjet arrow text', 'enum', ...ui('s_inklabel'), { opts: optsOf('s_inklabel'), group: 'Inkjet' });
+col('Inkjet orientation', 'enum', ...ui('s_orient'), { opts: optsOf('s_orient'), group: 'Inkjet' });
+col('Inkjet text height (mm)', 'num', ...pk('kh'), { group: 'Inkjet' });
+col('Inkjet horizontal from centre (mm)', 'num', ...pk('kx'), { group: 'Inkjet' });
+col('Inkjet vertical from centre (mm)', 'num', ...pk('ky'), { group: 'Inkjet' });
+for (let n = 0; n < 4; n++){
+  const F = `Foam ${n + 1}`, fo = e => (e.config.foams[n] ||= { ...FOAM_DEFAULT, where: '' });
+  const fk = k => { _k = `foam.${n}.${k}`; return [e => e.config.foams[n]?.[k], (e, v) => { fo(e)[k] = v; }]; };
+  col(`${F} placed on`, 'enum', e => e.config.foams[n]?.where ?? '', (e, v) => { fo(e).where = v; }, { opts: Object.entries(WHERE), group: F, key: `foam.${n}.where`, help: 'Blank = no foam strip' });
+  col(`${F} width (mm)`, 'num', ...fk('w'), { group: F });
+  col(`${F} thickness (mm)`, 'num', ...fk('t'), { group: F });
+  col(`${F} height from band bottom (mm)`, 'num', ...fk('off'), { group: F });
+  col(`${F} length (mm)`, 'num', ...fk('len'), { group: F, help: '0 = full length' });
+  col(`${F} position from centre (mm)`, 'num', ...fk('pos'), { group: F });
+  col(`${F} link group`, 'enum', e => e.config.foams[n]?.link ?? '', (e, v) => { fo(e).link = v; }, { opts: [['', 'Not linked'], ['A','A'], ['B','B'], ['C','C'], ['D','D']], group: F, key: `foam.${n}.link` });
+  col(`${F} gap side`, 'enum', e => e.config.foams[n]?.gap ?? '', (e, v) => { fo(e).gap = v; }, { opts: Object.entries(GAPS), group: F, key: `foam.${n}.gap`, help: 'All-around foam only. Blank = no gap' });
+  col(`${F} gap length (mm)`, 'num', ...fk('gl'), { group: F });
+  col(`${F} gap position from centre (mm)`, 'num', ...fk('gp'), { group: F });
+}
+col('Needs review', 'text', e => (e.needs || []).map(k => KEYDB[k] || k).join('; '), (e, v) => { e._review = v; },
+  { group: 'Review', key: null, help: 'Column names to flag for checking in the viewer, separated by ; (filled in automatically on export)' });
+// database-friendly column names: lower_snake_case, units as suffixes (pleat_height_mm), # -> no
+const dbName = h => h.toLowerCase().replace(/#/g, ' no').replace(/\((mm|deg)\)/g, ' $1').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+for (const c of COLS) c.db = dbName(c.h);
+{ const seen = new Set(); for (const c of COLS){ let n = c.db, i = 2; while (seen.has(n)) n = c.db + '_' + i++; c.db = n; seen.add(n); } }
+const KEYLABEL = Object.fromEntries(COLS.filter(c => c.key).map(c => [c.key, c.h]));
+const KEYDB = Object.fromEntries(COLS.filter(c => c.key).map(c => [c.key, c.db]));
+// a header or "needs review" entry may use the database name or the older readable label
+const colByName = name => { const n = String(name).trim().toLowerCase(); return COLS.find(c => c.db === n || c.h.toLowerCase() === n || c.db === dbName(n)); };
+
+const YES = ['y','yes','true','1','x','on'], NO = ['n','no','false','0','off'];
+function parseCell(c, raw){
+  const s = String(raw).trim();
+  switch (c.type){
+    case 'text': return { v: s };
+    case 'num': case 'int': {
+      const v = Number(s.replace(',', '.'));
+      if (!isFinite(v)) return { err: `"${s}" is not a number` };
+      return { v: c.type === 'int' ? Math.round(v) : v };
+    }
+    case 'bool': {
+      const l = s.toLowerCase();
+      if (YES.includes(l)) return { v: true }; if (NO.includes(l)) return { v: false };
+      return { err: `"${s}" should be Yes or No` };
+    }
+    case 'enum': {
+      const l = s.toLowerCase();
+      const m = c.opts.find(([v, t]) => v.toLowerCase() === l || String(t).toLowerCase() === l);
+      return m ? { v: m[0] } : { err: `"${s}" is not one of: ${c.opts.map(o => o[0] || '(blank)').join(', ')}` };
+    }
+  }
+}
+const fmtCell = (c, v) => v === undefined || v === null ? '' : c.type === 'bool' ? (v ? 'Yes' : 'No') : v;
+
+function entryFromCurrent(){ return { info: { ...SHEET }, extra: SHEET_EXTRA.map(r => ({ ...r })), config: snapshotConfig() }; }
+function rowOf(e){
+  return COLS.map(c => {
+    if (c.side && e.config.ui[c.side + '_c_sym']) return '';            // symmetrical: B mirrors A
+    return fmtCell(c, c.get(e));
+  });
+}
+function entryFromRow(cells){
+  const e = { info: {}, extra: [], config: clone(BASELINE) }, errs = [], issues = [];
+  const filled = new Set(), needs = new Set();
+  const use = (c, i) => {
+    const raw = cells[i];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return false;
+    const r = parseCell(c, raw);
+    if (r.err){ issues.push(`${c.h}: ${r.err}`); if (c.key) needs.add(c.key); return false; }
+    c.set(e, r.v); if (c.key) filled.add(c.key); return true;
+  };
+  COLS.forEach((c, i) => { if (c.phase !== 2) use(c, i); });
+  for (const gk of ['side', 'end']){
+    const g = e.config.groups[gk];
+    g.bands[1] = { ...g.bands[0] };
+    if (e._h && e._h[gk + '0'] !== undefined) e._h[gk + '1'] ??= e._h[gk + '0'];
+    let anyB = false;
+    COLS.forEach((c, i) => { if (c.phase === 2 && c.side === gk && use(c, i)) anyB = true; });
+    e.config.ui[gk + '_c_sym'] = !anyB;
+    g.bands.forEach((b, i) => {                                 // band height ↔ offsets
+      const h = e._h?.[gk + i];
+      if (h !== undefined) b.ot = +(h - e.config.P.ph - b.ob).toFixed(2);
+      b.sb = +(e.config.P.ph + b.ob + b.ot).toFixed(2);
+    });
+  }
+  delete e._h;
+  e.config.foams = e.config.foams.filter(f => f && f.where);
+  const P_ = e.config.P;
+  P_.fl = +(P_.pc * P_.pp).toFixed(2);
+  if (!filled.has('ui.i_part')) e.config.ui.i_part = e.info.part || '';   // inkjet prints the part number unless the sheet says otherwise
+  if (!e.info.part) errs.push('Part number is required');
+  // ---- required data that the row left blank ----
+  const want = k => { if (!filled.has(k)) needs.add(k); };
+  ['P.ph', 'P.pc', 'P.pp', 'P.mw'].forEach(want);
+  for (const gk of ['side', 'end']){
+    if (!e.config.ui[gk + '_c_on']) continue;
+    const bands = e.config.ui[gk + '_c_sym'] ? [0] : [0, 1];
+    for (const i of bands){
+      const b = e.config.groups[gk].bands[i], key = k => `band.${gk}.${i}.${k}`;
+      if (i === 0) want(key('bt'));               // Side/End B copies A unless given
+      if (!filled.has(key('sb')) && !(filled.has(key('ob')) && filled.has(key('ot'))) && i === 0) needs.add(key('sb'));
+      if (b.scored) want(key('fx'));
+      if (b.fold) want(key('ol'));
+    }
+  }
+  if (e.config.ui.c_tab) ['P.tg', 'P.tf', 'P.tw'].forEach(want);
+  if (e.config.ui.c_glue) ['P.gn', 'P.gs'].forEach(want);
+  if (e.config.ui.c_ink) want('ui.i_date');
+  e.config.foams.forEach((f, n) => { want(`foam.${n}.w`); want(`foam.${n}.t`); });
+  // ---- columns the sheet itself asks to have checked ----
+  for (const name of String(e._review || '').split(/[;\n]+/).map(t => t.trim()).filter(Boolean)){
+    const c = colByName(name);
+    if (c && c.key) needs.add(c.key); else issues.push(`Needs review: unknown column "${name}"`);
+  }
+  delete e._review;
+  e.needs = [...needs];
+  return { e, errs, issues };
+}
+
+function helpRows(){
+  return [['column', 'description', 'section', 'type', 'allowed_values_and_notes'],
+    ...COLS.map(c => [c.db, c.h, c.group || '', c.type === 'int' ? 'whole number' : c.type === 'num' ? 'number' : c.type === 'bool' ? 'Yes / No' : c.type === 'enum' ? 'choice' : 'text',
+      [c.type === 'enum' ? c.opts.map(([v, t]) => (v || '(blank)') + (t && t !== v ? ' = ' + t : '')).join('; ') : '', c.help || ''].filter(Boolean).join(' — ')]),
+    [], ['Blank cells use the default.'], ['Side B / End B: leave blank to match Side A / End A.'], ['Band height and the offsets are linked: give a height, or the two offsets.'], ['Older sheets with the readable column names (e.g. "Pleat height (mm)") still import.']];
+}
+async function saveWorkbook(rows, filename, msgId = 'bt_msg'){
+  const dl = await capDownloads;
+  if (!dl){ $(msgId).innerHTML = '<span class="err">Downloads aren\'t available in this view.</span>'; return; }
+  if (!window.XLSX){ $(msgId).innerHTML = '<span class="err">The spreadsheet library didn\'t load.</span>'; return; }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([COLS.map(c => c.db), ...rows]);
+  ws['!cols'] = COLS.map(c => ({ wch: Math.max(10, Math.min(30, c.db.length + 2)) }));
+  ws['!freeze'] = { xSplit: 1, ySplit: 1 };
+  XLSX.utils.book_append_sheet(wb, ws, 'Filters');
+  const hs = XLSX.utils.aoa_to_sheet(helpRows()); hs['!cols'] = [{ wch: 38 }, { wch: 38 }, { wch: 16 }, { wch: 14 }, { wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, hs, 'Help');
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  try { await dl.save({ filename, data: new Uint8Array(buf) }); $(msgId).innerHTML = '<span class="ok">Sheet saved.</span>'; }
+  catch (er){ if (er && er.code !== 'declined') $(msgId).innerHTML = `<span class="err">Couldn't save the sheet (${esc(er.code || 'error')}).</span>`; }
+}
+$('bt_template').onclick = () => saveWorkbook([rowOf({ ...entryFromCurrent(), needs: [...NEEDS] })], 'filter-batch-sheet.xlsx');
+// =====================================================================
+// Export tab: pick library parts, export STL (zip) and/or an Excel batch sheet
+// =====================================================================
+const exSel = new Set();
+function exMatches(){
+  const q = parseQuery($('ex_find').value);
+  return libDocs.filter(d => {
+    const v = d.data(), dims = dimsOf(v), get = a => a.g(v, dims);
+    for (const c of q.conds) if (!test(get(c.a), c.a, c.op, c.x, c.y)) return false;
+    if (q.words.length){ const hay = ATTRS.filter(a => a.t === 'text').map(a => String(get(a) ?? '')).join(' ').toLowerCase(); if (!q.words.every(w => hay.includes(w))) return false; }
+    return true;
+  });
+}
+function renderExport(){
+  for (const id of [...exSel]) if (!libDocs.some(d => d.id === id)) exSel.delete(id);
+  const rows = exMatches();
+  $('ex_count').textContent = `${exSel.size} selected · ${rows.length} shown of ${libDocs.length}`;
+  $('ex_list').innerHTML = !libDocs.length ? '<div class="note">No parts in the library yet.</div>' : rows.slice(0, 400).map(d => {
+    const v = d.data(), dims = dimsOf(v);
+    return `<label class="lib-row${exSel.has(d.id) ? ' loaded' : ''}" style="cursor:pointer"><input type="checkbox" data-ex="${esc(d.id)}" ${exSel.has(d.id) ? 'checked' : ''}>
+      <span class="pn">${esc(v.part || d.id)}</span><span class="meta">${dims.P.pc} pleats · ${f1(dims.len)} × ${f1(dims.wid)} × ${f1(dims.hgt)} mm${v.info?.mtype ? ' · ' + esc(v.info.mtype) : ''}</span></label>`;
+  }).join('') + (rows.length > 400 ? '<div class="note">Showing the first 400 — narrow the filter to see the rest.</div>' : '');
+}
+$('ex_list').addEventListener('change', e => { const id = e.target.dataset.ex; if (!id) return; e.target.checked ? exSel.add(id) : exSel.delete(id); renderExport(); });
+$('ex_find').addEventListener('input', renderExport);
+$('ex_all').onclick = () => { for (const d of exMatches()) exSel.add(d.id); renderExport(); };
+$('ex_none').onclick = () => { exSel.clear(); renderExport(); };
+const libRow = v => rowOf({ info: v.info || {}, extra: v.extra || [], needs: v.needs || [], config: { ...clone(BASELINE), ...clone(v.config || {}), ui: { ...BASELINE.ui, ...(v.config?.ui || {}) } } });
+const safeName = t => String(t || 'filter').replace(/[^\w.\-]+/g, '_');
+let exporting = false;
+$('ex_go').onclick = async () => {
+  if (exporting) return;
+  const docs = libDocs.filter(d => exSel.has(d.id)), doStl = $('ex_stl').checked, doXlsx = $('ex_xlsx').checked;
+  if (!docs.length){ $('ex_msg').innerHTML = '<span class="err">Tick the parts to export.</span>'; return; }
+  if (!doStl && !doXlsx){ $('ex_msg').innerHTML = '<span class="err">Choose STL, Excel or both.</span>'; return; }
+  const dl = await capDownloads;
+  if (!dl){ $('ex_msg').innerHTML = '<span class="err">Downloads aren\'t available in this view.</span>'; return; }
+  exporting = true; $('ex_go').disabled = true;
+  try {
+    if (doXlsx) await saveWorkbook(docs.map(d => libRow(d.data())), docs.length === 1 ? safeName(docs[0].data().part) + '.xlsx' : `filter-export-${docs.length}-parts.xlsx`, 'ex_msg');
+    if (doStl){
+      // build each part in the viewer, export its mesh, then put the viewer back as it was
+      const keep = { e: entryFromCurrent(), needs: [...NEEDS], cust: custMode, loaded: loadedId, batch: loadedBatch };
+      const files = [];
+      try {
+        for (const [n, d] of docs.entries()){
+          $('ex_msg').textContent = `Building STL ${n + 1} of ${docs.length}: ${d.data().part || d.id}…`;
+          await new Promise(r => setTimeout(r, 0));
+          custMode = null; applyConfig(clone(d.data().config || {}));
+          files.push({ name: safeName(d.data().part || d.id) + '.stl', data: buildSTL() });
+        }
+      } finally {
+        SHEET = { ...keep.e.info }; custMode = keep.cust; applyConfig(keep.e.config); setNeeds(keep.needs);
+        loadedId = keep.loaded; loadedBatch = keep.batch; renderSheet(); applyLock();
+      }
+      const direct = typeof localSave === 'function' && files.length === 1;   // the standalone file can save a bare .stl
+      try {
+        await dl.save(direct ? { filename: files[0].name, data: new Blob([files[0].data], { type: 'model/stl' }) }
+                             : { filename: files.length === 1 ? files[0].name.replace(/\.stl$/, '-stl.zip') : `filter-stl-${files.length}-parts.zip`, data: zipMulti(files) });
+        $('ex_msg').innerHTML = `<span class="ok">Exported ${files.length} STL file${files.length === 1 ? '' : 's'}${direct ? '' : ' in a .zip'}${doXlsx ? ' and the Excel sheet' : ''}.</span>`;
+      } catch (er){ if (er && er.code !== 'declined') $('ex_msg').innerHTML = `<span class="err">Couldn't save the STL files (${esc(er.code || 'error')}).</span>`; }
+    }
+  } finally { exporting = false; $('ex_go').disabled = false; }
+};
+
+$('bt_export').onclick = () => {
+  if (!libDocs.length){ $('bt_msg').textContent = 'No saved parts to export.'; return; }
+  saveWorkbook(libDocs.map(d => { const v = d.data(); return rowOf({ info: v.info || {}, extra: v.extra || [], needs: v.needs || [], config: { ...clone(BASELINE), ...clone(v.config || {}), ui: { ...BASELINE.ui, ...(v.config?.ui || {}) } } }); }), 'filter-parts.xlsx');
+};
+
+let batch = [];
+$('bt_file').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  if (!window.XLSX){ $('bt_msg').innerHTML = '<span class="err">The spreadsheet library didn\'t load.</span>'; return; }
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const ws = wb.Sheets['Filters'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+    const head = (rows[0] || []).map(h => String(h).trim().toLowerCase());
+    const idx = COLS.map(c => head.findIndex(h => h && colByName(h) === c));
+    if (idx[0] < 0) throw new Error('No "part_number" column found — use the downloaded batch sheet.');
+    const unknown = (rows[0] || []).filter(h => String(h).trim() && !colByName(h));
+    batch = rows.slice(1).map((r, n) => ({ n: n + 2, r })).filter(x => x.r.some(v => String(v).trim() !== ''))
+      .map(({ n, r }) => ({ n, ...entryFromRow(idx.map(i => i < 0 ? '' : r[i])) }));
+    $('bt_msg').innerHTML = `Read ${batch.length} filter${batch.length === 1 ? '' : 's'} from ${esc(file.name)}.` + (unknown.length ? ` <span class="err">Ignored unknown columns: ${esc(unknown.join(', '))}.</span>` : '');
+    renderBatch();
+  } catch (er){ $('bt_msg').innerHTML = `<span class="err">Couldn't read that file: ${esc(er.message || er)}</span>`; }
+});
+function renderBatch(){
+  const ok = batch.filter(b => !b.errs.length);
+  const flagged = batch.filter(b => b.e.needs.length).length;
+  const existing = ok.filter(b => libDocs.some(d => d.id === pnId(b.e.info.part))).length;
+  $('bt_list').innerHTML = !batch.length ? '' :
+    `<div class="row" style="gap:8px;margin:6px 0">
+      <button id="bt_saveall" ${ok.length && libDb ? '' : 'disabled'}>Save ${ok.length} to part library</button>
+      <span class="note">${existing ? existing + ' already in the library will be overwritten. ' : ''}${batch.length - ok.length ? (batch.length - ok.length) + ' row(s) have errors and will be skipped. ' : ''}${flagged ? `<span class="warnline">${flagged} filter${flagged === 1 ? '' : 's'} flagged with values to check — they save with their flags; load one to see what needs adjusting.</span>` : ''}${libDb ? '' : 'Saving needs the part library, which isn\'t available in this view.'}</span></div>` +
+    batch.map((b, i) => `<div class="lib-row${i === loadedBatch ? ' loaded' : ''}"><span class="pn">${esc(b.e.info.part || '(no part #)')}</span>
+      <span class="meta">Row ${b.n} · ${b.e.config.P.pc} pleats · ${b.e.config.P.ph} mm · ${b.e.config.P.mw} mm media${b.errs.length ? `<br><span class="err">${b.errs.map(esc).join('<br>')}</span>` : ''}${needsLine(b.e.needs)}${b.issues.length ? `<br><span class="warnline">${b.issues.map(esc).join('<br>')}</span>` : ''}</span>
+      <button data-bload="${i}">Load</button></div>`).join('');
+}
+$('bt_list').addEventListener('click', async e => {
+  const i = e.target.dataset.bload;
+  if (i !== undefined){
+    const b = batch[+i];
+    SHEET = { ...b.e.info }; SHEET_EXTRA = []; setNeeds(b.e.needs); applyConfig(clone(b.e.config)); renderSheet();
+    loadedBatch = +i; loadedId = null; custMode = null; $('lib_save').textContent = 'Save current filter'; applyLock(); renderBatch(); renderLib();
+    $('lib_pn').value = b.e.info.part || ''; status('Loaded row ' + b.n + (b.errs.length ? ' (has errors)' : '') + '.', b.errs.length ? 'err' : 'ok');
+  }
+  if (e.target.id === 'bt_saveall'){
+    const btn = e.target; btn.disabled = true;
+    let n = 0, fail = 0;
+    for (const b of batch.filter(b => !b.errs.length)){
+      try { const prev = libDocs.find(x => x.id === pnId(b.e.info.part))?.data();
+        await libDb.collection('parts').doc(pnId(b.e.info.part)).set({ part: b.e.info.part, info: b.e.info, extra: [], config: b.e.config, needs: b.e.needs || [], inkjets: prev?.inkjets || {}, updated: Date.now() }); n++; }
+      catch (er){ fail++; if (er.code === 'invalid_argument' || er.code === 'quota_exceeded') { $('bt_msg').innerHTML = `<span class="err">Stopped: ${er.code === 'quota_exceeded' ? 'the library is full' : 'you don\'t have permission to save parts here'}.</span>`; break; } }
+      btn.textContent = `Saving… ${n}`;
+    }
+    status(`Saved ${n} part${n === 1 ? '' : 's'} to the library${fail ? `, ${fail} failed` : ''}.`, fail ? 'err' : 'ok');
+    renderBatch();
+  }
+});
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); labelRenderer.render(scene, camera); });
+
+// =====================================================================
+// Production Suite: open a part (?part=) or the one running on a line (?line=, following changeovers), and the
+// view-only screen (?view=1: look, turn and zoom; nothing to change or save).
+// =====================================================================
+(() => {
+  const H = window.FV_HOST || {};
+  if (H.view) document.body.classList.add('fv-view');
+  const VIEW_OK = new Set(['c_ghost', 'c_edges', 'c_grid', 'c_dims', 'c_dim_o', 'c_dim_p', 'c_dim_b', 'c_dim_x', 'b_iso', 'b_side', 'b_top', 'd_sheet', 'd_close']);
+  window.__fvView = () => {
+    if (!H.view) return;
+    for (const el of document.querySelectorAll('#panel input, #panel select, #panel textarea, #panel button, #drawer input, #drawer select, #drawer textarea, #drawer button')){
+      if (!VIEW_OK.has(el.id)) el.disabled = true;
+    }
+  };
+  const note = (html, warn) => { const n = $('fvNote'); n.innerHTML = html; n.className = warn ? 'warn' : ''; n.hidden = !html; };
+  const csrf = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+  let shown = null;
+  async function open(part, extra){
+    shown = part;
+    if (!part){ note(extra || 'Nothing is running on this line.', true); window.__fvView(); return; }
+    let msg = '';
+    try {
+      const r = await fetch('/api/quality/fv/refresh', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() }, body: JSON.stringify({ part, line: H.line || '' }) }).then(r => r.json());
+      msg = r.msg || '';
+    } catch {}
+    await window.__fvHost.reload();
+    await new Promise(r => setTimeout(r, 30));
+    const P = part.trim().toUpperCase();
+    const d = libDocs.find(x => x.id === pnId(P)) || libDocs.find(x => String(x.data().part || '').toUpperCase() === P);
+    const byCust = !d && libDocs.find(x => custsOf(x.data()).some(c => c.toUpperCase() === P));
+    if (d) loadPart(d);
+    else if (byCust) loadPart(byCust, custsOf(byCust.data()).find(c => c.toUpperCase() === P));
+    else { note(`<b>${esc(part)}</b> isn't in the 3D part library yet.${H.view ? ' Quality adds filters in Quality › 3D viewer.' : ''}${extra ? '<br>' + extra : ''}`, true); window.__fvView(); return; }
+    note(`<b>${esc(part)}</b>${extra ? ' · ' + extra : ''}${msg && !/no 3D/.test(msg) ? '<br><span class="note">' + esc(msg) + '</span>' : ''}`);
+    window.__fvView();
+  }
+  window.__fvHost.ready.then(async () => {
+    window.__fvView();
+    if (H.line){
+      const follow = async () => {
+        try {
+          const r = await fetch('/api/quality/fv/running?line=' + encodeURIComponent(H.line), { credentials: 'same-origin', cache: 'no-store' }).then(r => r.json());
+          if (r.ok && r.part !== shown) await open(r.part, r.part ? `MO ${esc(r.mo)}${r.settingUp ? ' · setting up' : ' · running'} on ${esc(H.line)}` : `Nothing is running on ${esc(H.line)}.`);
+        } catch {}
+      };
+      await follow(); setInterval(() => { if (!document.hidden) follow(); }, 20000);
+    } else if (H.part) await open(H.part);
+  });
+})();
+</script>
+</body>
+</html>

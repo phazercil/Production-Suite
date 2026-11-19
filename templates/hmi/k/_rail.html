@@ -4,6 +4,7 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="#E06C5B" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 22 20H2Z"/><path d="M12 10v4M12 17h.01" stroke-linecap="round"/></svg>
     <span class="alarmcount">{% if alarms %}{{ alarms|length }}{% endif %}</span>
   </button>
+  <button type="button" class="ibtn suite-fs-rail" data-fullscreen title="Full screen (Esc leaves it)" aria-label="Full screen"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg></button>
   <div class="spacer"></div>
   {% if S.sup %}<button class="login sup on" hx-post="/kiosk/do/supEnd" title="Supervisor override by {{ S.sup.name }}"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>
     <span>End override</span><span class="who">{{ S.sup.name }}</span></button>
