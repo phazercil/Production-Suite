@@ -22,7 +22,8 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("qc.approve", "Approve out-of-spec QC", "Approve or disapprove a QC check that failed, and scrap filters from the count.", SUP),
         ("runs.nomo", "Run without an MO", "When a line has no MO to run, enter the filter number it runs by (Change over › No MO). With the Supervisor button on an operator's screen.", SUP),
         ("runs.override", "Override a running shift", "Change the speed or count settings of a shift that is running.", LEAD),
-        ("tickets.work", "Work maintenance requests", "Add repair notes and close maintenance requests.", SUP),
+        ("tickets.work", "Work maintenance requests", "Add repair notes, change a request's status (Maintenance › Requests) and record the parts used on a machine.", SUP),
+        ("inventory.edit", "Maintenance inventory", "Maintenance › Inventory: add and change items, add stock and count it.", SUP),
     ]),
     ("Quality", [
         ("quality.tolerances", "Quality settings", "Quality › QC checks, Parts & specs and Tolerances: what each stage's QC check asks, each part's drawing specs (and importing them from the asset database), how far each measurement may be under or over for every filter, and the Process Out issue list.", LEAD),

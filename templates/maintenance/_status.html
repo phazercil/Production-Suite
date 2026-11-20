@@ -1,0 +1,1 @@
+<span class="pill {% if st == 'Closed' %}ok{% elif st == 'Open' %}bad{% elif st == 'Reviewed' %}idle{% else %}warn{% endif %}">{% if st == "Closed" %}Completed{% else %}{{ st }}{% endif %}</span>

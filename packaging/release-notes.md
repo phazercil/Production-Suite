@@ -1,3 +1,21 @@
+## What's new in 1.9.3
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Maintenance section:** the Maintenance tab in the top bar is now open (Admin › Permissions › Open Maintenance; maintenance, shift leads and admins have it).
+  - **Pending requests:** every request from the lines that isn't completed, on every machine, high priority first. Filter by machine or status.
+  - **Status form:** each request has a status form (Open, Reviewed, In progress, Waiting on parts, Completed) with a note on why. Every change goes in the request's history with who made it, and the lines get a notice.
+  - **Completed** lists the last 30 days of completed requests; a request can be set back to Open from there.
+  - The Operator Kiosk's Maintenance page shows the new statuses and has the same status picker.
+- **Inventory (Maintenance › Inventory):** the parts and supplies maintenance keeps: name, part #, location, unit, what's on hand and the reorder level (low or out shows in colour).
+  - **Add stock** when parts come in, and **Count** to set what's on the shelf; every change is logged.
+  - **Use on a machine** records parts used, with or without a request. On a request, **Parts used** does the same from the request's card. The parts come off the stock, are linked to the machine (and the request), and the request's history says what was used. **Take back** undoes one recorded by mistake.
+  - **Parts by machine** shows everything used on each machine: totals per item and every use.
+  - The new **Maintenance inventory** permission adds and changes items and stock. Recording parts used needs **Work maintenance requests**.
+- **Connector builder in pages:** Admin › Connector builder is split into **Machines**, **MOs & schedule**, **Filter dimensions** and **Changeover & tooling**, each with how many of its boxes are connected. Each page shows the source cards its boxes use and the cards nothing uses yet. A **Still needed** chip opens the page its box is on.
+- **3D filter data has every viewer setting:** the box now has an input for each of the 3D viewer's batch-sheet settings: pleats, media, side and end bands (height, thickness, offset below and above the pleat, score flaps), fold-overs, pull tab, glue beads, inkjet, foam strips 1–4 and the info sheet, plus a unit of measure for the (mm) ones. B bands copy A when the database has no B. A setting the database doesn't have keeps what's saved in the viewer.
+- **The 3D viewer's part library is a source:** in the Connector builder, add a source card from the **3D viewer part library** (table filter_parts: the part number and every setting of each filter in Quality › 3D viewer). Wire it to Tooling for the part (its screw, helix and media material numbers), Part specs, Changeover steps or Machine settings: no outside database needed, and an edit in the viewer shows up straight away. Filters saved before this update are added when someone with Quality settings opens Quality › 3D viewer.
+
 ## What's new in 1.9.2
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).

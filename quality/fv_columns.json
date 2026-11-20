@@ -1,0 +1,961 @@
+[
+{
+"db": "base_number",
+"h": "Base number",
+"type": "text",
+"group": "Info",
+"key": "info.base"
+},
+{
+"db": "production_number",
+"h": "Production number",
+"type": "text",
+"group": "Info",
+"key": "info.prod"
+},
+{
+"db": "airqualitee_no",
+"h": "AirQualitee #",
+"type": "text",
+"group": "Info",
+"key": "info.aq"
+},
+{
+"db": "customer_oe_no",
+"h": "Customer / OE #",
+"type": "text",
+"group": "Info",
+"key": "info.cust"
+},
+{
+"db": "media_material_no",
+"h": "Media material #",
+"type": "text",
+"group": "Info",
+"key": "info.media"
+},
+{
+"db": "media_type",
+"h": "Media type",
+"type": "text",
+"group": "Info",
+"key": "info.mtype"
+},
+{
+"db": "side_band_material_no",
+"h": "Side band material #",
+"type": "text",
+"group": "Info",
+"key": "info.sband"
+},
+{
+"db": "end_band_material_no",
+"h": "End band material #",
+"type": "text",
+"group": "Info",
+"key": "info.eband"
+},
+{
+"db": "foam_material_no",
+"h": "Foam material #",
+"type": "text",
+"group": "Info",
+"key": "info.foam"
+},
+{
+"db": "glue",
+"h": "Glue",
+"type": "text",
+"group": "Info",
+"key": "info.glue"
+},
+{
+"db": "screw_no",
+"h": "Screw #",
+"type": "text",
+"group": "Info",
+"key": "info.screw"
+},
+{
+"db": "helix_no",
+"h": "Helix #",
+"type": "text",
+"group": "Info",
+"key": "info.helix"
+},
+{
+"db": "tolerance_length",
+"h": "Tolerance \u2013 length",
+"type": "text",
+"group": "Info",
+"key": "info.tol_len"
+},
+{
+"db": "tolerance_width",
+"h": "Tolerance \u2013 width",
+"type": "text",
+"group": "Info",
+"key": "info.tol_wid"
+},
+{
+"db": "tolerance_filter_height",
+"h": "Tolerance \u2013 filter height",
+"type": "text",
+"group": "Info",
+"key": "info.tol_fh"
+},
+{
+"db": "tolerance_pleat_height",
+"h": "Tolerance \u2013 pleat height",
+"type": "text",
+"group": "Info",
+"key": "info.tol_ph"
+},
+{
+"db": "tolerance_pleats",
+"h": "Tolerance \u2013 pleats",
+"type": "text",
+"group": "Info",
+"key": "info.tol_pc"
+},
+{
+"db": "notes",
+"h": "Notes",
+"type": "text",
+"group": "Info",
+"key": "info.notes"
+},
+{
+"db": "pleat_height_mm",
+"h": "Pleat height (mm)",
+"type": "num",
+"group": "Pleats",
+"key": "P.ph"
+},
+{
+"db": "pleat_count",
+"h": "Pleat count",
+"type": "int",
+"group": "Pleats",
+"key": "P.pc"
+},
+{
+"db": "pleat_pitch_mm",
+"h": "Pleat pitch (mm)",
+"type": "num",
+"group": "Pleats",
+"key": "P.pp"
+},
+{
+"db": "media_width_mm",
+"h": "Media width (mm)",
+"type": "num",
+"group": "Pleats",
+"key": "P.mw"
+},
+{
+"db": "media_thickness_mm",
+"h": "Media thickness (mm)",
+"type": "num",
+"group": "Pleats",
+"key": "P.mt"
+},
+{
+"db": "fold_inside_radius_mm",
+"h": "Fold inside radius (mm)",
+"type": "num",
+"group": "Pleats",
+"key": "P.fr"
+},
+{
+"db": "media_orientation",
+"h": "Media orientation",
+"type": "enum",
+"group": "Pleats",
+"key": "ui.s_cutend"
+},
+{
+"db": "media_colour",
+"h": "Media colour",
+"type": "enum",
+"group": "Display",
+"key": "ui.s_mcol"
+},
+{
+"db": "band_colour",
+"h": "Band colour",
+"type": "enum",
+"group": "Display",
+"key": "ui.s_bcol"
+},
+{
+"db": "side_bands",
+"h": "Side bands",
+"type": "bool",
+"group": "Side bands",
+"key": "ui.side_c_on"
+},
+{
+"db": "side_a_height_mm",
+"h": "Side A height (mm)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.sb"
+},
+{
+"db": "side_a_thickness_mm",
+"h": "Side A thickness (mm)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.bt"
+},
+{
+"db": "side_a_offset_below_pleat_mm",
+"h": "Side A offset below pleat (mm)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.ob"
+},
+{
+"db": "side_a_offset_above_pleat_mm",
+"h": "Side A offset above pleat (mm)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.ot"
+},
+{
+"db": "side_a_scored",
+"h": "Side A scored",
+"type": "bool",
+"group": "Side band A",
+"key": "band.side.0.scored"
+},
+{
+"db": "side_a_score_flap_length_mm",
+"h": "Side A score flap length (mm)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.fx"
+},
+{
+"db": "side_a_score_flap_angle_deg",
+"h": "Side A score flap angle (deg)",
+"type": "num",
+"group": "Side band A",
+"key": "band.side.0.fa"
+},
+{
+"db": "side_a_score_flap_edge",
+"h": "Side A score flap edge",
+"type": "enum",
+"group": "Side band A",
+"key": "band.side.0.ends"
+},
+{
+"db": "side_b_height_mm",
+"h": "Side B height (mm)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.sb"
+},
+{
+"db": "side_b_thickness_mm",
+"h": "Side B thickness (mm)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.bt"
+},
+{
+"db": "side_b_offset_below_pleat_mm",
+"h": "Side B offset below pleat (mm)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.ob"
+},
+{
+"db": "side_b_offset_above_pleat_mm",
+"h": "Side B offset above pleat (mm)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.ot"
+},
+{
+"db": "side_b_scored",
+"h": "Side B scored",
+"type": "bool",
+"group": "Side band B",
+"key": "band.side.1.scored"
+},
+{
+"db": "side_b_score_flap_length_mm",
+"h": "Side B score flap length (mm)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.fx"
+},
+{
+"db": "side_b_score_flap_angle_deg",
+"h": "Side B score flap angle (deg)",
+"type": "num",
+"group": "Side band B",
+"key": "band.side.1.fa"
+},
+{
+"db": "side_b_score_flap_edge",
+"h": "Side B score flap edge",
+"type": "enum",
+"group": "Side band B",
+"key": "band.side.1.ends"
+},
+{
+"db": "end_bands",
+"h": "End bands",
+"type": "bool",
+"group": "End bands",
+"key": "ui.end_c_on"
+},
+{
+"db": "end_a_height_mm",
+"h": "End A height (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.sb"
+},
+{
+"db": "end_a_thickness_mm",
+"h": "End A thickness (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.bt"
+},
+{
+"db": "end_a_offset_below_pleat_mm",
+"h": "End A offset below pleat (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.ob"
+},
+{
+"db": "end_a_offset_above_pleat_mm",
+"h": "End A offset above pleat (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.ot"
+},
+{
+"db": "end_a_scored",
+"h": "End A scored",
+"type": "bool",
+"group": "End band A",
+"key": "band.end.0.scored"
+},
+{
+"db": "end_a_score_flap_length_mm",
+"h": "End A score flap length (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.fx"
+},
+{
+"db": "end_a_score_flap_angle_deg",
+"h": "End A score flap angle (deg)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.fa"
+},
+{
+"db": "end_a_score_flap_edge",
+"h": "End A score flap edge",
+"type": "enum",
+"group": "End band A",
+"key": "band.end.0.ends"
+},
+{
+"db": "end_a_fold_over",
+"h": "End A fold over",
+"type": "bool",
+"group": "End band A",
+"key": "band.end.0.fold"
+},
+{
+"db": "end_a_fold_over_length_mm",
+"h": "End A fold-over length (mm)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.ol"
+},
+{
+"db": "end_a_fold_over_angle_deg",
+"h": "End A fold-over angle (deg)",
+"type": "num",
+"group": "End band A",
+"key": "band.end.0.oa"
+},
+{
+"db": "end_a_fold_over_edge",
+"h": "End A fold-over edge",
+"type": "enum",
+"group": "End band A",
+"key": "band.end.0.fends"
+},
+{
+"db": "end_b_height_mm",
+"h": "End B height (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.sb"
+},
+{
+"db": "end_b_thickness_mm",
+"h": "End B thickness (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.bt"
+},
+{
+"db": "end_b_offset_below_pleat_mm",
+"h": "End B offset below pleat (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.ob"
+},
+{
+"db": "end_b_offset_above_pleat_mm",
+"h": "End B offset above pleat (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.ot"
+},
+{
+"db": "end_b_scored",
+"h": "End B scored",
+"type": "bool",
+"group": "End band B",
+"key": "band.end.1.scored"
+},
+{
+"db": "end_b_score_flap_length_mm",
+"h": "End B score flap length (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.fx"
+},
+{
+"db": "end_b_score_flap_angle_deg",
+"h": "End B score flap angle (deg)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.fa"
+},
+{
+"db": "end_b_score_flap_edge",
+"h": "End B score flap edge",
+"type": "enum",
+"group": "End band B",
+"key": "band.end.1.ends"
+},
+{
+"db": "end_b_fold_over",
+"h": "End B fold over",
+"type": "bool",
+"group": "End band B",
+"key": "band.end.1.fold"
+},
+{
+"db": "end_b_fold_over_length_mm",
+"h": "End B fold-over length (mm)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.ol"
+},
+{
+"db": "end_b_fold_over_angle_deg",
+"h": "End B fold-over angle (deg)",
+"type": "num",
+"group": "End band B",
+"key": "band.end.1.oa"
+},
+{
+"db": "end_b_fold_over_edge",
+"h": "End B fold-over edge",
+"type": "enum",
+"group": "End band B",
+"key": "band.end.1.fends"
+},
+{
+"db": "pull_tab",
+"h": "Pull tab",
+"type": "bool",
+"group": "Pull tab",
+"key": "ui.c_tab"
+},
+{
+"db": "pull_tab_band",
+"h": "Pull tab band",
+"type": "enum",
+"group": "Pull tab",
+"key": "ui.s_tabon"
+},
+{
+"db": "pull_tab_free_end_points",
+"h": "Pull tab free end points",
+"type": "enum",
+"group": "Pull tab",
+"key": "ui.s_tabdir"
+},
+{
+"db": "pull_tab_glue_on_length_mm",
+"h": "Pull tab glue-on length (mm)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.tg"
+},
+{
+"db": "pull_tab_free_length_mm",
+"h": "Pull tab free length (mm)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.tf"
+},
+{
+"db": "pull_tab_strip_width_mm",
+"h": "Pull tab strip width (mm)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.tw"
+},
+{
+"db": "pull_tab_position_from_band_end_mm",
+"h": "Pull tab position from band end (mm)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.tp"
+},
+{
+"db": "pull_tab_height_offset_mm",
+"h": "Pull tab height offset (mm)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.tv"
+},
+{
+"db": "pull_tab_free_end_angle_deg",
+"h": "Pull tab free end angle (deg)",
+"type": "num",
+"group": "Pull tab",
+"key": "P.ta"
+},
+{
+"db": "glue_beads",
+"h": "Glue beads",
+"type": "bool",
+"group": "Glue beads",
+"key": "ui.c_glue"
+},
+{
+"db": "glue_beads_on",
+"h": "Glue beads on",
+"type": "enum",
+"group": "Glue beads",
+"key": "ui.s_glue"
+},
+{
+"db": "glue_bead_count",
+"h": "Glue bead count",
+"type": "int",
+"group": "Glue beads",
+"key": "P.gn"
+},
+{
+"db": "glue_bead_spacing_mm",
+"h": "Glue bead spacing (mm)",
+"type": "num",
+"group": "Glue beads",
+"key": "P.gs"
+},
+{
+"db": "glue_bead_diameter_mm",
+"h": "Glue bead diameter (mm)",
+"type": "num",
+"group": "Glue beads",
+"key": "P.gd"
+},
+{
+"db": "glue_bead_dip_mm",
+"h": "Glue bead dip (mm)",
+"type": "num",
+"group": "Glue beads",
+"key": "P.gg"
+},
+{
+"db": "inkjet",
+"h": "Inkjet",
+"type": "bool",
+"group": "Inkjet",
+"key": "ui.c_ink"
+},
+{
+"db": "inkjet_band",
+"h": "Inkjet band",
+"type": "enum",
+"group": "Inkjet",
+"key": "ui.s_inkon"
+},
+{
+"db": "inkjet_part_number",
+"h": "Inkjet part number",
+"type": "text",
+"group": "Inkjet",
+"key": "ui.i_part"
+},
+{
+"db": "inkjet_date_code",
+"h": "Inkjet date code",
+"type": "text",
+"group": "Inkjet",
+"key": "ui.i_date"
+},
+{
+"db": "inkjet_country_of_origin",
+"h": "Inkjet country of origin",
+"type": "text",
+"group": "Inkjet",
+"key": "ui.i_coo"
+},
+{
+"db": "inkjet_epa_registration",
+"h": "Inkjet EPA registration",
+"type": "text",
+"group": "Inkjet",
+"key": "ui.i_epa"
+},
+{
+"db": "inkjet_extra_word",
+"h": "Inkjet extra word",
+"type": "text",
+"group": "Inkjet",
+"key": "ui.i_word"
+},
+{
+"db": "inkjet_arrow",
+"h": "Inkjet arrow",
+"type": "enum",
+"group": "Inkjet",
+"key": "ui.s_arrow"
+},
+{
+"db": "inkjet_arrow_text",
+"h": "Inkjet arrow text",
+"type": "enum",
+"group": "Inkjet",
+"key": "ui.s_inklabel"
+},
+{
+"db": "inkjet_orientation",
+"h": "Inkjet orientation",
+"type": "enum",
+"group": "Inkjet",
+"key": "ui.s_orient"
+},
+{
+"db": "inkjet_text_height_mm",
+"h": "Inkjet text height (mm)",
+"type": "num",
+"group": "Inkjet",
+"key": "P.kh"
+},
+{
+"db": "inkjet_horizontal_from_centre_mm",
+"h": "Inkjet horizontal from centre (mm)",
+"type": "num",
+"group": "Inkjet",
+"key": "P.kx"
+},
+{
+"db": "inkjet_vertical_from_centre_mm",
+"h": "Inkjet vertical from centre (mm)",
+"type": "num",
+"group": "Inkjet",
+"key": "P.ky"
+},
+{
+"db": "foam_1_placed_on",
+"h": "Foam 1 placed on",
+"type": "enum",
+"group": "Foam 1",
+"key": "foam.0.where"
+},
+{
+"db": "foam_1_width_mm",
+"h": "Foam 1 width (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.w"
+},
+{
+"db": "foam_1_thickness_mm",
+"h": "Foam 1 thickness (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.t"
+},
+{
+"db": "foam_1_height_from_band_bottom_mm",
+"h": "Foam 1 height from band bottom (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.off"
+},
+{
+"db": "foam_1_length_mm",
+"h": "Foam 1 length (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.len"
+},
+{
+"db": "foam_1_position_from_centre_mm",
+"h": "Foam 1 position from centre (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.pos"
+},
+{
+"db": "foam_1_link_group",
+"h": "Foam 1 link group",
+"type": "enum",
+"group": "Foam 1",
+"key": "foam.0.link"
+},
+{
+"db": "foam_1_gap_side",
+"h": "Foam 1 gap side",
+"type": "enum",
+"group": "Foam 1",
+"key": "foam.0.gap"
+},
+{
+"db": "foam_1_gap_length_mm",
+"h": "Foam 1 gap length (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.gl"
+},
+{
+"db": "foam_1_gap_position_from_centre_mm",
+"h": "Foam 1 gap position from centre (mm)",
+"type": "num",
+"group": "Foam 1",
+"key": "foam.0.gp"
+},
+{
+"db": "foam_2_placed_on",
+"h": "Foam 2 placed on",
+"type": "enum",
+"group": "Foam 2",
+"key": "foam.1.where"
+},
+{
+"db": "foam_2_width_mm",
+"h": "Foam 2 width (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.w"
+},
+{
+"db": "foam_2_thickness_mm",
+"h": "Foam 2 thickness (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.t"
+},
+{
+"db": "foam_2_height_from_band_bottom_mm",
+"h": "Foam 2 height from band bottom (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.off"
+},
+{
+"db": "foam_2_length_mm",
+"h": "Foam 2 length (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.len"
+},
+{
+"db": "foam_2_position_from_centre_mm",
+"h": "Foam 2 position from centre (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.pos"
+},
+{
+"db": "foam_2_link_group",
+"h": "Foam 2 link group",
+"type": "enum",
+"group": "Foam 2",
+"key": "foam.1.link"
+},
+{
+"db": "foam_2_gap_side",
+"h": "Foam 2 gap side",
+"type": "enum",
+"group": "Foam 2",
+"key": "foam.1.gap"
+},
+{
+"db": "foam_2_gap_length_mm",
+"h": "Foam 2 gap length (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.gl"
+},
+{
+"db": "foam_2_gap_position_from_centre_mm",
+"h": "Foam 2 gap position from centre (mm)",
+"type": "num",
+"group": "Foam 2",
+"key": "foam.1.gp"
+},
+{
+"db": "foam_3_placed_on",
+"h": "Foam 3 placed on",
+"type": "enum",
+"group": "Foam 3",
+"key": "foam.2.where"
+},
+{
+"db": "foam_3_width_mm",
+"h": "Foam 3 width (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.w"
+},
+{
+"db": "foam_3_thickness_mm",
+"h": "Foam 3 thickness (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.t"
+},
+{
+"db": "foam_3_height_from_band_bottom_mm",
+"h": "Foam 3 height from band bottom (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.off"
+},
+{
+"db": "foam_3_length_mm",
+"h": "Foam 3 length (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.len"
+},
+{
+"db": "foam_3_position_from_centre_mm",
+"h": "Foam 3 position from centre (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.pos"
+},
+{
+"db": "foam_3_link_group",
+"h": "Foam 3 link group",
+"type": "enum",
+"group": "Foam 3",
+"key": "foam.2.link"
+},
+{
+"db": "foam_3_gap_side",
+"h": "Foam 3 gap side",
+"type": "enum",
+"group": "Foam 3",
+"key": "foam.2.gap"
+},
+{
+"db": "foam_3_gap_length_mm",
+"h": "Foam 3 gap length (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.gl"
+},
+{
+"db": "foam_3_gap_position_from_centre_mm",
+"h": "Foam 3 gap position from centre (mm)",
+"type": "num",
+"group": "Foam 3",
+"key": "foam.2.gp"
+},
+{
+"db": "foam_4_placed_on",
+"h": "Foam 4 placed on",
+"type": "enum",
+"group": "Foam 4",
+"key": "foam.3.where"
+},
+{
+"db": "foam_4_width_mm",
+"h": "Foam 4 width (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.w"
+},
+{
+"db": "foam_4_thickness_mm",
+"h": "Foam 4 thickness (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.t"
+},
+{
+"db": "foam_4_height_from_band_bottom_mm",
+"h": "Foam 4 height from band bottom (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.off"
+},
+{
+"db": "foam_4_length_mm",
+"h": "Foam 4 length (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.len"
+},
+{
+"db": "foam_4_position_from_centre_mm",
+"h": "Foam 4 position from centre (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.pos"
+},
+{
+"db": "foam_4_link_group",
+"h": "Foam 4 link group",
+"type": "enum",
+"group": "Foam 4",
+"key": "foam.3.link"
+},
+{
+"db": "foam_4_gap_side",
+"h": "Foam 4 gap side",
+"type": "enum",
+"group": "Foam 4",
+"key": "foam.3.gap"
+},
+{
+"db": "foam_4_gap_length_mm",
+"h": "Foam 4 gap length (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.gl"
+},
+{
+"db": "foam_4_gap_position_from_centre_mm",
+"h": "Foam 4 gap position from centre (mm)",
+"type": "num",
+"group": "Foam 4",
+"key": "foam.3.gp"
+}
+]

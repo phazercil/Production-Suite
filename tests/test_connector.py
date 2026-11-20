@@ -139,6 +139,36 @@ class ConnectorTests(Base):
         self.assertEqual(len(connector.link_cards(connector.groups())), 2)   # once
         self.assertEqual(SourceCard.objects.get(table="pleater_log").filters, [{"col": "machine", "val": "Barbara"}])
 
+    def test_builder_has_a_page_per_kind_of_data(self):
+        bar = Machine.objects.get(name="Barbara")
+        c = self.card("machines", "pleater_log", "Barbara readings", [{"col": "machine", "val": "Barbara"}], ["id", "machine", "ppm"])
+        self.assertTrue(self.save(group=f"m:{bar.pk}", src=c, map={"orderCol": "id", "ppm": "ppm"})["ok"])
+        cl = Client(HTTP_HX_REQUEST="true")
+        cl.post("/kiosk/do/login", {"pin": "9999"})
+        with mock.patch.object(connector.integrations, "preview", return_value={"rows": [{"ppm": 180, "machine": "Barbara"}]}), \
+                mock.patch.object(kadmin, "tables", return_value={"err": "", "ready": True, "tables": SCHEMA["tables"]}):
+            r = cl.get("/kiosk/v/admin?tab=connector&cpage=machines").content.decode()
+            for label in ("Machines", "MOs &amp; schedule", "Filter dimensions", "Changeover &amp; tooling"):
+                self.assertIn(label, r)
+            self.assertIn(f'data-group="m:{bar.pk}"', r)
+            self.assertNotIn('data-group="q:filter_3d"', r)
+            self.assertIn("Barbara readings", r)                                      # the card its box uses
+            r = cl.get("/kiosk/v/admin?tab=connector&cpage=filters").content.decode()
+            for k in ("q:part_spec", "q:part_drawing", "q:filter_3d"):
+                self.assertIn(f'data-group="{k}"', r)
+            self.assertNotIn(f'data-group="m:{bar.pk}"', r)
+            self.assertNotIn('Barbara readings</b>', r.split("Recent changes")[0])   # a card wired on another page
+            self.assertIn("Side band A · Side A offset below pleat (mm)", r)          # every 3D viewer setting
+            r = cl.get("/kiosk/v/admin?tab=connector").content.decode()               # the page is remembered
+            self.assertIn('data-group="q:filter_3d"', r)
+            r = cl.get("/kiosk/v/admin?tab=connector&focus=s2k").content.decode()     # "Still needed" opens its page
+            self.assertIn('data-group="s2k"', r)
+            self.assertIn("cgroup st-", r)
+            self.assertNotIn('data-group="q:filter_3d"', r)
+            r = cl.get("/kiosk/v/admin?tab=connector&cpage=changeover").content.decode()
+            for k in ("q:changeover_steps", "q:asset_settings", "q:part_tooling"):
+                self.assertIn(f'data-group="{k}"', r)
+
     def test_hand_written_sql_is_marked_custom(self):
         SavedQuery.objects.create(name="part_spec", sql="select a.x as rev from (select 1) a", saved_by="x")
         g = next(x for x in connector.groups() if x["key"] == "q:part_spec")

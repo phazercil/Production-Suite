@@ -2298,6 +2298,72 @@ renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, came
   const H = window.FV_HOST || {};
   if (H.view) document.body.classList.add('fv-view');
   const VIEW_OK = new Set(['c_ghost', 'c_edges', 'c_grid', 'c_dims', 'c_dim_o', 'c_dim_p', 'c_dim_b', 'c_dim_x', 'b_iso', 'b_side', 'b_top', 'd_sheet', 'd_close']);
+  window.__fvCols = () => COLS.map(c => ({ db: c.db, h: c.h, type: c.type, group: c.group || '', key: c.key || '' }));
+  // A part's saved settings as one flat row of the batch sheet's columns (B bands that mirror A get A's values):
+  // the Connector builder's "3D viewer part library" table, sent with every save.
+  window.__fvFlat = v => {
+    if (!v || !v.config) return undefined;
+    const e = { info: clone(v.info || {}), extra: clone(v.extra || []), config: clone(v.config) };
+    const cfg = e.config;
+    cfg.P = { ...DEFAULTS, ...(cfg.P || {}) }; cfg.ui = cfg.ui || {}; cfg.foams = cfg.foams || [];
+    cfg.groups = cfg.groups || clone(BASELINE.groups);
+    for (const gk of ['side', 'end']){
+      cfg.groups[gk] = cfg.groups[gk] || clone(BASELINE.groups[gk]);
+      const bs = cfg.groups[gk].bands = (cfg.groups[gk].bands || []).map(b => ({ ...BAND_DEFAULT, ...b }));
+      while (bs.length < 2) bs.push({ ...(bs[0] || BAND_DEFAULT) });
+      if (cfg.ui[gk + '_c_sym']) bs[1] = { ...bs[0] };
+    }
+    const out = {};
+    COLS.forEach(c => {
+      if (c.group === 'Review' || c.db === 'part_number') return;
+      let x; try { x = fmtCell(c, c.get(e)); } catch (err) { x = ''; }
+      if (x !== '' && x !== undefined && x !== null && !(typeof x === 'number' && !isFinite(x))) out[c.db] = x;
+    });
+    return out;
+  };
+  // A filter's row from the asset database ("3D filter data", kept with it by the server) laid over its saved
+  // settings, by the batch sheet's own rules. Columns the row doesn't have stay as saved.
+  window.__fvMerge = v => {
+    const row = v && v.db && v.db.row;
+    if (!row) return v;
+    const e = { info: clone(v.info || {}), config: clone(v.config || BASELINE) };
+    const cfg = e.config;
+    cfg.P = { ...DEFAULTS, ...(cfg.P || {}) }; cfg.ui = cfg.ui || {}; cfg.foams = cfg.foams || [];
+    cfg.groups = cfg.groups || clone(BASELINE.groups);
+    for (const gk of ['side', 'end']){
+      cfg.groups[gk] = cfg.groups[gk] || clone(BASELINE.groups[gk]);
+      const bs = cfg.groups[gk].bands = (cfg.groups[gk].bands || []).map(b => ({ ...BAND_DEFAULT, ...b }));
+      while (bs.length < 2) bs.push({ ...(bs[0] || BAND_DEFAULT) });
+    }
+    const inch = /^(in|inch|inches|"|″)$/i.test(String(row.uom || '').trim());
+    let used = 0;
+    const put = c => {
+      const raw = row[c.db];
+      if (raw === undefined || raw === null || String(raw).trim() === '' || c.group === 'Review') return false;
+      const r = parseCell(c, raw);
+      if (r.err) return false;
+      let val = r.v;
+      if (inch && c.type === 'num' && /\(mm\)/.test(c.h)) val = +(val * 25.4).toFixed(3);
+      c.set(e, val); used++; return true;
+    };
+    COLS.forEach(c => { if (c.phase !== 2) put(c); });
+    for (const gk of ['side', 'end']){
+      const g = cfg.groups[gk];
+      let anyB = false;
+      COLS.forEach(c => { if (c.phase === 2 && c.side === gk && put(c)) anyB = true; });
+      if (!anyB && cfg.ui[gk + '_c_sym'] !== false) g.bands[1] = { ...g.bands[0] };
+      if (e._h && e._h[gk + '0'] !== undefined) e._h[gk + '1'] ??= e._h[gk + '0'];
+      g.bands.forEach((b, i) => {
+        const h = e._h?.[gk + i];
+        if (h !== undefined) b.ot = +(h - cfg.P.ph - b.ob).toFixed(2);
+        b.sb = +(cfg.P.ph + b.ob + b.ot).toFixed(2);
+      });
+    }
+    delete e._h;
+    cfg.foams = cfg.foams.filter(f => f && f.where);
+    cfg.P.fl = +(cfg.P.pc * cfg.P.pp).toFixed(2);
+    return { ...v, part: v.part || e.info.part, info: e.info, config: cfg, fromDb: { fields: used, t: v.db.t } };
+  };
   window.__fvView = () => {
     if (!H.view) return;
     for (const el of document.querySelectorAll('#panel input, #panel select, #panel textarea, #panel button, #drawer input, #drawer select, #drawer textarea, #drawer button')){

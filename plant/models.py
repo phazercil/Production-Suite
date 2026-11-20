@@ -186,6 +186,9 @@ class FilterModel3D(models.Model):
     pid = models.CharField(max_length=120, unique=True, help_text="The viewer's id for the part (its part number, cleaned)")
     part = models.CharField(max_length=120, db_index=True)
     data = models.JSONField(default=dict)
+    # its settings as one flat row (the batch sheet's columns, worked out by the viewer when it saves): the
+    # Connector builder's "3D viewer part library" table
+    flat = models.JSONField(default=dict, blank=True)
     updated = models.DateTimeField(auto_now=True)
     by = models.CharField(max_length=80, blank=True)
 
