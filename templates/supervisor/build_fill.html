@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Fill in {{ sh.line }} · History builder{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+  <div class="sv-head"><a class="btn ghost" href="/supervisor/build/">‹ History builder</a><a class="btn ghost" href="/supervisor/log/{{ sh.pk }}/">Shift report</a><span class="grow"></span><span class="who">{{ me.name }}</span></div>
+  <h1>{{ sh.line }} · {{ sh.shift_name }}</h1>
+  <p class="muted">{{ sh.start|day }} {{ sh.start|clock }} – {% if sh.end %}{{ sh.end|day }} {{ sh.end|clock }}{% else %}running{% endif %} · {% if sh.user_name %}{{ sh.user_name }}{% else %}{{ nobody }}{% endif %} · {{ sh.count|num }} units{% if st.mins %} · {{ st.uptime }}% up · {{ st.down }} min down{% endif %}</p>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  {% if sh.active %}<div class="flash">This log is still running. Fill it in after its shift ends.</div>{% endif %}
+
+  <div class="sv-grid">
+  <div class="card"><h2>What the machine recorded</h2>
+    {% if hours %}<div class="tblwrap"><table class="st"><thead><tr><th>Hour</th><th class="n">Units</th><th class="n">Running</th><th class="n">Stopped</th><th class="n">Planned</th><th>Recipe</th></tr></thead><tbody>
+    {% for h in hours %}<tr><td class="nw">{{ h.h|day }} {{ h.h|clock }}</td><td class="n">{{ h.units|num }}</td><td class="n">{{ h.run }} min</td><td class="n">{% if h.down %}<span class="warn">{{ h.down }} min</span>{% else %}0{% endif %}</td><td class="n">{{ h.planned }} min</td><td>{{ h.recipes|join:", " }}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="muted">No machine data on this log.</p>{% endif %}
+    {% if downs %}<h2>Stops</h2><table class="st"><tbody>{% for d in downs %}<tr><td class="nw">{{ d.start_time|clock }} – {{ d.end_time|clock }}</td><td class="n">{{ d.minutes }} min</td><td>{% if d.reason %}{{ d.reason }}{% else %}<span class="warn">Not entered</span>{% endif %}</td><td>{% if can %}<a class="edit" href="/supervisor/edit/downtime/{{ d.pk }}/?back={{ here|urlencode }}">Edit</a>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% if runs %}<h2>MO runs already on it</h2><table class="st"><tbody>{% for r in runs %}<tr><td>{{ r.mo }}</td><td>{{ r.item }}</td><td class="n">{{ r.qty|num }}</td><td class="nw">{{ r.start_time|clock }} – {{ r.end_time|clock }}</td><td>{% if can %}<a class="edit" href="/supervisor/edit/morun/{{ r.pk }}/?back={{ here|urlencode }}">Edit</a>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  </div>
+
+  {% if not sh.active %}<form method="post" class="card sv-form">{% csrf_token %}<h2>From the paper log</h2>
+    <p class="muted">One row per operator and part. A new operator splits the log at the time their row starts, so each person gets their own units, uptime and downtime. Leave Qty blank to use what the machine counted in that time. Leave Operator blank for time nobody was on it.</p>
+    {% include "supervisor/_build_rows.html" with qtyhint="counted" %}
+    {% if can %}<label class="fld"><span>Why (kept with the change)</span><input type="text" name="why" value="{{ request.POST.why|default:'' }}" placeholder="e.g. From the 1st shift paper log"></label>
+    <div class="row"><button class="btn go" type="submit">Save</button></div>{% endif %}
+  </form>{% endif %}
+  </div>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

@@ -499,3 +499,104 @@ def process_out(request, pk):
         "mode": "supervisor", "me": me, "q": q, "vals": qc_values(q, labels), "issues": issues, "can": can, "err": err, "back": back,
         "form": {"qty": request.POST.get("qty") if err else (q.scrapped or ""), "issue": request.POST.get("issue") if err else q.issue,
                  "note": request.POST.get("note") if err else q.issue_note}})
+
+
+# ------------------------------------------------------------------ History builder (supervisor/build.py)
+def _rows_posted(post):
+    from .build import MAX_ROWS
+    keys = ("who", "from", "to", "mo", "item", "qty", "scrap")
+    return [{k: post.get(f"{k}_{i}", "") for k in keys} for i in range(MAX_ROWS)]
+
+
+def _builder_ctx(me, rows, msg="", err=""):
+    from plant.models import Person
+
+    from .build import MAX_ROWS
+    rows = list(rows or [])
+    shown = max(3, sum(1 for r in rows if any(str(v).strip() for v in r.values())) + 1)
+    rows += [{} for _ in range(MAX_ROWS - len(rows))]
+    return {"mode": "supervisor", "me": me, "can": perms.can(me, EDIT_PERM), "msg": msg, "err": err, "nobody": NOBODY,
+            "people": list(Person.objects.order_by("name").values_list("name", flat=True)),
+            "rows": [{"i": i, "r": r, "hide": i >= shown} for i, r in enumerate(rows[:MAX_ROWS])]}
+
+
+@ensure_csrf_cookie
+@require_GET
+def build_list(request):
+    """Supervisor › History builder: the logs that need the paper log."""
+    from .build import to_fill
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    q = dict(request.GET.items())
+    q.setdefault("from", (timezone.localdate() - timedelta(days=13)).isoformat())
+    f = filters(q)
+    want = request.GET.get("need") or ""
+    rows = to_fill(f["line"], f["A"], f["B"])
+    if want in ("operator", "parts"):
+        rows = [x for x in rows if x.need == want]
+    lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
+    return render(request, "supervisor/build_list.html", {
+        "mode": "supervisor", "me": me, "f": f, "need": want, "rows": rows, "lines": lines, "nobody": NOBODY, "can": perms.can(me, EDIT_PERM),
+        "totals": {"Logs": len(rows), "No operator": sum(1 for x in rows if x.need == "operator"),
+                   "No parts": sum(1 for x in rows if x.need == "parts"), "Units": sum(x.count for x in rows)},
+        "msg": request.GET.get("msg", "")[:200]})
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def build_fill(request, pk):
+    """Fill in one log from the paper log."""
+    from hmi import engine
+    from hmi.models import MoRun
+
+    from .build import hours
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    sh = ShiftRun.objects.select_related("mo", "machine").filter(pk=pk).first()
+    if not sh:
+        raise Http404("No such log")
+    err, rows = "", None
+    if request.method == "POST":
+        rows = _rows_posted(request.POST)
+        if not perms.can(me, EDIT_PERM):
+            err = "You don't have permission to correct history (Admin › Permissions › Correct history)."
+        else:
+            r = engine.execute("histFill", {"id": sh.pk, "rows": rows, "why": request.POST.get("why", "")}, engine.Ctx(user=me))
+            if r.get("ok"):
+                return HttpResponseRedirect(f"/supervisor/build/?{urlencode({'msg': r.get('msg') or 'Saved.'})}")
+            err = r.get("error") or "That didn't save."
+    if rows is None:   # start with one row for the whole log: its operator and MO, if it has them
+        rows = [{"who": sh.user_name, "from": local(sh.start).strftime("%H:%M"), "to": local(sh.end).strftime("%H:%M") if sh.end else "",
+                 "mo": sh.mo.number if sh.mo else "", "item": sh.mo.part if sh.mo else "", "qty": "", "scrap": ""}]
+    st = engine.shift_stats(sh)
+    ctx = _builder_ctx(me, rows, request.GET.get("msg", "")[:200], err)
+    ctx.update({"sh": sh, "hours": hours(sh), "st": st, "runs": MoRun.objects.filter(shift=sh).order_by("start_time"),
+                "downs": Downtime.objects.filter(shift=sh).order_by("start_time"), "here": f"/supervisor/build/{sh.pk}/"})
+    return render(request, "supervisor/build_fill.html", ctx)
+
+
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def build_add(request):
+    """Add a log by hand for time with no record at all."""
+    from hmi import engine
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    err, rows = "", [{}]
+    form = {"machine": request.GET.get("machine", ""), "day": timezone.localdate().isoformat(), "start": "", "end": "", "shift_name": "", "why": ""}
+    if request.method == "POST":
+        rows = _rows_posted(request.POST)
+        form.update({k: request.POST.get(k, "") for k in form})
+        if not perms.can(me, EDIT_PERM):
+            err = "You don't have permission to correct history (Admin › Permissions › Correct history)."
+        else:
+            r = engine.execute("histAdd", {**form, "rows": rows}, engine.Ctx(user=me))
+            if r.get("ok"):
+                return HttpResponseRedirect(f"/supervisor/build/?{urlencode({'msg': r.get('msg') or 'Saved.'})}")
+            err = r.get("error") or "That didn't save."
+    ctx = _builder_ctx(me, rows, "", err)
+    ctx.update({"form": form, "machines": list(Machine.objects.order_by("sort", "id").values_list("name", flat=True))})
+    return render(request, "supervisor/build_add.html", ctx)

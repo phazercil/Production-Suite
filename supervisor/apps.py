@@ -5,4 +5,4 @@ class SupervisorConfig(AppConfig):
     name = "supervisor"
 
     def ready(self):
-        from . import edit  # noqa: F401  (registers the history correction commands with the engine)
+        from . import build, edit  # noqa: F401  (registers the history correction and builder commands with the engine)
