@@ -1,5 +1,6 @@
 {% load suite %}<div id="connector" class="connector" data-connector {% if not tabCan %}data-readonly{% endif %}>
 {% include "hmi/k/admin/_csum.html" %}
+<nav class="cpages" aria-label="Connector builder pages">{% for p in C.pages %}<button type="button" class="btn {% if p.on %}primary{% else %}ghost{% endif %}" hx-get="/kiosk/v/admin?tab=connector&amp;cpage={{ p.key }}" hx-target="#view" {% if p.on %}aria-current="page"{% endif %}>{{ p.label }} <span class="pill {% if p.done == p.total %}ok{% else %}warn{% endif %}">{{ p.done }}/{{ p.total }}</span></button>{% endfor %}</nav>
 {% if not C.dbs %}<div class="panel" style="border-color:var(--warn)"><b>No database is connected yet.</b> Add the machine data, asset or S2K database under <a href="/admin/?tab=connections" style="color:var(--accent)">Connections</a>, then come back here.</div>
 {% else %}
 <div class="cwire" data-wire>

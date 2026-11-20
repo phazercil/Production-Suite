@@ -1,54 +1,124 @@
 {% extends "base.html" %}{% load static suite %}
-{% block title %}Maintenance · {% if tab.on == "requests" %}Requests{% elif tab.on == "history" %}PM history{% else %}PM schedule{% endif %}{% endblock %}
+{% block title %}Maintenance · {% for k, l in tabs %}{% if k == tab %}{{ l }}{% endif %}{% endfor %}{% endblock %}
 {% block body_class %}scroll{% endblock %}
-{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'maintenance/maintenance.css' %}">{% endblock %}
 {% block content %}<div class="sv">
-  <div class="sv-head"><h1>Maintenance</h1><span class="muted">{% if tab.on == "requests" %}Requests from the lines{% elif tab.on == "history" %}Planned maintenance done in the last year{% else %}Planned maintenance by machine: every so many days, run hours or filters made{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
-  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
-  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
-  <nav class="sv-tabs" aria-label="Maintenance">{% for k, label in tabs %}<a href="?{{ tab.q|get:k }}" {% if tab.on == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
-  <form method="get" class="sv-filter no-print" style="margin-bottom:12px"><input type="hidden" name="tab" value="{{ tab.on }}">
-    <label>Machine<select name="m"><option value="">All machines and equipment</option>{% for m in machines %}<option {% if m == machine %}selected{% endif %}>{{ m }}</option>{% endfor %}{% for m in other %}<option {% if m == machine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
-    <button class="btn">Show</button></form>
+  <div class="sv-head"><h1>Maintenance</h1><span class="muted">Requests from the lines, their status and the parts used · planned maintenance · the inventory</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  <nav class="sv-tabs" aria-label="Maintenance">{% for k, label in tabs %}<a href="?{{ tabq|get:k }}" {% if tab == k %}aria-current="page"{% endif %}>{{ label }}{% if k == "requests" %} ({{ counts.open|add:counts.work|add:counts.parts }}){% endif %}</a>{% endfor %}</nav>
 
-{% if tab.on == "pm" %}
-  <div class="sv-kpis" style="margin-bottom:12px"><div class="kpi {% if counts.due %}bad{% endif %}"><span>Due, no request yet</span><b>{{ counts.due }}</b></div><div class="kpi"><span>Request open</span><b>{{ counts.open }}</b></div><div class="kpi"><span>Due soon</span><b>{{ counts.soon }}</b></div><div class="kpi"><span>Tasks</span><b>{{ rows|length }}</b></div></div>
-  <p class="muted">When a task falls due the server opens a maintenance request for it, which shows on every line's Maintenance page. Completing the request (or <b>Log done</b> here) starts the count again. Run hours and filters made come from each machine's readings; other equipment goes by days. "Falls due" is an estimate from the last two weeks of running.</p>
-  <div class="card"><table class="st"><thead><tr><th>Machine</th><th>Task</th><th>Every</th><th>Since last done</th><th></th><th>Falls due</th><th>Last done</th><th></th></tr></thead><tbody>
+  {% if tab == "requests" or tab == "done" %}
+  {% if tab == "requests" %}<div class="sv-kpis"><div class="kpi"><span>Open</span><b>{{ counts.open }}</b></div><div class="kpi"><span>Reviewed / in progress</span><b>{{ counts.work }}</b></div><div class="kpi"><span>Waiting on parts</span><b>{{ counts.parts }}</b></div><div class="kpi"><span>Completed (7 days)</span><b>{{ counts.done }}</b></div></div>{% endif %}
+  <form class="sv-filter" method="get"><input type="hidden" name="tab" value="{{ tab }}">
+    <label>Machine<select name="machine"><option value="">All machines</option>{% for m in reqMachines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    {% if tab == "requests" %}<label>Status<select name="status"><option value="">All pending</option>{% for v, l in statuses %}{% if v != "Closed" %}<option value="{{ v }}" {% if v == fstatus %}selected{% endif %}>{{ l }}</option>{% endif %}{% endfor %}</select></label>{% endif %}
+    <button class="btn go" type="submit">Show</button>{% if not canWork %}<span class="note">Changing a status or recording parts needs <b>Work maintenance requests</b> (Admin › Permissions).</span>{% endif %}</form>
+  <div class="mt-reqs">{% for x in rows %}{% include "maintenance/_ticket.html" %}
+  {% empty %}<div class="card"><p class="muted">{% if tab == "requests" %}No pending maintenance requests{% if fmachine or fstatus %} for these filters{% endif %}.{% else %}Nothing completed in the last 30 days{% if fmachine %} on {{ fmachine }}{% endif %}.{% endif %}</p></div>{% endfor %}</div>
+
+  {% elif tab == "pm" or tab == "history" %}
+  <form method="get" class="sv-filter"><input type="hidden" name="tab" value="{{ tab }}">
+    <label>Machine<select name="machine"><option value="">All machines and equipment</option>{% for m in machines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <button class="btn go" type="submit">Show</button></form>
+  {% if tab == "pm" %}
+  <div class="sv-kpis"><div class="kpi {% if pmcounts.due %}bad{% endif %}"><span>Due, no request yet</span><b>{{ pmcounts.due }}</b></div><div class="kpi"><span>Request open</span><b>{{ pmcounts.open }}</b></div><div class="kpi"><span>Due soon</span><b>{{ pmcounts.soon }}</b></div><div class="kpi"><span>Tasks</span><b>{{ rows|length }}</b></div></div>
+  <p class="muted">When a task falls due the server opens a maintenance request for it, which shows under Pending requests and on every line's Maintenance page. Completing the request (or <b>Log done</b> here) starts the count again. Run hours and filters made come from each machine's readings; other equipment goes by days. "Falls due" is an estimate from the last two weeks of running.</p>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th>Task</th><th>Every</th><th>Since last done</th><th></th><th>Falls due</th><th>Last done</th><th></th></tr></thead><tbody>
   {% for r in rows %}<tr>
     <td class="nw"><b>{{ r.task.machine }}</b></td>
     <td><b>{{ r.task.title }}</b>{% if r.task.priority == "High" %} <span class="pill bad">HIGH</span>{% endif %}{% if r.task.steps %}<div class="note" style="white-space:pre-line">{{ r.task.steps|truncatechars:240 }}</div>{% endif %}</td>
     <td class="nw">{{ r.everyTxt }}</td>
     <td class="nw">{{ r.usedTxt }} <span class="muted">· {{ r.pct }}%</span><div class="bar" role="img" aria-label="{{ r.pct }}% of the interval used"><i class="{{ r.pill.0 }}" style="width:{% if r.pct > 100 %}100{% else %}{{ r.pct }}{% endif %}%"></i></div><div class="note">{{ r.leftTxt }}</div></td>
-    <td class="nw"><span class="pill {{ r.pill.0 }}">{{ r.pill.1 }}</span>{% if r.ticket %}<div class="note">opened {{ r.ticket.t|plan:t }}{% if r.ticket.status == "In progress" %} · in progress{% endif %}</div>{% endif %}</td>
+    <td class="nw"><span class="pill {{ r.pill.0 }}">{{ r.pill.1 }}</span>{% if r.ticket %}<div class="note"><a href="?tab=requests#r{{ r.ticket.id }}">#{{ r.ticket.id }}</a> opened {{ r.ticket.t|plan:now }} · {{ r.ticket.status_label|lower }}</div>{% endif %}</td>
     <td class="nw">{% if r.state == "due" or r.state == "open" %}now{% elif r.eta %}{{ r.eta|day }}{% elif r.state == "off" %}—{% else %}<span class="muted">no running yet</span>{% endif %}</td>
     <td class="nw">{% if r.task.last_done %}{{ r.task.last_done|day }}{% if r.task.last_by %}<div class="note">{{ r.task.last_by }}</div>{% endif %}{% else %}<span class="muted">not yet</span>{% endif %}</td>
     <td class="nw" style="text-align:right">
-      {% if canWork %}<details class="inl"><summary class="btn po">Log done</summary><form method="post" class="sv-filter" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="pmDone"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ machine }}"><label>Note<input type="text" name="note" maxlength="4000" placeholder="What was done, parts used"></label><button class="btn go">Done now</button></form></details>{% endif %}
-      {% if canEdit %}{% if not r.ticket and r.task.active %}<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="pmOpenNow"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ machine }}"><button class="btn ghost po" title="Open the request now, before it falls due">Open request</button></form>{% endif %}
-      <a class="btn ghost po" href="?tab=pm&amp;edit={{ r.task.id }}{% if machine %}&amp;m={{ machine|urlencode }}{% endif %}#edit">Edit</a>{% endif %}</td></tr>
+      {% if canWork %}<details class="inl"><summary class="btn po">Log done</summary><form method="post" class="sv-filter" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="pmDone"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ fmachine }}"><label>Note<input type="text" name="note" maxlength="4000" placeholder="What was done (record parts under Inventory)"></label><button class="btn go">Done now</button></form></details>{% endif %}
+      {% if canEdit %}{% if not r.ticket and r.task.active %}<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="pmOpenNow"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ fmachine }}"><button class="btn ghost po" title="Open the request now, before it falls due">Open request</button></form>{% endif %}
+      <a class="btn ghost po" href="?tab=pm&amp;edit={{ r.task.id }}{% if fmachine %}&amp;machine={{ fmachine|urlencode }}{% endif %}#edit">Edit</a>{% endif %}</td></tr>
   {% if canEdit and edit == r.task.id %}<tr id="edit"><td colspan="8">{% include "maintenance/_pm_form.html" with x=r.task %}</td></tr>{% endif %}
-  {% empty %}<tr><td colspan="8" class="empty">No planned maintenance yet{% if machine %} for {{ machine }}{% endif %}.{% if canEdit %} Add the first task below.{% endif %}</td></tr>{% endfor %}
-  </tbody></table></div>
+  {% empty %}<tr><td colspan="8" class="empty">No planned maintenance yet{% if fmachine %} for {{ fmachine }}{% endif %}.{% if canEdit %} Add the first task below.{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></div>
   {% if canEdit %}<div class="card" style="margin-top:14px"><h2>Add a PM task</h2>{% include "maintenance/_pm_form.html" with x=None %}</div>
   {% else %}<p class="muted">Adding and changing tasks needs the <b>PM schedule</b> permission (Admin › Permissions).</p>{% endif %}
-
-{% elif tab.on == "requests" %}
-  <div class="row" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><nav class="seg">{% for f, label in "open:Open & in progress,done:Completed (30 days)"|pairs %}<a class="btn {% if show != f %}ghost{% endif %} po" href="?tab=requests&amp;show={{ f }}{% if machine %}&amp;m={{ machine|urlencode }}{% endif %}">{{ label }}</a>{% endfor %}</nav>
-    <span class="grow" style="flex:1"></span><a class="btn" href="/operator/maintenance/">Open the kiosk Maintenance page</a></div>
-  <div class="card"><table class="st"><thead><tr><th>Machine</th><th>Request</th><th>Priority</th><th>Status</th><th>Opened</th><th>By</th></tr></thead><tbody>
-  {% for x in reqs %}<tr><td class="nw"><b>{{ x.t.machine }}</b></td><td>{{ x.t.type|default:"Request" }}{% if x.t.pm_id %} <span class="pill idle">PM</span>{% endif %}{% if x.t.notes %}<div class="note">{{ x.t.notes|truncatechars:160 }}</div>{% endif %}</td>
-    <td>{% if x.t.priority == "High" %}<span class="pill bad">HIGH</span>{% else %}{{ x.t.priority }}{% endif %}</td>
-    <td class="nw">{% if x.t.status == "Closed" %}<span class="pill ok">COMPLETED</span><div class="note">{{ x.t.updated|plan:t }} · {{ x.t.updated_by }}</div>{% elif x.t.status == "In progress" %}<span class="pill warn">IN PROGRESS</span>{% else %}<span class="pill bad">OPEN</span><div class="note">{{ x.age|dur }}</div>{% endif %}</td>
-    <td class="nw">{{ x.t.t|plan:t }}</td><td>{{ x.t.by }}</td></tr>
-  {% empty %}<tr><td colspan="6" class="empty">{% if show == "open" %}No open requests.{% else %}Nothing completed in the last 30 days.{% endif %}</td></tr>{% endfor %}</tbody></table></div>
-
-{% else %}
-  <div class="card"><table class="st"><thead><tr><th>Done</th><th>Machine</th><th>Task</th><th>By</th><th>On time</th><th>Note</th></tr></thead><tbody>
+  {% else %}
+  <p class="muted">Planned maintenance done in the last year.</p>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Done</th><th>Machine</th><th>Task</th><th>By</th><th>On time</th><th>Note</th></tr></thead><tbody>
   {% for r in hist %}<tr><td class="nw">{{ r.t.updated|day }} {{ r.t.updated|clock }}</td><td class="nw"><b>{{ r.t.machine }}</b></td><td>{{ r.task.title|default:r.t.type }}</td><td>{{ r.t.updated_by }}</td>
     <td class="nw">{% if r.late is None %}<span class="muted">—</span>{% elif r.late > 0.5 %}<span class="pill warn">{{ r.late|floatformat:0 }} day{{ r.late|floatformat:0|pluralize }} late</span>{% else %}<span class="pill ok">ON TIME</span>{% endif %}</td>
     <td>{{ r.note }}</td></tr>
-  {% empty %}<tr><td colspan="6" class="empty">No planned maintenance done yet.</td></tr>{% endfor %}</tbody></table></div>
-{% endif %}
+  {% empty %}<tr><td colspan="6" class="empty">No planned maintenance done yet{% if fmachine %} on {{ fmachine }}{% endif %}.</td></tr>{% endfor %}</tbody></table></div></div>
+  {% endif %}
+  {% elif tab == "inventory" %}
+  <div class="sv-kpis"><div class="kpi"><span>Items</span><b>{{ items|length }}</b></div><div class="kpi"><span>Low or out</span><b class="{% if low %}bad{% endif %}">{{ low }}</b></div></div>
+  <form class="sv-filter" method="get"><input type="hidden" name="tab" value="inventory">
+    <label>Find<input type="search" name="q" value="{{ q }}" placeholder="Name, part # or location"></label>
+    <label class="chk"><input type="checkbox" name="all" value="1" {% if showAll %}checked{% endif %}> Include items taken off the list</label>
+    <button class="btn go" type="submit">Show</button></form>
+  {% if canStock %}<details class="card mt-add" {% if not inv and not q %}open{% endif %}><summary><b>Add an item</b></summary>
+    <form method="post" action="/maintenance/do/itemSave" class="sv-form mt-grid">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
+      <label class="fld"><span>Name</span><input name="name" maxlength="120" required placeholder="e.g. Drive belt"></label>
+      <label class="fld"><span>Part #</span><input name="part_no" maxlength="60"></label>
+      <label class="fld"><span>Location</span><input name="location" maxlength="80" placeholder="Shelf, bin, cabinet"></label>
+      <label class="fld"><span>Unit</span><input name="unit" maxlength="20" value="each"></label>
+      <label class="fld"><span>On hand now</span><input name="qty" type="number" min="0" step="any" value="0"></label>
+      <label class="fld"><span>Reorder at</span><input name="min_qty" type="number" min="0" step="any" placeholder="blank = no reminder"></label>
+      <label class="fld" style="grid-column:1/-1"><span>Notes</span><input name="notes" maxlength="2000" placeholder="Vendor, size, which machines take it…"></label>
+      <div class="row"><button class="btn go">Add the item</button></div></form></details>{% endif %}
+  <div class="card"><div class="tblwrap mt-invwrap"><table class="st mt-inv"><thead><tr><th>Item</th><th>Location</th><th class="n">On hand</th><th class="n">Reorder at</th><th class="n">Used (30 days)</th><th>Used on</th><th></th></tr></thead><tbody>
+  {% for r in inv %}{% with i=r.i %}<tr id="i{{ i.pk }}" class="{% if not i.active %}muted{% endif %}">
+    <td><b>{{ i.name }}</b>{% if i.part_no %}<div class="note">#{{ i.part_no }}</div>{% endif %}{% if i.notes %}<div class="note">{{ i.notes|truncatechars:90 }}</div>{% endif %}{% if not i.active %}<div class="note">Off the list</div>{% endif %}</td>
+    <td>{{ i.location|default:"—" }}</td>
+    <td class="n">{% if i.qty < 0 %}<span class="pill bad" title="More was used than was counted: count it">{{ i.qty|floatformat:"-3" }}</span>{% elif i.low %}<span class="pill warn">{{ i.qty|floatformat:"-3" }}</span>{% else %}<b>{{ i.qty|floatformat:"-3" }}</b>{% endif %} <span class="note">{{ i.unit }}</span></td>
+    <td class="n">{% if i.min_qty is not None %}{{ i.min_qty|floatformat:"-3" }}{% else %}—{% endif %}</td>
+    <td class="n">{{ r.i.used30|default:0|floatformat:"-3" }}</td>
+    <td>{% for m, n in r.on %}<a class="chip" href="?tab=machines&machine={{ m|urlencode }}">{{ m }} · {{ n|floatformat:"-3" }}</a>{% empty %}<span class="muted">—</span>{% endfor %}</td>
+    <td class="mt-acts">{% if i.active %}
+      {% if canWork %}<details><summary class="btn sm">Use on a machine</summary><form method="post" action="/maintenance/do/itemUse" class="mt-pop">{% csrf_token %}<input type="hidden" name="item" value="{{ i.pk }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="i{{ i.pk }}">
+        <label class="fld"><span>Machine</span><select name="machine" required><option value="">Pick…</option>{% for m in machines %}<option>{{ m }}</option>{% endfor %}</select></label>
+        <label class="fld"><span>How many ({{ i.unit }})</span><input type="number" name="qty" min="0.001" step="any" value="1" required></label>
+        <label class="fld"><span>For request (optional)</span><select name="ticket"><option value="">None</option>{% for t in pending %}<option value="{{ t.id }}">#{{ t.id }} {{ t.machine }} · {{ t.type|default:"Request"|truncatechars:30 }}</option>{% endfor %}</select></label>
+        <label class="fld"><span>Note</span><input name="note" maxlength="200"></label><button class="btn go">Record</button><p class="note">With a request, the machine is the request's.</p></form></details>{% endif %}
+      {% if canStock %}<details><summary class="btn sm ghost">Stock</summary><div class="mt-pop">
+        <form method="post" action="/maintenance/do/itemStock">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="kind" value="added"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="i{{ i.pk }}">
+          <label class="fld"><span>Received</span><input type="number" name="qty" min="0.001" step="any" required></label><input name="note" maxlength="200" placeholder="PO, vendor (optional)" aria-label="Note"><button class="btn">Add stock</button></form>
+        <form method="post" action="/maintenance/do/itemStock">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="kind" value="count"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="i{{ i.pk }}">
+          <label class="fld"><span>Counted on the shelf</span><input type="number" name="qty" min="0" step="any" value="{{ i.qty|floatformat:'-3' }}" required></label><input name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note"><button class="btn">Save count</button></form></div></details>
+      <a class="btn sm ghost" href="?tab=inventory&edit={{ i.pk }}#i{{ i.pk }}">Edit</a>{% endif %}
+    {% elif canStock %}<form method="post" action="/maintenance/do/itemArchive">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="active" value="1"><input type="hidden" name="back" value="{{ here }}"><button class="btn sm ghost">Put back on the list</button></form>{% endif %}</td></tr>
+  {% if edit == i.pk and canStock %}<tr class="mt-editrow"><td colspan="7"><form method="post" action="/maintenance/do/itemSave" class="sv-form mt-grid">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="back" value="/maintenance/?tab=inventory"><input type="hidden" name="anchor" value="i{{ i.pk }}">
+      <label class="fld"><span>Name</span><input name="name" maxlength="120" required value="{{ i.name }}"></label>
+      <label class="fld"><span>Part #</span><input name="part_no" maxlength="60" value="{{ i.part_no }}"></label>
+      <label class="fld"><span>Location</span><input name="location" maxlength="80" value="{{ i.location }}"></label>
+      <label class="fld"><span>Unit</span><input name="unit" maxlength="20" value="{{ i.unit }}"></label>
+      <label class="fld"><span>Reorder at</span><input name="min_qty" type="number" min="0" step="any" value="{% if i.min_qty is not None %}{{ i.min_qty|floatformat:'-3' }}{% endif %}"></label>
+      <label class="fld" style="grid-column:1/-1"><span>Notes</span><input name="notes" maxlength="2000" value="{{ i.notes }}"></label>
+      <div class="row"><button class="btn go">Save</button><a class="btn ghost" href="?tab=inventory#i{{ i.pk }}">Cancel</a><span class="grow"></span></div></form>
+      <form method="post" action="/maintenance/do/itemArchive" class="row" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="active" value="0"><input type="hidden" name="back" value="/maintenance/?tab=inventory"><button class="btn sm bad">Take it off the list</button><span class="note">Its history stays.</span></form></td></tr>{% endif %}
+  {% endwith %}{% empty %}<tr><td colspan="7" class="empty">{% if q %}No items match “{{ q }}”.{% else %}No items yet.{% if canStock %} Add the first one above.{% endif %}{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+  <div class="card"><h2>Recent changes</h2><div class="tblwrap"><table class="st"><thead><tr><th>When</th><th>Item</th><th>What</th><th>Machine</th><th>Request</th><th>By</th><th>Note</th></tr></thead><tbody>
+    {% for m in moves %}<tr><td class="nw">{{ m.t|day }} {{ m.t|clock }}</td><td>{{ m.item }}</td>
+      <td class="nw">{% if m.kind == "used" %}Used {{ m.qty|floatformat:"-3" }}{% elif m.kind == "added" %}Added {{ m.qty|floatformat:"-3" }}{% else %}Counted ({% if m.qty >= 0 %}+{% endif %}{{ m.qty|floatformat:"-3" }}){% endif %} {{ m.item.unit }}</td>
+      <td>{{ m.machine|default:"—" }}</td><td>{% if m.ticket %}<a href="?tab={% if m.ticket.status == 'Closed' %}done{% else %}requests{% endif %}#r{{ m.ticket_id }}">#{{ m.ticket_id }}</a>{% else %}—{% endif %}</td><td>{{ m.by }}</td><td>{{ m.note }}</td></tr>
+    {% empty %}<tr><td colspan="7" class="empty">Nothing yet.</td></tr>{% endfor %}</tbody></table></div></div>
+
+  {% else %}
+  <div class="mt-mach">
+    <div class="card mt-mlist"><h2>Machines</h2>{% for r in mrows %}<a href="?tab=machines&machine={{ r.m|urlencode }}" {% if r.m == sel %}aria-current="page"{% endif %}><b>{{ r.m }}</b><span class="note">{% if r.n %}{{ r.n }} use{{ r.n|pluralize }} of parts{% else %}no parts recorded{% endif %}{% if r.last %} · last {{ r.last|day }}{% endif %}{% if r.open %} · <span class="warn">{{ r.open }} pending</span>{% endif %}</span></a>{% empty %}<p class="muted">No machines yet.</p>{% endfor %}</div>
+    <div>{% if sel %}
+      <div class="card"><h2>{{ sel }} · parts used</h2>{% if canWork and items %}<form method="post" action="/maintenance/do/itemUse" class="mt-inline">{% csrf_token %}<input type="hidden" name="machine" value="{{ sel }}"><input type="hidden" name="back" value="{{ here }}">
+        <select name="item" required aria-label="Item used on {{ sel }}"><option value="">Item used…</option>{% for i in items %}<option value="{{ i.pk }}">{{ i }} ({{ i.qty|floatformat:"-3" }} on hand)</option>{% endfor %}</select>
+        <input type="number" name="qty" min="0.001" step="any" value="1" required aria-label="How many" class="qty"><input type="text" name="note" maxlength="200" placeholder="Note (optional)" aria-label="Note"><button class="btn">Record</button></form>{% endif %}
+        <div class="tblwrap"><table class="st"><thead><tr><th>Item</th><th class="n">Total used</th><th class="n">Times</th><th>Last</th></tr></thead><tbody>
+        {% for b in byItem %}<tr><td><b>{{ b.item__name }}</b>{% if b.item__part_no %} <span class="note">#{{ b.item__part_no }}</span>{% endif %}</td><td class="n">{{ b.n|floatformat:"-3" }} {{ b.item__unit }}</td><td class="n">{{ b.times }}</td><td class="nw">{{ b.last|day }}</td></tr>
+        {% empty %}<tr><td colspan="4" class="empty">No parts recorded on {{ sel }} yet.</td></tr>{% endfor %}</tbody></table></div></div>
+      <div class="card"><h2>Every use</h2><div class="tblwrap"><table class="st"><thead><tr><th>When</th><th>Item</th><th class="n">Qty</th><th>Request</th><th>By</th><th>Note</th><th></th></tr></thead><tbody>
+        {% for u in uses %}<tr><td class="nw">{{ u.t|day }} {{ u.t|clock }}</td><td>{{ u.item }}</td><td class="n">{{ u.qty|floatformat:"-3" }} {{ u.item.unit }}</td>
+          <td>{% if u.ticket %}#{{ u.ticket_id }} {{ u.ticket.type }} {% include "maintenance/_status.html" with st=u.ticket.status %}{% else %}—{% endif %}</td><td>{{ u.by }}</td><td>{{ u.note }}</td>
+          <td>{% if canWork %}<form method="post" action="/maintenance/do/itemUseUndo">{% csrf_token %}<input type="hidden" name="id" value="{{ u.pk }}"><input type="hidden" name="back" value="{{ here }}"><button class="linkbtn">Take back</button></form>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="7" class="empty">Nothing yet.</td></tr>{% endfor %}</tbody></table></div></div>
+    {% else %}<div class="card"><p class="muted">Pick a machine to see every part used on it.</p></div>{% endif %}</div>
+  </div>
+  {% endif %}
 </div>{% endblock %}
 {% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

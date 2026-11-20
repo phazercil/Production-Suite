@@ -86,19 +86,91 @@ class FilterViewerTests(TestCase):
         x = FilterModel3D.objects.create(pid="AQ1136C", part="AQ1136C", data=doc("AQ1136C", mw=215, mt=0.8))
         self.assertIsNone(viewer.refresh_from_db(x))                             # not set up: kept as stored
         SavedQuery.objects.create(name="filter_3d", sql="SELECT 1", saved_by="x")
-        row = {"columns": [], "rows": [{"ph": "1.25", "pc": "30", "pp": "0.4", "uom": "in"}], "ms": 1, "truncated": False}
+        row = {"columns": [], "rows": [{"PLEAT_HEIGHT_MM": "1.25", "side_a_offset_below_pleat_mm": 2, "inkjet_extra_word": "HEPA",
+                                        "uom": "in", "not_a_setting": "x", "pleat_count": None}], "ms": 1, "truncated": False}
         with mock.patch.object(engine.integrations, "assets_ready", return_value=True), \
                 mock.patch.object(engine.integrations, "run_saved", return_value=row):
             msg = viewer.refresh_from_db(x, force=True)
-        self.assertIn("from the asset database", msg)
-        P = FilterModel3D.objects.get(pid="AQ1136C").data["config"]["P"]
-        self.assertEqual((P["ph"], P["pc"], P["pp"], P["fl"]), (31.75, 30, 10.16, 304.8))     # inches → mm; length = count × pitch
-        self.assertEqual((P["mw"], P["mt"]), (215, 0.8))                                      # not in the database: as stored
+        self.assertIn("3 settings from the asset database", msg)
+        d = FilterModel3D.objects.get(pid="AQ1136C").data
+        self.assertEqual(d["db"]["row"], {"pleat_height_mm": "1.25", "side_a_offset_below_pleat_mm": 2, "inkjet_extra_word": "HEPA", "uom": "in"})
+        self.assertEqual(d["config"]["P"]["mw"], 215)                            # the saved settings stay; the viewer lays the row over them
         c = Client(enforce_csrf_checks=True)
         self.assertTrue(sup_login(c, "4444", "section.quality", "/quality/")["ok"])
         with mock.patch.object(engine.integrations, "assets_ready", return_value=True), \
                 mock.patch.object(engine.integrations, "run_saved", return_value=row):
             r = c.post("/quality/viewer/refresh-all/", {"csrfmiddlewaretoken": c.cookies["csrftoken"].value})
         self.assertIn("Read+1+filter", r["Location"])
+
+    def test_every_viewer_setting_is_a_connector_role(self):
         from hmi.snapshot import qdef
-        self.assertIn("filter_3d", qdef())                                       # its own entry in the Connector builder
+        roles = [r[0] for r in qdef()["filter_3d"]["roles"]]
+        for k in ("pleat_height_mm", "pleat_count", "side_a_offset_below_pleat_mm", "side_a_offset_above_pleat_mm", "end_a_fold_over",
+                  "pull_tab_position_from_band_end_mm", "glue_bead_count", "inkjet_epa_registration", "foam_1_placed_on", "customer_oe_no", "uom"):
+            self.assertIn(k, roles)
+        self.assertGreater(len(roles), 120)
+        self.assertNotIn("needs_review", roles)
+
+
+class ViewerLibrarySourceTests(TestCase):
+    """The 3D viewer's part library as a Connector builder source (no outside database needed)."""
+    def setUp(self):
+        cache.clear()
+        seed_demo(reset=True)
+        from hmi.models import Person
+        self.ctx = engine.Ctx(user=Person.objects.get(role="admin"))
+        FilterModel3D.objects.create(pid="AQ1234", part="AQ1234", data={"part": "AQ1234"},
+                                     flat={"screw_no": "SC-12", "helix_no": "HX-3", "media_material_no": "M-778", "pleat_height_mm": 25})
+        FilterModel3D.objects.create(pid="AQ9999", part="AQ9999", data={"part": "AQ9999"}, flat={"screw_no": "SC-40"})
+
+    def test_library_is_a_table_and_tooling_reads_it(self):
+        from hmi import connector, integrations, runinfo
+        self.assertIn("viewer", connector.ready_dbs())
+        cols = {c["name"] for c in integrations.schema("viewer")["tables"][0]["columns"]}
+        self.assertTrue({"part_number", "screw_no", "side_a_offset_below_pleat_mm"} <= cols)
+        r = engine.execute("sourceCardSave", {"db": "viewer", "table": "filter_parts", "title": "3D library", "filters": [], "columns": []}, self.ctx)
+        self.assertTrue(r["ok"], r)
+        cid = (r.get("data") or r)["id"]
+        r = engine.execute("connectorSave", {"group": "q:part_tooling", "src": cid,
+                                             "map": {"f_part": "part_number", "screws": "screw_no", "helix": "helix_no", "media": "media_material_no"}}, self.ctx)
+        self.assertTrue(r["ok"], r)
+        q = SavedQuery.objects.get(name="part_tooling")
+        self.assertTrue(integrations.is_viewer_sql(q.sql))
+        self.assertTrue(integrations.query_ready("part_tooling"))
+        self.assertFalse(integrations.assets_ready())
+        self.assertEqual(integrations.run_saved(q.sql, {"part": "AQ1234"})["rows"],
+                         [{"screws": "SC-12", "helix": "HX-3", "media": "M-778"}])
+        t = runinfo.tooling("AQ1234", "Barbara")
+        self.assertEqual(t["src"], "db")
+        self.assertIn("SC-12", json.dumps(t["groups"]))
+        g = next(g for g in connector.groups() if g["key"] == "q:part_tooling")
+        self.assertEqual((g["db"], g["status"]), ("viewer", "done"))
+        f3 = next(g for g in connector.groups() if g["key"] == "q:filter_3d")
+        self.assertNotIn("viewer", f3["dbs"])                    # not from itself
+        r = engine.execute("connectorSave", {"group": "q:filter_3d", "src": cid, "map": {"f_part": "part_number"}}, self.ctx)
+        self.assertFalse(r["ok"])
+        # an edit in the viewer shows up straight away
+        x = FilterModel3D.objects.get(pid="AQ1234")
+        x.flat = {"screw_no": "SC-99"}
+        x.save()
+        self.assertEqual(integrations.run_saved(q.sql, {"part": "AQ1234"})["rows"][0]["screws"], "SC-99")
+
+    def test_library_is_read_only(self):
+        from hmi import integrations
+        for bad in ("DELETE FROM filter_parts", "SELECT 1; DROP TABLE filter_parts"):
+            with self.assertRaises(integrations.ConnError):
+                integrations.run_saved(bad, {}, db="viewer")
+        self.assertEqual(FilterModel3D.objects.count(), 2)
+
+    def test_saving_keeps_the_flat_row(self):
+        c = Client()
+        self.assertTrue(sup_login(c, "4444", "section.quality", "/quality/")["ok"])
+        r = c.post("/api/quality/fv/parts/set", json.dumps({"id": "AQ5", "data": {"part": "AQ5"}, "flat": {"screw_no": "S1", "bogus": "x", "notes": ""}}),
+                   content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(FilterModel3D.objects.get(pid="AQ5").flat, {"screw_no": "S1"})
+        r = c.post("/api/quality/fv/parts/flat", json.dumps({"rows": {"AQ9999": {"helix_no": "H2"}}}), content_type="application/json")
+        self.assertEqual(r.json()["n"], 1)
+        self.assertEqual(FilterModel3D.objects.get(pid="AQ9999").flat, {"helix_no": "H2"})
+        self.assertFalse(next(d for d in c.get("/api/quality/fv/parts").json()["docs"] if d["id"] == "AQ5")["flat"] is False)
+        self.assertEqual(Client().post("/api/quality/fv/parts/flat", json.dumps({"rows": {}}), content_type="application/json").status_code, 403)

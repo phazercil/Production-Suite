@@ -12,6 +12,7 @@ from scheduler import views as sch
 from quality import viewer as fviewer
 from quality import views as quality
 from supervisor import views as supervisor
+from maintenance import views as maintenance
 from suite import sections, thin
 
 urlpatterns = [
@@ -79,14 +80,19 @@ urlpatterns = [
     path("api/quality/fv/parts", fviewer.parts),
     path("api/quality/fv/parts/set", fviewer.part_set),
     path("api/quality/fv/parts/delete", fviewer.part_delete),
+    path("api/quality/fv/parts/flat", fviewer.part_flat),
     path("api/quality/fv/running", fviewer.running),
     path("api/quality/fv/refresh", fviewer.refresh),
     path("quality/viewer/refresh-all/", fviewer.refresh_all),
     path("supervisor/log/<int:pk>/", supervisor.log, name="supervisor-log"),
     path("supervisor/edit/<str:kind>/<int:pk>/", supervisor.edit, name="supervisor-edit"),
+    path("supervisor/build/", supervisor.build_list, name="supervisor-build"),
+    path("supervisor/build/new/", supervisor.build_add, name="supervisor-build-add"),
+    path("supervisor/build/<int:pk>/", supervisor.build_fill, name="supervisor-build-fill"),
     path("supervisor/processout/<int:pk>/", supervisor.process_out, name="supervisor-processout"),
     path("supervisor/coend/<int:pk>/", supervisor.co_force_end, name="supervisor-coend"),
     path("maintenance/", maintenance.page, name="maintenance-section"),
+    path("maintenance/do/<str:name>", maintenance.do, name="maintenance-do"),
     path("packaging/", sections.soon, {"key": "packaging"}, name="packaging-section"),   # (coming later)   # the Labor Budget alone (no other sections), e.g. for the office
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),

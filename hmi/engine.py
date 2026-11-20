@@ -820,7 +820,7 @@ def load_changeover_steps(sh, co):
         co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
         return
     co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
-    if not (st.settings.get("useDb") and integrations.assets_ready()):
+    if not (st.settings.get("useDb") and integrations.query_ready("changeover_steps")):
         return
     q = SavedQuery.objects.filter(name="changeover_steps").first()
     qs = SavedQuery.objects.filter(name="asset_settings").first()
@@ -947,7 +947,7 @@ def known_part(part):
     """True when the suite knows this filter: the cost sheet, Parts & specs, or the asset database has it."""
     if (Catalog().matches(part) or [None])[0] or PartSpec.objects.filter(key=part_key(part)).exists():
         return True
-    if integrations.assets_ready():
+    if integrations.query_ready("part_spec", "part_drawing"):
         try:
             pull_drawing(part_key(part))
         except Exception as e:  # noqa: BLE001
@@ -1330,7 +1330,7 @@ def ticket_status(p, ctx):
     need(t.status != "Closed", "That request is already completed.")
     note = str(p.get("note") or "").strip()
     need(len(note) <= 4000, "Keep the repair note under 4,000 characters.")
-    t.status = "In progress" if t.status == "Open" and not p.get("close") else "Closed"
+    t.status = "In progress" if t.status != "In progress" and not p.get("close") else "Closed"
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save()
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
@@ -1353,7 +1353,7 @@ def ticket_note(p, ctx):
     need(text, "Write the repair note first.")
     need(len(text) <= 4000, "Keep the repair note under 4,000 characters.")
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, text=text)
-    if t.status == "Open":
+    if t.status in ("Open", "Reviewed"):
         t.status = "In progress"
     t.updated, t.updated_by = ctx.now, ctx.by
     t.save(update_fields=["status", "updated", "updated_by"])
@@ -1532,7 +1532,7 @@ def pull_drawing(key, ctx=None):
     """The part's drawing from the asset database into Parts & specs: Part specs (dimensions, rev) and Drawing file
     (rev, link). The drawing file's rev wins: it comes with the file operators open. Returns what happened in a
     sentence, or None when no drawing queries are set up. Raises when the database can't be read."""
-    if not (integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists()):
+    if not integrations.query_ready("part_spec", "part_drawing"):
         return None
     ctx = ctx or Ctx()
     o, d = _first_row("part_spec", key, ctx), _first_row("part_drawing", key, ctx)
@@ -2675,9 +2675,9 @@ def parts_import(p, ctx):
     keys = list(dict.fromkeys(k for k in (part_key(w) for w in words) if k))
     need(keys, "Paste the part numbers to import.")
     need(len(keys) <= 500, f"That's {len(keys)} parts: import 500 or fewer at a time.")
-    need(integrations.assets_ready(), "The asset database isn't set up yet (Admin › Connections).")
     need(SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
-         "Wire Part specs (and Drawing file) to the asset database first (Admin › Connector builder).")
+         "Wire Part specs (and Drawing file) to the asset database or the 3D viewer part library first (Admin › Connector builder).")
+    need(integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
     done, missing, failed = [], [], []
     for k in keys:
         try:
@@ -2699,7 +2699,7 @@ def parts_import(p, ctx):
 def parts_refresh(p, ctx):
     """Quality › Parts & specs › Refresh: connect to the asset database again and re-read every part listed (and every
     part an open MO runs), so the dimensions, rev and drawing link are the database's latest."""
-    need(integrations.assets_ready(), "The asset database isn't set up yet (Admin › Connections).")
+    need(integrations.assets_ready() or integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
     from django.core.cache import cache
     from django.db import connections
     for alias in ("assets",):   # a fresh connection: settings or the server may have changed
@@ -3559,7 +3559,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "filter_3d": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):
@@ -3679,7 +3679,9 @@ def _apply_group(g, c, mp, ctx, slot_where=None, run2_name=None):
             sw = connector.clean_slot_where(g["state"].get("where") if slot_where is None else slot_where, keys=set(g.get("filterable") or []))
             bad = sorted({f["col"] for v in sw.values() for f in v if f["col"] not in sch[table]})
             need(not bad, f'The table "{table}" has no column ' + ", ".join(f'"{x}"' for x in bad) + ".")
-            sql = kadmin.build_codata_sql(name, {"table": table, **mp, "where": filters, "slotWhere": sw})
+            sql = kadmin.build_codata_sql(name, {"table": table, **mp, "where": filters, "slotWhere": sw}, integrations.kind_of(db))
+            if db == "viewer":
+                sql = integrations.VIEWER_TAG + sql
     except ValueError as e:
         raise Need(str(e))
     db_save({"name": name, "sql": sql, "params": {"source": c.pk}}, ctx)
@@ -3811,7 +3813,7 @@ def db_save(p, ctx):
         SavedQuery.objects.filter(name=name).delete()
         audit(ctx, f"Stopped using the {name} query")
         return
-    db = _which_db({"db": QUERY_DB[name]})
+    db = "viewer" if integrations.is_viewer_sql(p["sql"]) else _which_db({"db": QUERY_DB[name]})
     try:
         r = integrations.run_saved(p["sql"], p.get("params") or {}, limit=1, db=db)
     except Exception as e:

@@ -8,7 +8,7 @@
 (function () {
   "use strict";
   const NS = "http://www.w3.org/2000/svg";
-  const DBN = {machines: "machine data database", assets: "asset database", s2k: "S2K database"};
+  const DBN = {machines: "machine data database", assets: "asset database", s2k: "S2K database", viewer: "3D viewer part library"};
   let picked = null;     // column picked up by a tap
   let drag = null;       // {from: tag|slot, x0, y0, moved, id, root}
 
@@ -217,6 +217,8 @@
 
   function init(root) {
     if (root._ready) return; root._ready = true;
+    const fg = root.querySelector(".cgroup.focus");   // opened at a box ("Still needed" on another page)
+    if (fg) setTimeout(() => { fg.scrollIntoView({block: "center"}); flash(fg, "ok"); }, 60);
     root.querySelectorAll(".cgroup").forEach(g => {
       state(g);
       if (stash && stash[g.dataset.group]) g._st = JSON.parse(JSON.stringify(stash[g.dataset.group]));   // unsaved wires survive a card change

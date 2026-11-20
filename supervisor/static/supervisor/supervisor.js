@@ -46,3 +46,15 @@
     }).catch(function () {});
   }, (+g.dataset.refresh || 30) * 1000);
 })();
+(function () {   // History builder: show the next empty paper-log row
+  var b = document.getElementById('sv-addrow');
+  if (!b) return;
+  b.addEventListener('click', function () {
+    var r = document.querySelector('.sv-rows tr[hidden]');
+    if (!r) { b.disabled = true; b.textContent = 'No more rows: save, then add the rest'; return; }
+    r.hidden = false;
+    var i = r.querySelector('input');
+    if (i) i.focus();
+    if (!document.querySelector('.sv-rows tr[hidden]')) b.disabled = true;
+  });
+})();

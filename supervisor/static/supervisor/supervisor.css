@@ -85,3 +85,4 @@ a.edit{font-weight:600}
 .bar i{display:block;height:100%;background:#56d364}.bar i.warn{background:#e3b341}.bar i.bad{background:#ff7b72}.bar i.idle{background:var(--s-ink-2)}
 details.inl{display:inline-block;text-align:left;vertical-align:top}details.inl summary{list-style:none}details.inl summary::-webkit-details-marker{display:none}
 .sv-filter textarea{width:100%;min-height:60px}
+.sv-rows input{width:100%;min-width:5em;box-sizing:border-box}.sv-rows td{padding:4px 6px}

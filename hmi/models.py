@@ -160,6 +160,8 @@ class RollTag(models.Model):
 
 
 class Ticket(models.Model):
+    # stored value, shown as; "Closed" is shown as Completed (older screens and reports read "Closed")
+    STATUSES = [("Open", "Open"), ("Reviewed", "Reviewed"), ("In progress", "In progress"), ("Waiting on parts", "Waiting on parts"), ("Closed", "Completed")]
     shift = models.ForeignKey(ShiftRun, null=True, blank=True, on_delete=models.SET_NULL)
     t = models.DateTimeField()
     line = models.CharField(max_length=60, blank=True)
@@ -168,7 +170,7 @@ class Ticket(models.Model):
     type = models.CharField(max_length=80)
     priority = models.CharField(max_length=10, default="Medium")
     notes = models.TextField(blank=True)
-    status = models.CharField(max_length=12, default="Open")
+    status = models.CharField(max_length=20, default="Open")
     updated = models.DateTimeField(null=True, blank=True)
     updated_by = models.CharField(max_length=120, blank=True)
     pm = models.ForeignKey("PMTask", null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets",
@@ -177,6 +179,10 @@ class Ticket(models.Model):
     class Meta:
         db_table = "hmi_tickets"
         ordering = ["t"]
+
+    @property
+    def status_label(self):
+        return dict(self.STATUSES).get(self.status, self.status)
 
 
 class TicketNote(models.Model):

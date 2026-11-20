@@ -1,13 +1,31 @@
-## What's new in 1.9.3
+## What's new in 1.9.4
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
 
-- **Maintenance section:** the Maintenance tab in the top bar is now open (people with **Open Maintenance**). It has the **PM schedule**, the **Requests** from the lines and **PM history**.
+- **Maintenance › PM schedule and PM history:** two new tabs beside Pending requests, Completed, Inventory and Parts by machine. A request opened by the PM schedule shows a **PM** tag under Pending requests.
 - **Planned maintenance (PM schedule):** add jobs for each machine or piece of equipment, done every so many **days**, **run hours** or **filters made** (run hours and filters come from the machine's own readings). The schedule shows how much of each interval is used, what is due, due soon or open, and an estimate of when each one falls due. When a job falls due, the server opens a maintenance request for it (**PM · job**), so it shows on every line's Maintenance page; completing that request starts the count again. **Log done** records a job done early; **Open request** opens it before it's due. Changing the schedule needs the new **PM schedule** permission (maintenance, shift leads and Admin by default).
 - **Alerts for QC and planned maintenance (Admin › Alerts):** besides line-down messages, each person can be told when a **QC check is overdue** by their number of minutes (re-checks too), when a **QC check fails** and waits for a supervisor, and when **planned maintenance falls due**. Each is one message per check or request. A person can now get only these (line down set to 0).
 - **Traceability (Quality › Traceability):** search a roll, lot, material, MO or part and see which media rolls went into which MOs, with the filters each roll made for each MO, the QC checks while the roll was on, and the picture of its tag. A roll counts from when its tag is scanned until the next roll's tag on that line. Download it as CSV.
 - **Roll off:** Roll tags shows the roll on the line now and has **Roll off**, for a roll taken off (used up or put away part-used) before the next one goes on.
 - **Read a roll tag from a picture:** Roll tags › **Take a picture of the tag**. The tablet reads the tag itself (nothing leaves the plant network) and fills in the roll ID, lot, material and footage for the operator to check, and the picture is kept with the roll. It finds each field by the label printed next to it; Quality › Traceability › **Reading roll tags** sets the labels your suppliers' tags use, a pattern for a value with no label, and which field a plain barcode fills (GS1 barcodes fill the lot and roll themselves). A material that isn't the MO's media is pointed out.
+
+## What's new in 1.9.3
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Maintenance section:** the Maintenance tab in the top bar is now open (Admin › Permissions › Open Maintenance; maintenance, shift leads and admins have it).
+  - **Pending requests:** every request from the lines that isn't completed, on every machine, high priority first. Filter by machine or status.
+  - **Status form:** each request has a status form (Open, Reviewed, In progress, Waiting on parts, Completed) with a note on why. Every change goes in the request's history with who made it, and the lines get a notice.
+  - **Completed** lists the last 30 days of completed requests; a request can be set back to Open from there.
+  - The Operator Kiosk's Maintenance page shows the new statuses and has the same status picker.
+- **Inventory (Maintenance › Inventory):** the parts and supplies maintenance keeps: name, part #, location, unit, what's on hand and the reorder level (low or out shows in colour).
+  - **Add stock** when parts come in, and **Count** to set what's on the shelf; every change is logged.
+  - **Use on a machine** records parts used, with or without a request. On a request, **Parts used** does the same from the request's card. The parts come off the stock, are linked to the machine (and the request), and the request's history says what was used. **Take back** undoes one recorded by mistake.
+  - **Parts by machine** shows everything used on each machine: totals per item and every use.
+  - The new **Maintenance inventory** permission adds and changes items and stock. Recording parts used needs **Work maintenance requests**.
+- **Connector builder in pages:** Admin › Connector builder is split into **Machines**, **MOs & schedule**, **Filter dimensions** and **Changeover & tooling**, each with how many of its boxes are connected. Each page shows the source cards its boxes use and the cards nothing uses yet. A **Still needed** chip opens the page its box is on.
+- **3D filter data has every viewer setting:** the box now has an input for each of the 3D viewer's batch-sheet settings: pleats, media, side and end bands (height, thickness, offset below and above the pleat, score flaps), fold-overs, pull tab, glue beads, inkjet, foam strips 1–4 and the info sheet, plus a unit of measure for the (mm) ones. B bands copy A when the database has no B. A setting the database doesn't have keeps what's saved in the viewer.
+- **The 3D viewer's part library is a source:** in the Connector builder, add a source card from the **3D viewer part library** (table filter_parts: the part number and every setting of each filter in Quality › 3D viewer). Wire it to Tooling for the part (its screw, helix and media material numbers), Part specs, Changeover steps or Machine settings: no outside database needed, and an edit in the viewer shows up straight away. Filters saved before this update are added when someone with Quality settings opens Quality › 3D viewer.
 
 ## What's new in 1.9.2
 

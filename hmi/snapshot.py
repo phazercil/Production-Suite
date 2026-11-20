@@ -32,20 +32,29 @@ QDEF = {
                      "perPart": True,
                      "roles": [["url", "Drawing link (PDF or image)"], ["rev", "Drawing rev"],
                                ["newest", "Newest first by (date or rev), when the part has a row per rev"]]},
-    "filter_3d": {"title": "3D filter data", "help": "One row for the part: the dimensions the 3D viewer (Quality › 3D viewer) builds the "
-                                                  "filter from. The viewer keeps each filter in the suite's own database; when this is set up, "
-                                                  "what it returns updates the stored filter each time it's opened (and with Refresh). "
-                                                  "Anything it doesn't return stays as stored.",
-                  "perPart": True,
-                  "roles": [["ph", "Pleat height"], ["pc", "Pleat count"], ["pp", "Pleat pitch"], ["fl", "Filter (pack) length"],
-                            ["mw", "Media width"], ["mt", "Media thickness"], ["fr", "Fold inside radius"],
-                            ["uom", "Unit of measure (mm, in…): each dimension's own"]]},
+    "filter_3d": {"title": "3D filter data", "help": "One row for the part, with any of the 3D viewer's settings (the same ones as its batch "
+                                                  "sheet: pleats, side and end bands, score flaps, fold-overs, pull tab, glue beads, inkjet, "
+                                                  "foam, info sheet). The viewer keeps each filter in the suite's database; what this returns "
+                                                  "is laid over it each time the filter is opened. Anything it doesn't return stays as saved. "
+                                                  "Dimensions are in mm unless the unit column says inches.",
+                  "perPart": True, "roles": "filter_3d"},
     "part_tooling": {"title": "Tooling for the part", "help": "What the run screen shows under Up Next and Current MO. Either one row per tool (Tool type + Tool), "
                                                                 "or one row with a column each for screws, helix, media and side bands.",
                      "roles": [["kind", "Tool type (screws, helix, media, side band)"], ["name", "Tool / part number"], ["detail", "Size or note"],
                                ["screws", "Screws"], ["helix", "Helix"], ["media", "Media"], ["sideband", "Side bands"]]},
 }
 
+
+
+def fv_columns():
+    """The 3D viewer's settings, as its batch sheet names them (quality/fv_columns.json, taken from the viewer)."""
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).resolve().parent.parent / "quality" / "fv_columns.json").read_text())
+
+
+QDEF["filter_3d"]["roles"] = [[c["db"], f'{c["group"]} · {c["h"]}' if c["group"] not in c["h"] else c["h"]] for c in fv_columns()] \
+    + [["uom", "Unit of measure (mm or in) for the (mm) columns"]]
 
 
 def qdef():

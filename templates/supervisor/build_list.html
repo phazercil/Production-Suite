@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}History builder · Supervisor{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+  <div class="sv-head"><a class="btn ghost" href="/supervisor/?tab=logs">‹ History</a><h1>History builder</h1><span class="muted">Fill in operators and parts from the paper logs for time the machine recorded with nobody logged in</span><span class="grow"></span><span class="who">{{ me.name }}</span>{% if can %}<a class="btn go" href="/supervisor/build/new/">Add a log by hand</a>{% endif %}</div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+  {% if not can %}<div class="flash">You can look but not change anything: filling in history needs the <b>Correct history</b> permission (Admin › Permissions).</div>{% endif %}
+  <form class="sv-filter" method="get">
+    <label>Line<select name="line"><option value="">All lines</option>{% for l in lines %}<option {% if l == f.line %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>From<input type="date" name="from" value="{{ f.from|date:'Y-m-d' }}"></label>
+    <label>To<input type="date" name="to" value="{{ f.to|date:'Y-m-d' }}"></label>
+    <label>Missing<select name="need"><option value="">Anything</option><option value="operator" {% if need == "operator" %}selected{% endif %}>Operator</option><option value="parts" {% if need == "parts" %}selected{% endif %}>Parts</option></select></label>
+    <button class="btn go" type="submit">Show</button>
+  </form>
+  <div class="sv-kpis">{% for k, v in totals.items %}<div class="kpi"><span>{{ k }}</span><b>{{ v|num }}</b></div>{% endfor %}</div>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Line</th><th>Shift</th><th>Start</th><th>End</th><th>Operator</th><th class="n">Units</th><th>Missing</th><th></th></tr></thead><tbody>
+  {% for x in rows %}<tr class="go" data-href="/supervisor/build/{{ x.pk }}/">
+    <td>{{ x.line }}</td><td>{{ x.shift_name }}</td><td class="nw">{{ x.start|day }} {{ x.start|clock }}</td><td class="nw">{{ x.end|day }} {{ x.end|clock }}</td>
+    <td>{% if x.user_name %}{{ x.user_name }}{% else %}<span class="muted">{{ nobody }}</span>{% endif %}</td><td class="n">{{ x.count|num }}</td>
+    <td>{% if x.need == "operator" %}<span class="pill warn">Operator and parts</span>{% else %}<span class="pill idle">Parts</span>{% endif %}</td>
+    <td><a href="/supervisor/build/{{ x.pk }}/">Fill in</a></td></tr>
+  {% empty %}<tr><td colspan="8" class="empty">Nothing to fill in for these dates.</td></tr>{% endfor %}</tbody></table></div></div>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

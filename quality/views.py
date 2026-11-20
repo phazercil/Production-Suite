@@ -243,7 +243,7 @@ def page(request):
                           for x in parts[:500]], nParts=n, q=q,
                    fields=fields, units=cfg.get("assetUnits") or {}, unitSpecs=[(k, lbl) for k, lbl in qc.tol_specs(cfg)] + [("tol", "Tolerance")],
                    unwired=unwired_features(cfg), assetsReady=integrations.assets_ready(),
-                   canImport=integrations.assets_ready() and SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
+                   canImport=integrations.query_ready("part_spec", "part_drawing"),
                    uomWired="AS uom" in (getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""),
                    pasted=request.POST.get("parts", "") if err else "")
         return render(request, "quality/page.html", ctx)

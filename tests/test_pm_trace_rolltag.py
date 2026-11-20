@@ -136,17 +136,19 @@ class PMTests(Base):
         c = Client()
         self.assertContains(c.get("/maintenance/"), "Open Maintenance")   # its PIN login
         login(c, "3333")
-        PMTask.objects.create(machine="Barbara", title="Grease chain", every=7, unit="days", created=self.t - timedelta(days=8))
-        r = c.get("/maintenance/")
+        task = PMTask.objects.create(machine="Barbara", title="Grease chain", every=7, unit="days", created=self.t - timedelta(days=8))
+        r = c.get("/maintenance/?tab=pm")
         self.assertContains(r, "Grease chain")
         self.assertContains(r, "DUE")
+        Ticket.objects.create(t=self.t, by="PM schedule", machine="Barbara", type="PM · Grease chain", pm=task)
+        self.assertContains(c.get("/maintenance/"), "Opened by the PM schedule")   # tagged under Pending requests
         r = c.post("/maintenance/", {"action": "pmSave", "machine": "Salvatore", "title": "Check guards", "every": "14", "unit": "days",
                                      "priority": "High", "active": "1"})
         self.assertEqual(r.status_code, 302)
         self.assertTrue(PMTask.objects.filter(machine="Salvatore", title="Check guards", priority="High").exists())
         r = c.post("/maintenance/", {"action": "pmSave", "machine": "Salvatore", "title": "", "every": "14"})
         self.assertContains(r, "Say what the job is")
-        for tab in ("requests", "history"):
+        for tab in ("requests", "done", "pm", "history", "inventory", "machines"):
             self.assertEqual(c.get(f"/maintenance/?tab={tab}").status_code, 200)
 
 

@@ -13,7 +13,7 @@ from plant.models import Machine
 
 from . import integrations
 
-DB_LABEL = {"machines": "Machine data database", "assets": "Asset database", "s2k": "S2K database"}
+DB_LABEL = {"machines": "Machine data database", "assets": "Asset database", "s2k": "S2K database", "viewer": "3D viewer part library"}
 MACHINE_SLOTS = [("orderCol", "Newest row (time stamp or ID)", True, "Which row is the latest reading"),
                  ("ppm", "Speed (in the machine's speed unit)", True, "Pleats per minute, mm per second or parts per minute: Admin › Machines › Speed unit"),
                  ("count", "Filters made (counter)", False, "Without it, filters are worked out from the speed"),
@@ -30,7 +30,8 @@ def _q(name):
 
 def ready_dbs():
     integrations.liveconfig.refresh()
-    return [d for d in ("machines", "assets", "s2k") if d in integrations.connections.databases]
+    # the 3D viewer's part library is the suite's own (Quality › 3D viewer): always there
+    return [d for d in ("machines", "assets", "s2k") if d in integrations.connections.databases] + ["viewer"]
 
 
 _ID = r"(?:`(?:[^`]|``)+`|\"(?:[^\"]|\"\")+\"|\[(?:[^\]]|\]\])+\])"   # `mysql`, "postgres" or [sql server]
@@ -84,6 +85,20 @@ def _slots(defs, current):
     return [{"k": k, "label": lbl, "req": req, "help": hlp, "col": current.get(k, "")} for k, lbl, req, hlp in defs]
 
 
+# The builder's pages: each data need is on one
+PAGES = [("machines", "Machines"), ("mos", "MOs & schedule"), ("filters", "Filter dimensions"), ("changeover", "Changeover & tooling")]
+QUERY_PAGE = {"part_spec": "filters", "part_drawing": "filters", "filter_3d": "filters",
+              "changeover_steps": "changeover", "asset_settings": "changeover", "part_tooling": "changeover"}
+
+
+def page_of(g):
+    if g["kind"] == "machine":
+        return "machines"
+    if g["kind"] == "s2k":
+        return "mos"
+    return QUERY_PAGE.get(g["key"].split(":", 1)[-1], "changeover")
+
+
 def groups():
     """Everything the suite can take from a database, with what each is linked to now."""
     from .kadmin import S2K_ROLES
@@ -128,7 +143,8 @@ def groups():
         if name == "changeover_steps":
             defs.append(("f_from", "Part changing from", False, ""))
         defs += [(r[0], r[1], bool(len(r) > 2 and r[2]), "") for r in D["roles"]]
-        out.append({"key": f"q:{name}", "kind": "query", "title": D["title"], "sub": D["help"], "color": "", "dbs": ["assets"], "db": "assets",
+        out.append({"key": f"q:{name}", "kind": "query", "title": D["title"], "sub": D["help"], "color": "",
+                    "dbs": ["assets"] if name == "filter_3d" else ["assets", "viewer"], "db": "viewer" if sv and integrations.is_viewer_sql(sv.sql) else "assets",
                     "table": p["table"], "slots": _slots(defs, p["map"]), "filters": p["where"],
                     "src": (sv.params or {}).get("source") if sv else None, "custom": bool(sv and not p["table"]), "other": "",
                     "filterable": sorted(keys), "slotWhere": clean_slot_where(p["slotWhere"], keys=keys)})

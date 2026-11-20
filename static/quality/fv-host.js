@@ -10,11 +10,14 @@
   var docs = [], ver = null, subs = [], loaded = false, readyRes;
   var ready = new Promise(function (r) { readyRes = r; });
   var copy = function (o) { return JSON.parse(JSON.stringify(o)); };
+  // a filter as the viewer sees it: its saved settings, with its asset database row (if any) laid over them
+  var flat = function (d) { try { return window.__fvFlat ? window.__fvFlat(d) : undefined; } catch (e) { console.error(e); return undefined; } };
+  var view = function (d) { var v = copy(d); try { return window.__fvMerge ? window.__fvMerge(v) : v; } catch (e) { console.error(e); return v; } };
 
   function snapFor(s) {
     var arr = docs.slice().sort(function (a, b) { return String(a.data[s.field] == null ? "" : a.data[s.field]).localeCompare(String(b.data[s.field] == null ? "" : b.data[s.field])); });
     return { metadata: { fromCache: false }, size: arr.length, empty: !arr.length,
-             docs: arr.map(function (d) { return { id: d.id, exists: true, data: function () { return copy(d.data); } }; }) };
+             docs: arr.map(function (d) { return { id: d.id, exists: true, data: function () { return view(d.data); } }; }) };
   }
   function emit() { subs.forEach(function (s) { try { s.cb(snapFor(s)); } catch (e) { console.error(e); } }); }
   async function pull(force) {
@@ -22,12 +25,25 @@
       var r = await fetch("/api/quality/fv/parts" + (ver && !force ? "?v=" + encodeURIComponent(ver) : ""), { credentials: "same-origin", cache: "no-store" });
       var j = await r.json();
       if (!j.ok) throw new Error(j.error || "The part library can't be read.");
-      if (!j.same) { docs = j.docs; ver = j.v; emit(); }
+      if (!j.same) { docs = j.docs; ver = j.v; emit(); backfill(); }
       else if (!loaded) emit();
       loaded = true; readyRes();
     } catch (e) {
       subs.forEach(function (s) { if (s.err) s.err({ code: "unavailable", message: String(e.message || e) }); });
     }
+  }
+  // parts saved before the viewer sent flat rows (the Connector builder's "3D viewer part library"): fill them in once
+  var filling = false;
+  async function backfill() {
+    if (filling || !H.canEdit || H.view || !window.__fvFlat) return;
+    var rows = {}, n = 0;
+    docs.forEach(function (d) { if (!d.flat) { var f = flat(d.data); if (f) { rows[d.id] = f; n++; } } });
+    if (!n) return;
+    filling = true;
+    try {
+      await fetch("/api/quality/fv/parts/flat", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-CSRFToken": csrf() }, body: JSON.stringify({ rows: rows }) });
+      docs.forEach(function (d) { if (rows[d.id]) d.flat = true; });
+    } catch (e) { console.error(e); } finally { filling = false; }
   }
   async function post(path, body) {
     if (!H.canEdit) {
@@ -45,10 +61,10 @@
       doc: function (id) {
         return {
           id: id,
-          set: function (data) { return post("/api/quality/fv/parts/set", { id: id, data: data }); },
-          update: function (data) { var d = docs.find(function (x) { return x.id === id; }); return post("/api/quality/fv/parts/set", { id: id, data: Object.assign({}, d ? d.data : {}, data) }); },
+          set: function (data) { return post("/api/quality/fv/parts/set", { id: id, data: data, flat: flat(data) }); },
+          update: function (data) { var d = docs.find(function (x) { return x.id === id; }); var all = Object.assign({}, d ? d.data : {}, data); return post("/api/quality/fv/parts/set", { id: id, data: all, flat: flat(all) }); },
           delete: function () { return post("/api/quality/fv/parts/delete", { id: id }); },
-          get: async function () { await ready; var d = docs.find(function (x) { return x.id === id; }); return { id: id, exists: !!d, data: function () { return d ? copy(d.data) : undefined; } }; }
+          get: async function () { await ready; var d = docs.find(function (x) { return x.id === id; }); return { id: id, exists: !!d, data: function () { return d ? view(d.data) : undefined; } }; }
         };
       },
       orderBy: function (field) {

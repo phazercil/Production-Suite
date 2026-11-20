@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("hmi", "0016_qc_recheck"),
+        ("hmi", "0017_ticket_statuses"),
     ]
 
     operations = [

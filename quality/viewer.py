@@ -13,6 +13,7 @@ from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from hmi.views import current_person
@@ -53,7 +54,17 @@ def parts(request):
     v = _version()
     if request.GET.get("v") == v:
         return JsonResponse({"ok": True, "v": v, "same": True})
-    return JsonResponse({"ok": True, "v": v, "docs": [{"id": x.pid, "data": x.data} for x in FilterModel3D.objects.all()]})
+    return JsonResponse({"ok": True, "v": v, "docs": [{"id": x.pid, "data": x.data, "flat": bool(x.flat)} for x in FilterModel3D.objects.all()]})
+
+
+def clean_flat(f):
+    """A flat row from the viewer, kept to the batch sheet's columns (text, at most 200 characters each)."""
+    from hmi.snapshot import fv_columns
+    names = {c["db"] for c in fv_columns()}
+    if not isinstance(f, dict):
+        return {}
+    return {k: (v if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)[:200])
+            for k, v in f.items() if k in names and v is not None and str(v).strip() != ""}
 
 
 def _editor(request):
@@ -84,8 +95,27 @@ def part_set(request):
         raise BadRequest("A part needs its id and its settings.")
     if len(request.body) > MAX_DOC:
         raise BadRequest("That part is too big to save.")
-    FilterModel3D.objects.update_or_create(pid=pid, defaults={"part": str(data.get("part") or pid)[:120], "data": data, "by": me.name})
+    d = {"part": str(data.get("part") or pid)[:120], "data": data, "by": me.name}
+    if "flat" in p:
+        d["flat"] = clean_flat(p.get("flat"))
+    FilterModel3D.objects.update_or_create(pid=pid, defaults=d)
     return JsonResponse({"ok": True, "v": _version()})
+
+
+@json_api
+@require_POST
+def part_flat(request):
+    """Fill in the flat rows of parts saved before the viewer sent them ({rows: {id: row}}); the settings stay as they are."""
+    me, denied = _editor(request)
+    if denied:
+        return denied
+    rows = _body(request).get("rows")
+    if not isinstance(rows, dict):
+        raise BadRequest("Send the rows.")
+    n = 0
+    for pid, f in list(rows.items())[:2000]:
+        n += FilterModel3D.objects.filter(pid=str(pid)[:120]).update(flat=clean_flat(f), updated=timezone.now())
+    return JsonResponse({"ok": True, "n": n})
 
 
 @json_api
@@ -118,26 +148,22 @@ def running(request):
 # kept here; what the database returns replaces the stored values when the filter is opened (at most every
 # "re-read drawings" minutes) or on Refresh. What it doesn't return stays as stored.
 # ---------------------------------------------------------------------------------------------------------------
-DB_FIELDS = ("ph", "pc", "pp", "fl", "mw", "mt", "fr")   # the viewer's own setting names, in mm (pc: a count)
-
-
 def db_ready():
     from hmi import integrations
     from hmi.models import SavedQuery
     return integrations.assets_ready() and SavedQuery.objects.filter(name="filter_3d").exists()
 
 
-def _mm(v, uom):
-    u = str(uom or "mm").strip().lower().rstrip(".")
-    return v * 25.4 if u in ("in", "inch", "inches", '"', "″") else v * 10 if u == "cm" else v
-
-
 def refresh_from_db(x, ctx=None, force=False):
-    """Bring one stored filter (a FilterModel3D) up to date from the asset database. Returns a sentence, or None when
-    there's nothing to do (not set up, or read recently)."""
+    """Read one stored filter's row from the asset database ("3D filter data") and keep it with the filter: the
+    viewer lays it over the saved settings when it opens the filter (its own batch-sheet rules: mm unless the unit
+    column says inches, Side/End B copying A, band heights to offsets). Columns it doesn't return stay as saved.
+    Returns a sentence, or None when there's nothing to do (not set up, or read recently)."""
     from django.core.cache import cache
+    from django.utils import timezone
 
     from hmi import engine
+    from hmi.snapshot import fv_columns
     if not db_ready():
         return None
     key = "fv-db:" + x.pid
@@ -147,32 +173,22 @@ def refresh_from_db(x, ctx=None, force=False):
     o = engine._first_row("filter_3d", engine.part_key(x.part), ctx or engine.Ctx())
     if every > 0:
         cache.set(key, 1, int(every * 60))
-    if not o:
-        return f"The asset database has no 3D data for {x.part}."
-    vals = {}
-    for f in DB_FIELDS:
-        n = engine._spec_number(o.get(f))
-        if n is not None and n > 0:
-            vals[f] = round(n if f == "pc" else _mm(n, o.get(f + "_uom") or o.get("uom")), 3)
-    if not vals:
-        return f"The asset database has no 3D dimensions for {x.part}."
+    known = {c["db"] for c in fv_columns()} | {"uom"}
+    row = {k: (v if isinstance(v, (int, float)) else str(v)[:500]) for k, v in (o or {}).items()
+           if k in known and v is not None and str(v).strip() != ""}
     data = dict(x.data or {})
-    cfg = dict(data.get("config") or {})
-    P = dict(cfg.get("P") or {})
-    P.update(vals)
-    if "pc" in P and "pp" in P and "fl" not in vals:
-        P["fl"] = round(P["pc"] * P["pp"], 2)          # the viewer keeps length = count × pitch
-    elif "fl" in vals and "pc" in P and "pp" not in vals and P["pc"]:
-        P["pp"] = round(vals["fl"] / P["pc"], 3)
-    cfg["P"] = P
-    data["config"] = cfg
-    from django.utils import timezone
-    data["fromDb"] = {"fields": sorted(vals), "t": int(timezone.now().timestamp() * 1000)}
-    if data != x.data:
+    if not [k for k in row if k != "uom"]:
+        if data.pop("db", None) is not None:
+            x.data = data
+            x.save(update_fields=["data", "updated"])
+        return f"The asset database has no 3D data for {x.part}."
+    db = {"row": row, "t": int(timezone.now().timestamp() * 1000)}
+    if (data.get("db") or {}).get("row") != row:
+        data["db"] = db
         x.data = data
-        x.by = "Asset database"
-        x.save(update_fields=["data", "by", "updated"])
-    return f"{x.part}: {', '.join(sorted(vals))} from the asset database."
+        x.save(update_fields=["data", "updated"])
+    n = len([k for k in row if k != "uom"])
+    return f"{x.part}: {n} setting{'s' if n != 1 else ''} from the asset database."
 
 
 def find(part):
