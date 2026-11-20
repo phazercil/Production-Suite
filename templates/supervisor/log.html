@@ -3,7 +3,7 @@
 {% block body_class %}scroll{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
 {% block content %}<div class="sv">
-  <div class="sv-head no-print"><a class="btn ghost" href="/supervisor/{% if back %}?{{ back }}{% endif %}">‹ Back to history</a><span class="grow"></span>{% if canEdit %}<a class="btn ghost" href="/supervisor/edit/log/{{ P.sh.pk }}/?back={{ here|urlencode }}">Edit log</a>{% endif %}<button type="button" class="btn ghost" id="sv-print">Print</button><button type="button" class="btn ghost" id="sv-copy" data-text="{{ P.text }}">Copy report</button></div>
+  <div class="sv-head no-print"><a class="btn ghost" href="/supervisor/{% if back %}?{{ back }}{% endif %}">‹ Back to history</a><span class="grow"></span>{% if canEdit %}<a class="btn ghost" href="/supervisor/edit/log/{{ P.sh.pk }}/?back={{ here|urlencode }}">Edit log</a>{% endif %}{% if not P.sh.active %}<a class="btn ghost" href="/supervisor/build/{{ P.sh.pk }}/">Fill in from paper log</a>{% endif %}<button type="button" class="btn ghost" id="sv-print">Print</button><button type="button" class="btn ghost" id="sv-copy" data-text="{{ P.text }}">Copy report</button></div>
   {% if msg %}<div class="flash ok no-print" role="status">{{ msg }}</div>{% endif %}
   <h1>End of Shift report · {{ P.sh.line }}</h1>
   <p class="muted">{% if P.sh.shift_name %}{{ P.sh.shift_name }} · {% endif %}{% if P.who %}{{ P.who }}{% else %}{{ nobody }}{% endif %} · {{ P.sh.start|day }} {{ P.sh.start|clock }} – {% if P.sh.active %}now (still running){% else %}{{ P.sh.end|clock }}{% endif %}</p>

@@ -1,0 +1,12 @@
+{% load suite %}<datalist id="sv-people">{% for n in people %}<option value="{{ n }}">{% endfor %}</datalist>
+<div class="tblwrap"><table class="st sv-rows"><thead><tr><th>Operator</th><th>From</th><th>To</th><th>MO</th><th>Part</th><th class="n">Qty</th><th class="n">Scrap</th></tr></thead><tbody>
+{% for x in rows %}<tr data-row="{{ x.i }}" {% if x.hide %}hidden{% endif %}>
+  <td><input type="text" name="who_{{ x.i }}" value="{{ x.r.who|default:'' }}" list="sv-people" placeholder="{{ nobody }}" aria-label="Row {{ x.i|add:1 }} operator" {% if not can %}disabled{% endif %}></td>
+  <td><input type="time" name="from_{{ x.i }}" value="{{ x.r.from|default:'' }}" aria-label="Row {{ x.i|add:1 }} from" {% if not can %}disabled{% endif %}></td>
+  <td><input type="time" name="to_{{ x.i }}" value="{{ x.r.to|default:'' }}" aria-label="Row {{ x.i|add:1 }} to" {% if not can %}disabled{% endif %}></td>
+  <td><input type="text" name="mo_{{ x.i }}" value="{{ x.r.mo|default:'' }}" size="9" aria-label="Row {{ x.i|add:1 }} MO" {% if not can %}disabled{% endif %}></td>
+  <td><input type="text" name="item_{{ x.i }}" value="{{ x.r.item|default:'' }}" size="10" placeholder="from the MO" aria-label="Row {{ x.i|add:1 }} part" {% if not can %}disabled{% endif %}></td>
+  <td class="n"><input type="number" min="0" name="qty_{{ x.i }}" value="{{ x.r.qty|default:'' }}" style="width:6em" placeholder="{{ qtyhint }}" aria-label="Row {{ x.i|add:1 }} qty" {% if not can %}disabled{% endif %}></td>
+  <td class="n"><input type="number" min="0" name="scrap_{{ x.i }}" value="{{ x.r.scrap|default:'' }}" style="width:5em" aria-label="Row {{ x.i|add:1 }} scrap" {% if not can %}disabled{% endif %}></td>
+</tr>{% endfor %}</tbody></table></div>
+{% if can %}<div class="row" style="margin-top:8px"><button type="button" class="btn ghost" id="sv-addrow">+ Add a row</button></div>{% endif %}

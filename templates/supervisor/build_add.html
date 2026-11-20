@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Add a log · History builder{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+  <div class="sv-head"><a class="btn ghost" href="/supervisor/build/">‹ History builder</a><span class="grow"></span><span class="who">{{ me.name }}</span></div>
+  <h1>Add a log by hand</h1>
+  <p class="muted">For time with no record at all (the machine's feed was down, or it has none). If the suite already logged the time, fill in that log from the History builder list instead.</p>
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  {% if not can %}<div class="flash">Adding history needs the <b>Correct history</b> permission (Admin › Permissions).</div>{% endif %}
+  <form method="post" class="card sv-form">{% csrf_token %}
+    <div class="sv-filter" style="margin:0">
+      <label>Machine<select name="machine" {% if not can %}disabled{% endif %}><option value="">Pick one</option>{% for m in machines %}<option {% if m == form.machine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+      <label>Day<input type="date" name="day" value="{{ form.day }}" {% if not can %}disabled{% endif %}></label>
+      <label>Start<input type="time" name="start" value="{{ form.start }}" {% if not can %}disabled{% endif %}></label>
+      <label>End<input type="time" name="end" value="{{ form.end }}" {% if not can %}disabled{% endif %}></label>
+      <label>Shift<input type="text" name="shift_name" value="{{ form.shift_name }}" placeholder="from the machine schedule" {% if not can %}disabled{% endif %}></label>
+    </div>
+    <h2>From the paper log</h2>
+    <p class="muted">One row per operator and part, with the quantity made. Each operator gets their own log.</p>
+    {% include "supervisor/_build_rows.html" with qtyhint="" %}
+    {% if can %}<label class="fld"><span>Why (kept with the change)</span><input type="text" name="why" value="{{ form.why }}" placeholder="e.g. Feed was down, from the paper log"></label>
+    <div class="row"><button class="btn go" type="submit">Add the log</button></div>{% endif %}
+  </form>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

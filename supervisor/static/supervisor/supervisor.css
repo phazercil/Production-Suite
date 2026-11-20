@@ -79,3 +79,4 @@ a.edit{font-weight:600}
 .lc-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:10px 0 6px;font-size:15px}.lc-kv dt{color:var(--s-ink-2)}.lc-kv dd{margin:0}
 .lc-kv .big{font-size:20px}
 .pill.idle{color:var(--s-ink-2)}
+.sv-rows input{width:100%;min-width:5em;box-sizing:border-box}.sv-rows td{padding:4px 6px}

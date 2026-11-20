@@ -301,6 +301,27 @@ Each downtime then lists what the machine reported during it (and in the 2 minut
 and in the "Why did the line stop?" prompt. A code still showing appears in the run screen's alerts and on Status.
 Stored in `hmi_machine_errors` for Grafana (a ready query is under Admin › Connections › Grafana).
 
+### History builder (Supervisor)
+
+Machine data is recorded whether or not anyone is logged in. Supervisor › History › **History builder** lists the
+closed logs that still need the paper log: time the machine ran or made parts with nobody logged in, and logs with
+an operator but no parts on record. Open one to see what the machine recorded hour by hour (units, running and
+stopped minutes, recipe), then enter the paper log, one row per operator and part:
+
+- **Operator, From, To:** a different operator splits the log at the time their row starts. Each piece gets its own
+  machine minutes, units, uptime, downtime (a stop over the hand-over is split too), QC checks, notes and changeover
+  pieces. Leave Operator blank for time nobody was on the machine. Paper times up to 15 minutes outside the log
+  count as its start or end.
+- **MO, Part, Qty, Scrap:** each row with an MO or part becomes an MO run. The part is taken from the MO when left
+  blank; Qty left blank is what the machine counted in that time.
+
+**Add a log by hand** is for time with no record at all (the feed was down, or the machine has none): machine, day,
+start and end, and the rows, with the quantities from the paper. It is refused if the suite already has a log in
+that time; fill that one in instead.
+
+Needs **Correct history** (Admin › Permissions). Every change is kept with who, when and why, like the other History
+corrections. The MO's made count is not changed (it comes from the machine and S2K).
+
 ### Outside databases: MariaDB/MySQL, SQL Server or PostgreSQL
 
 The asset, S2K and machine data databases can each be **MariaDB / MySQL, Microsoft SQL Server or PostgreSQL**.
