@@ -23,6 +23,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("runs.nomo", "Run without an MO", "When a line has no MO to run, enter the filter number it runs by (Change over › No MO). With the Supervisor button on an operator's screen.", SUP),
         ("runs.override", "Override a running shift", "Change the speed or count settings of a shift that is running.", LEAD),
         ("tickets.work", "Work maintenance requests", "Add repair notes and close maintenance requests.", SUP),
+        ("pm.edit", "PM schedule", "Add, change and remove planned maintenance tasks (Maintenance › PM schedule).", SUP),
     ]),
     ("Quality", [
         ("quality.tolerances", "Quality settings", "Quality › QC checks, Parts & specs and Tolerances: what each stage's QC check asks, each part's drawing specs (and importing them from the asset database), how far each measurement may be under or over for every filter, and the Process Out issue list.", LEAD),

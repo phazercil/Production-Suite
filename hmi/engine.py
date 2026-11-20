@@ -1286,10 +1286,26 @@ def roll_add(p, ctx):
         need(feet is not None and 0 <= feet <= 1_000_000, "Footage must be a number of feet.")
         feet = int(feet)
     need(len(rid) <= 80, "That roll ID is too long (80 characters at most).")
-    RollTag.objects.create(shift=sh, t=ctx.now, line=sh.line, roll=rid, material=str(p.get("material") or "")[:120], lot=str(p.get("lot") or "")[:80],
-                           feet=feet, mo=sh.mo.number if sh.mo else "", count_at=sh.count, by=ctx.by)
-    event("roll", {"line": sh.line, "roll": rid})
+    r = RollTag.objects.create(shift=sh, t=ctx.now, line=sh.line, roll=rid, material=str(p.get("material") or "").strip()[:120],
+                               lot=str(p.get("lot") or "").strip()[:80], feet=feet, mo=sh.mo.number if sh.mo else "", count_at=sh.count, by=ctx.by)
+    if p.get("photo"):   # the picture of the tag the fields were read from (Roll tags › Take a picture)
+        from .models import RollTagPhoto
+        RollTagPhoto.objects.filter(pk=p.get("photo"), roll__isnull=True, line=sh.line, t__gte=ctx.now - timedelta(hours=12)).update(roll=r)
+    event("roll", {"line": sh.line, "roll": rid, "lot": r.lot, "material": r.material, "mo": r.mo})
     return {"msg": f"Roll {rid} added"}
+
+
+@cmd("rollOff")
+def roll_off(p, ctx):
+    """The roll on the line was taken off (used up, or put away part-used) without another one going on yet."""
+    sh = shift_of(p, ctx)
+    from . import trace
+    r = trace.current_roll(sh.line)
+    need(r, "There's no roll on this line to take off.")
+    r.off_t, r.off_by = ctx.now, ctx.by
+    r.save(update_fields=["off_t", "off_by"])
+    event("roll_off", {"line": sh.line, "roll": r.roll})
+    return {"msg": f"Roll {r.roll} taken off"}
 
 
 @cmd("ticketAdd")
@@ -1319,6 +1335,9 @@ def ticket_status(p, ctx):
     t.save()
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
                               text=note or ("Completed" if t.status == "Closed" else "Started work"))
+    if t.status == "Closed" and t.pm_id:   # planned maintenance done: its count starts again
+        from . import pm
+        pm.completed(t, ctx.now, ctx.by)
     event("maintenance_status", {"id": t.id, "status": t.status})
     notify((f"Maintenance completed on {t.machine} · {t.type} by {ctx.by}" + (f": {note}" if note else "")) if t.status == "Closed"
            else f"Maintenance started on {t.machine} · {t.type} ({ctx.by})", "maint", lines=[t.line or t.machine, t.machine], go="maintenance")
@@ -1341,6 +1360,96 @@ def ticket_note(p, ctx):
     event("maintenance_note", {"id": t.id})
     notify(f"Repair note on {t.machine} · {t.type} from {ctx.by}: {text}", "maint", lines=[t.line or t.machine, t.machine], go="maintenance")
     return {"msg": "Repair note added"}
+
+
+# ------------------------------------------------------------------ planned maintenance (Maintenance › PM schedule)
+def _pm_number(v, what, lo=0.0001, hi=10_000_000):
+    n = to_number(v)
+    need(n is not None and lo <= n <= hi, what)
+    return n
+
+
+@cmd("pmSave", "pm.edit")
+def pm_save(p, ctx):
+    """Add or change a PM task."""
+    from . import pm
+    from .models import PMTask
+    t = PMTask.objects.filter(pk=p.get("id")).first() if p.get("id") else PMTask(created=ctx.now)
+    need(t is not None, "That PM task is no longer on file.")
+    machine = str(p.get("machine") or "").strip()[:60]
+    need(machine, "Pick the machine or equipment.")
+    known = set(Machine.objects.values_list("name", flat=True)) | set(config().get("equipment", []))
+    need(machine in known or machine == t.machine, "Pick the machine or equipment from the list.")
+    title = re.sub(r"\s+", " ", str(p.get("title") or "")).strip()[:120]
+    need(title, "Say what the job is, e.g. Grease the pleater chain.")
+    unit = p.get("unit") if p.get("unit") in pm.UNITS else "days"
+    need(unit == "days" or pm.is_machine(machine), f"{machine} has no machine readings, so it can only go by days.")
+    every = _pm_number(p.get("every"), "How often? Enter a number above 0.")
+    if unit == "days":
+        need(every <= 3660, "Every how many days? (10 years at most)")
+    changed = t.pk and (t.unit != unit)
+    t.machine, t.title, t.unit, t.every = machine, title, unit, every
+    t.steps = str(p.get("steps") or "").strip()[:4000]
+    t.priority = p.get("priority") if p.get("priority") in ("Low", "Medium", "High") else "Medium"
+    if "active" in p:
+        t.active = bool(p.get("active")) and p.get("active") not in ("0", "false", "off")
+    if p.get("lastDone"):   # when it was last done, if before the suite knew about it
+        d = valid_date(p.get("lastDone"))
+        need(d, "Last done: pick a date.")
+        from datetime import datetime, time as dtime
+
+        from django.utils import timezone
+        from plant.util import local
+        t.last_done = ctx.now if local(ctx.now).date() == d else timezone.make_aware(datetime.combine(d, dtime(12)))
+        need(t.last_done <= ctx.now, "Last done can't be in the future.")
+    elif changed and t.last_done is None:
+        t.last_done = ctx.now
+    t.updated_by = ctx.by
+    t.save()
+    audit(ctx, f"PM schedule: saved {machine} · {title} (every {pm.fmt_amount(every, unit)})")
+    return {"msg": f"{title} saved.", "data": {"id": t.id}}
+
+
+@cmd("pmDelete", "pm.edit")
+def pm_delete(p, ctx):
+    from .models import PMTask
+    t = PMTask.objects.filter(pk=p.get("id")).first()
+    need(t, "That PM task is no longer on file.")
+    open_ = t.tickets.exclude(status="Closed")
+    for x in open_:   # its open request goes too (the completed ones stay as history)
+        x.delete()
+    t.active = False
+    t.save(update_fields=["active"])
+    if not t.tickets.exists():
+        t.delete()
+    audit(ctx, f"PM schedule: removed {t.machine} · {t.title}")
+    return {"msg": f"{t.title} removed."}
+
+
+@cmd("pmDone", "tickets.work")
+def pm_done(p, ctx):
+    """Log a PM task done now (early, or its open request completed from the PM schedule)."""
+    from . import pm
+    from .models import PMTask
+    t = PMTask.objects.select_for_update().filter(pk=p.get("id")).first()
+    need(t, "That PM task is no longer on file.")
+    note = str(p.get("note") or "").strip()
+    need(len(note) <= 4000, "Keep the note under 4,000 characters.")
+    pm.log_done(t, ctx.now, ctx.by, note)
+    notify(f"Planned maintenance done on {t.machine}: {t.title} ({ctx.by})", "maint", lines=[t.machine], go="maintenance")
+    return {"msg": f"{t.title} logged as done. The count starts again from now."}
+
+
+@cmd("pmOpenNow", "pm.edit")
+def pm_open_now(p, ctx):
+    """Open the request for a task now, before it falls due."""
+    from . import pm
+    from .models import PMTask
+    t = PMTask.objects.filter(pk=p.get("id")).first()
+    need(t, "That PM task is no longer on file.")
+    need(not pm.open_ticket(t), "This task already has an open request.")
+    pm.open_request(t, ctx.now, by=ctx.by)
+    return {"msg": f"Request opened for {t.title}."}
 
 
 @cmd("noteAdd")
@@ -3207,7 +3316,7 @@ def src_test(p, ctx):
 # ------------------------------------------------------------------ downtime alerts
 def _contact_json(c):
     return {"id": c.id, "name": c.name, "email": c.email, "phone": c.phone, "lines": c.lines or [], "downAfter": c.down_after,
-            "notifyBack": c.notify_back, "active": c.active}
+            "notifyBack": c.notify_back, "qcLate": c.qc_late, "qcFail": c.qc_fail, "pmDue": c.pm_due, "active": c.active}
 
 
 @cmd("alertInfo", "alerts.edit")
@@ -3239,11 +3348,16 @@ def alert_contact_save(p, ctx):
     need(email or phone, "Enter an email address, a mobile number, or both.")
     names = set(Machine.objects.values_list("name", flat=True))
     lines = [x for x in (f.get("lines") or []) if x in names] if isinstance(f.get("lines"), list) else []
-    try:
-        after = max(1, min(1440, int(float(f.get("downAfter") or 15))))
-    except (TypeError, ValueError):
-        after = 15
+    def minutes(v, default):
+        try:
+            return max(0, min(1440, int(float(v if v not in (None, "") else default))))
+        except (TypeError, ValueError):
+            return default
+    after = minutes(f.get("downAfter"), 15)   # 0 = not told about stops
     c.name, c.email, c.phone, c.lines, c.down_after = name, email, phone, lines, after
+    c.qc_late = minutes(f.get("qcLate"), 0)   # 0 = not told about overdue QC checks
+    c.qc_fail, c.pm_due = bool(f.get("qcFail")), bool(f.get("pmDue"))
+    need(after or c.qc_late or c.qc_fail or c.pm_due, "Pick at least one thing to tell this person about.")
     c.notify_back, c.active = f.get("notifyBack") is not False, f.get("active") is not False
     c.save()
     audit(ctx, f"Downtime alerts: saved {name}")
@@ -3417,7 +3531,9 @@ def data_reset(p, ctx):
         from plant.demo import seed_demo
         seed_demo(reset=True)
         return {"msg": "Demo data loaded", "relogin": True}
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, ToolingCache, MachineError):
+    from .models import RollTagPhoto
+    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTagPhoto, RollTag, Ticket, ShiftNote, MoRun, Notice, Event, ChangeoverCache, ToolingCache,
+                  MachineError):
         model.objects.all().delete()
     MO.objects.all().delete()
     Machine.objects.filter(feed_type="demo").update(feed_type="none")

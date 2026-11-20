@@ -437,16 +437,33 @@ def m_ticket_done(request, s):
 
 
 @modal("rolls", login=True)
-def m_rolls(request, s):
+def m_rolls(request, s, pre=None, photo=None, how=None, read=None):
+    """Roll tags: scan or type a roll's tag, or take a picture of it and let the screen read it (hmi/rolltag.py)."""
     if not s.shift_on:
         return thin.refused("Start a shift before scanning rolls.")
+    from . import trace
     from .models import RollTag
     rolls = list(RollTag.objects.filter(shift=s.shift).order_by("-t"))
     rows = []
     for i, r in enumerate(rolls):
         nxt = s.shift.count if i == 0 else rolls[i - 1].count_at
         rows.append({"r": r, "units": nxt - r.count_at})
-    return modal_response(request, "hmi/k/m_rolls.html", **ctx_for(s, rows=rows, media=s.part(s.current_item())["media"] if s.current_item() else ""))
+    media = s.part(s.current_item())["media"] if s.current_item() else ""
+    pre = dict(pre or {})
+    pre.setdefault("material", media)
+    cur = trace.current_roll(s.station)
+    return modal_response(request, "hmi/k/m_rolls.html", **ctx_for(s, rows=rows, media=media, pre=pre, photo=photo, how=how or {}, read=read,
+                                                                   cur=cur, curPhoto=cur.photos.values_list("id", flat=True).first() if cur else None,
+                                                                   static_v=_rolltag_assets()))
+
+
+def _rolltag_assets():
+    """Where the screen finds the text reader (Tesseract, served by the suite itself: no internet)."""
+    from django.conf import settings
+    from django.templatetags.static import static
+    base = settings.STATIC_URL.rstrip("/") + "/vendor/tesseract"   # folders: the reader adds the file names itself
+    return {"lib": static("vendor/tesseract/tesseract.min.js"), "worker": static("vendor/tesseract/worker.min.js"), "core": base + "/core",
+            "lang": base + "/lang"}
 
 
 @modal("ticket", login=True)
@@ -463,6 +480,15 @@ def m_photo(request, s):
     if not ph:
         return thin.refused("That picture is no longer on file.")
     return modal_response(request, "hmi/k/m_photo.html", **ctx_for(s, ph=ph))
+
+
+@modal("rollPhoto")
+def m_roll_photo(request, s):
+    from .models import RollTagPhoto
+    ph = RollTagPhoto.objects.filter(pk=request.GET.get("id") or 0).select_related("roll").defer("data", "thumb").first()
+    if not ph:
+        return thin.refused("That picture is no longer on file.")
+    return modal_response(request, "hmi/k/m_roll_photo.html", **ctx_for(s, ph=ph, back=s.shift_on))
 
 
 @modal("drawing")
@@ -865,6 +891,45 @@ def a_co_step(request, s, p):
     r = run(request, s, "coStep", {"i": i, "checked": bool(p.get(f"step{i}"))})
     return thin.done(changed=True) if r["ok"] else thin.refused(r["error"])
 ACTIONS["rollAdd"] = simple("rollAdd", toast=False, then=lambda request, s, r: m_rolls(request, s))
+ACTIONS["rollOff"] = simple("rollOff", then=lambda request, s, r: thin.trigger(m_rolls(request, s), toast=r.get("msg")))
+
+
+@action("rollRead")
+def a_roll_read(request, s, p):
+    """A picture of a roll tag, and what the tablet read from it: fill in the fields and keep the picture."""
+    from . import photos, rolltag
+    from .models import RollTagPhoto
+    if not s.me:
+        return login_needed(request, s, {"login": True})
+    if not s.shift_on:
+        return thin.refused("Start a shift before scanning rolls.")
+    ocr = p.get("ocr") if isinstance(p.get("ocr"), dict) else {}
+    res = rolltag.read(ocr.get("lines") or [], ocr.get("barcodes") or [])
+    f = request.FILES.get("tagphoto")
+    ph = None
+    if f:
+        try:
+            if f.size > photos.MAX_BYTES:
+                raise photos.PhotoError("That picture is too large (over 25 MB).")
+            jpeg, thumb, w, h = photos.process(f.read())
+            ph = RollTagPhoto.objects.create(t=now(), by=s.me.name, line=s.station, data=jpeg, thumb=thumb, size=len(jpeg), width=w, height=h,
+                                             text=(res["text"] + ("\nBarcodes: " + ", ".join(res["barcodes"]) if res["barcodes"] else ""))[:8000],
+                                             found=res["fields"])
+        except photos.PhotoError as e:
+            return err_in_modal(str(e))
+    n = len(res["fields"])
+    if ocr.get("error") and not n:
+        read = {"ok": False, "text": f"This screen couldn't read the picture ({str(ocr['error'])[:120]}). The picture is kept with the roll; type the fields."}
+    elif not n:
+        read = {"ok": False, "text": "Nothing on the tag could be matched to a field. Type them in; the picture is kept with the roll. "
+                                     "If your tags label things differently, a shift lead can add the labels in Quality › Traceability."}
+    else:
+        names = [lbl for k, lbl in rolltag.FIELDS if k in res["fields"]]
+        read = {"ok": True, "text": f"Read {', '.join(names)} from the picture. Check them against the tag, then Add roll."}
+    read["raw"] = res["text"]
+    read["barcodes"] = res["barcodes"]
+    return m_rolls(request, s, pre=res["fields"], photo=ph.pk if ph else None, how=res["how"], read=read)
+
 ACTIONS["noteAdd"] = simple("noteAdd", toast=False, then=lambda request, s, r: m_notes(request, s))
 ACTIONS["overrideSet"] = simple("overrideSet", close=True)
 ACTIONS["overrideClear"] = simple("overrideClear", toast=False, close=True)

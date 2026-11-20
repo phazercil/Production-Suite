@@ -1,0 +1,54 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Maintenance · {% if tab.on == "requests" %}Requests{% elif tab.on == "history" %}PM history{% else %}PM schedule{% endif %}{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+  <div class="sv-head"><h1>Maintenance</h1><span class="muted">{% if tab.on == "requests" %}Requests from the lines{% elif tab.on == "history" %}Planned maintenance done in the last year{% else %}Planned maintenance by machine: every so many days, run hours or filters made{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
+  {% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  <nav class="sv-tabs" aria-label="Maintenance">{% for k, label in tabs %}<a href="?{{ tab.q|get:k }}" {% if tab.on == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+  <form method="get" class="sv-filter no-print" style="margin-bottom:12px"><input type="hidden" name="tab" value="{{ tab.on }}">
+    <label>Machine<select name="m"><option value="">All machines and equipment</option>{% for m in machines %}<option {% if m == machine %}selected{% endif %}>{{ m }}</option>{% endfor %}{% for m in other %}<option {% if m == machine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <button class="btn">Show</button></form>
+
+{% if tab.on == "pm" %}
+  <div class="sv-kpis" style="margin-bottom:12px"><div class="kpi {% if counts.due %}bad{% endif %}"><span>Due, no request yet</span><b>{{ counts.due }}</b></div><div class="kpi"><span>Request open</span><b>{{ counts.open }}</b></div><div class="kpi"><span>Due soon</span><b>{{ counts.soon }}</b></div><div class="kpi"><span>Tasks</span><b>{{ rows|length }}</b></div></div>
+  <p class="muted">When a task falls due the server opens a maintenance request for it, which shows on every line's Maintenance page. Completing the request (or <b>Log done</b> here) starts the count again. Run hours and filters made come from each machine's readings; other equipment goes by days. "Falls due" is an estimate from the last two weeks of running.</p>
+  <div class="card"><table class="st"><thead><tr><th>Machine</th><th>Task</th><th>Every</th><th>Since last done</th><th></th><th>Falls due</th><th>Last done</th><th></th></tr></thead><tbody>
+  {% for r in rows %}<tr>
+    <td class="nw"><b>{{ r.task.machine }}</b></td>
+    <td><b>{{ r.task.title }}</b>{% if r.task.priority == "High" %} <span class="pill bad">HIGH</span>{% endif %}{% if r.task.steps %}<div class="note" style="white-space:pre-line">{{ r.task.steps|truncatechars:240 }}</div>{% endif %}</td>
+    <td class="nw">{{ r.everyTxt }}</td>
+    <td class="nw">{{ r.usedTxt }} <span class="muted">· {{ r.pct }}%</span><div class="bar" role="img" aria-label="{{ r.pct }}% of the interval used"><i class="{{ r.pill.0 }}" style="width:{% if r.pct > 100 %}100{% else %}{{ r.pct }}{% endif %}%"></i></div><div class="note">{{ r.leftTxt }}</div></td>
+    <td class="nw"><span class="pill {{ r.pill.0 }}">{{ r.pill.1 }}</span>{% if r.ticket %}<div class="note">opened {{ r.ticket.t|plan:t }}{% if r.ticket.status == "In progress" %} · in progress{% endif %}</div>{% endif %}</td>
+    <td class="nw">{% if r.state == "due" or r.state == "open" %}now{% elif r.eta %}{{ r.eta|day }}{% elif r.state == "off" %}—{% else %}<span class="muted">no running yet</span>{% endif %}</td>
+    <td class="nw">{% if r.task.last_done %}{{ r.task.last_done|day }}{% if r.task.last_by %}<div class="note">{{ r.task.last_by }}</div>{% endif %}{% else %}<span class="muted">not yet</span>{% endif %}</td>
+    <td class="nw" style="text-align:right">
+      {% if canWork %}<details class="inl"><summary class="btn po">Log done</summary><form method="post" class="sv-filter" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="action" value="pmDone"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ machine }}"><label>Note<input type="text" name="note" maxlength="4000" placeholder="What was done, parts used"></label><button class="btn go">Done now</button></form></details>{% endif %}
+      {% if canEdit %}{% if not r.ticket and r.task.active %}<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="pmOpenNow"><input type="hidden" name="id" value="{{ r.task.id }}"><input type="hidden" name="m" value="{{ machine }}"><button class="btn ghost po" title="Open the request now, before it falls due">Open request</button></form>{% endif %}
+      <a class="btn ghost po" href="?tab=pm&amp;edit={{ r.task.id }}{% if machine %}&amp;m={{ machine|urlencode }}{% endif %}#edit">Edit</a>{% endif %}</td></tr>
+  {% if canEdit and edit == r.task.id %}<tr id="edit"><td colspan="8">{% include "maintenance/_pm_form.html" with x=r.task %}</td></tr>{% endif %}
+  {% empty %}<tr><td colspan="8" class="empty">No planned maintenance yet{% if machine %} for {{ machine }}{% endif %}.{% if canEdit %} Add the first task below.{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if canEdit %}<div class="card" style="margin-top:14px"><h2>Add a PM task</h2>{% include "maintenance/_pm_form.html" with x=None %}</div>
+  {% else %}<p class="muted">Adding and changing tasks needs the <b>PM schedule</b> permission (Admin › Permissions).</p>{% endif %}
+
+{% elif tab.on == "requests" %}
+  <div class="row" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><nav class="seg">{% for f, label in "open:Open & in progress,done:Completed (30 days)"|pairs %}<a class="btn {% if show != f %}ghost{% endif %} po" href="?tab=requests&amp;show={{ f }}{% if machine %}&amp;m={{ machine|urlencode }}{% endif %}">{{ label }}</a>{% endfor %}</nav>
+    <span class="grow" style="flex:1"></span><a class="btn" href="/operator/maintenance/">Open the kiosk Maintenance page</a></div>
+  <div class="card"><table class="st"><thead><tr><th>Machine</th><th>Request</th><th>Priority</th><th>Status</th><th>Opened</th><th>By</th></tr></thead><tbody>
+  {% for x in reqs %}<tr><td class="nw"><b>{{ x.t.machine }}</b></td><td>{{ x.t.type|default:"Request" }}{% if x.t.pm_id %} <span class="pill idle">PM</span>{% endif %}{% if x.t.notes %}<div class="note">{{ x.t.notes|truncatechars:160 }}</div>{% endif %}</td>
+    <td>{% if x.t.priority == "High" %}<span class="pill bad">HIGH</span>{% else %}{{ x.t.priority }}{% endif %}</td>
+    <td class="nw">{% if x.t.status == "Closed" %}<span class="pill ok">COMPLETED</span><div class="note">{{ x.t.updated|plan:t }} · {{ x.t.updated_by }}</div>{% elif x.t.status == "In progress" %}<span class="pill warn">IN PROGRESS</span>{% else %}<span class="pill bad">OPEN</span><div class="note">{{ x.age|dur }}</div>{% endif %}</td>
+    <td class="nw">{{ x.t.t|plan:t }}</td><td>{{ x.t.by }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="empty">{% if show == "open" %}No open requests.{% else %}Nothing completed in the last 30 days.{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+
+{% else %}
+  <div class="card"><table class="st"><thead><tr><th>Done</th><th>Machine</th><th>Task</th><th>By</th><th>On time</th><th>Note</th></tr></thead><tbody>
+  {% for r in hist %}<tr><td class="nw">{{ r.t.updated|day }} {{ r.t.updated|clock }}</td><td class="nw"><b>{{ r.t.machine }}</b></td><td>{{ r.task.title|default:r.t.type }}</td><td>{{ r.t.updated_by }}</td>
+    <td class="nw">{% if r.late is None %}<span class="muted">—</span>{% elif r.late > 0.5 %}<span class="pill warn">{{ r.late|floatformat:0 }} day{{ r.late|floatformat:0|pluralize }} late</span>{% else %}<span class="pill ok">ON TIME</span>{% endif %}</td>
+    <td>{{ r.note }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="empty">No planned maintenance done yet.</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

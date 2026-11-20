@@ -32,7 +32,8 @@ def ensure_basics():
 def wipe():
     from hmi import models as H
     from scheduler.models import Job
-    for model in (H.PpmReading, H.Downtime, H.QCCheck, H.RollTag, H.Ticket, H.ShiftNote, H.MoRun, H.Notice, H.AuditLog, H.Event, H.MachineError,
+    for model in (H.PpmReading, H.Downtime, H.QCCheck, H.RollTagPhoto, H.RollTag, H.Ticket, H.PMTask, H.ShiftNote, H.MoRun, H.Notice, H.AuditLog,
+                  H.Event, H.MachineError,
                   H.ChangeoverCache, H.ToolingCache, H.LineState, H.ShiftRun, Job, MO, Person, PartSpec, ShiftBreak):
         model.objects.all().delete()
     Machine.objects.all().delete()
@@ -148,6 +149,14 @@ def seed_demo(reset=True):
                            lot="L2603-117", feet=3200, mo="309215", count_at=0, by=jo.name)
     Ticket.objects.create(shift=sh, t=start + timedelta(minutes=70), line="Barbara", by=jo.name, machine="Barbara", type="Pleater jam",
                           priority="Medium", notes="Media walking left at the score wheels after restart.")
+    # planned maintenance (Maintenance › PM schedule): one due now, one nearly due, one by filters made
+    from hmi.models import PMTask
+    PMTask.objects.create(machine="Compressor", title="Drain the air tank and check the dryer", every=7, unit="days", created=t - timedelta(days=30),
+                          last_done=t - timedelta(days=8), last_by="K. Patel", steps="Open the tank drain until only air comes out\nCheck the dryer's dew point light")
+    PMTask.objects.create(machine="Barbara", title="Grease the pleater chain", every=40, unit="hours", created=t - timedelta(days=30),
+                          last_done=t - timedelta(days=4), last_by="K. Patel", steps="Grease all four chain points\nWipe off the extra")
+    PMTask.objects.create(machine="Salvatore", title="Change the glue filter", every=25000, unit="units", created=t - timedelta(days=30),
+                          last_done=t - timedelta(days=6), last_by="K. Patel")
     # what the pleater reported during its stops (demo machine errors)
     from hmi.models import MachineError
     demo_errs = [("E214", "Media break detected"), ("E031", "Score wheel guard open"), ("E107", "Glue pot low temperature")]

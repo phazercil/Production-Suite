@@ -237,6 +237,19 @@ def timed_pulls(state, t):
             if n:
                 log.info("removed %s pictures of old closed maintenance tickets", n)
         run("photos", purge_photos)
+    # Roll tag pictures never saved with a roll (the operator took one but didn't add the roll), once a day
+    if due("rollphotos", 24 * 60):
+        def purge_roll_photos():
+            from .models import RollTagPhoto
+            RollTagPhoto.objects.filter(roll__isnull=True, t__lt=t - timedelta(days=1)).delete()
+        run("rollphotos", purge_roll_photos)
+    # Planned maintenance (Maintenance › PM schedule): open a request for each task that has fallen due
+    if due("pm", 5):
+        def pm_check():
+            from . import pm
+            for x in pm.check(t):
+                log.info("planned maintenance due: %s · %s", x.machine, x.type)
+        run("pm", pm_check)
     # Updates: files dropped in updates/inbox, and an update that is due (Admin > Updates)
     if not state.get("updates") or (t - state["updates"]).total_seconds() >= 15:
         state["updates"] = t

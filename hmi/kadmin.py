@@ -824,7 +824,8 @@ def a_alert_edit(request, s, p):
     deny = _need(request, s, "alerts.edit")
     if deny:
         return deny
-    edit = {"name": "", "email": "", "phone": "", "lines": [], "downAfter": 15, "notifyBack": True, "active": True}
+    edit = {"name": "", "email": "", "phone": "", "lines": [], "downAfter": 15, "notifyBack": True, "qcLate": 0, "qcFail": False, "pmDue": False,
+            "active": True}
     if p.get("id"):
         r = run(request, s, "alertInfo", {})
         edit = next((c for c in (r.get("data") or {}).get("contacts", []) if str(c["id"]) == str(p["id"])), edit)
@@ -840,7 +841,8 @@ def a_alert_cancel(request, s, p):
 def a_alert_save(request, s, p):
     c = {"id": int(p["id"]) if str(p.get("id") or "").isdigit() else None, "name": p.get("name", ""), "email": p.get("email", ""),
          "phone": p.get("phone", ""), "lines": request.POST.getlist("lines"), "downAfter": p.get("downAfter") or 15,
-         "notifyBack": bool(p.get("notifyBack")), "active": bool(p.get("active"))}
+         "notifyBack": bool(p.get("notifyBack")), "qcLate": p.get("qcLate") or 0, "qcFail": bool(p.get("qcFail")), "pmDue": bool(p.get("pmDue")),
+         "active": bool(p.get("active"))}
     r = run(request, s, "alertContactSave", {"contact": c})
     if not r["ok"]:
         return alerts_panel(request, s, edit=c, err=r["error"])

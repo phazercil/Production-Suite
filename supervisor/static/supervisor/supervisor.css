@@ -79,3 +79,9 @@ a.edit{font-weight:600}
 .lc-kv{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;margin:10px 0 6px;font-size:15px}.lc-kv dt{color:var(--s-ink-2)}.lc-kv dd{margin:0}
 .lc-kv .big{font-size:20px}
 .pill.idle{color:var(--s-ink-2)}
+/* Maintenance › PM schedule */
+.kpi.bad b{color:#ff7b72}
+.bar{height:6px;border-radius:3px;background:var(--s-rule);margin-top:4px;min-width:90px;overflow:hidden}
+.bar i{display:block;height:100%;background:#56d364}.bar i.warn{background:#e3b341}.bar i.bad{background:#ff7b72}.bar i.idle{background:var(--s-ink-2)}
+details.inl{display:inline-block;text-align:left;vertical-align:top}details.inl summary{list-style:none}details.inl summary::-webkit-details-marker{display:none}
+.sv-filter textarea{width:100%;min-height:60px}

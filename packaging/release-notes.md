@@ -1,3 +1,14 @@
+## What's new in 1.9.3
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Maintenance section:** the Maintenance tab in the top bar is now open (people with **Open Maintenance**). It has the **PM schedule**, the **Requests** from the lines and **PM history**.
+- **Planned maintenance (PM schedule):** add jobs for each machine or piece of equipment, done every so many **days**, **run hours** or **filters made** (run hours and filters come from the machine's own readings). The schedule shows how much of each interval is used, what is due, due soon or open, and an estimate of when each one falls due. When a job falls due, the server opens a maintenance request for it (**PM · job**), so it shows on every line's Maintenance page; completing that request starts the count again. **Log done** records a job done early; **Open request** opens it before it's due. Changing the schedule needs the new **PM schedule** permission (maintenance, shift leads and Admin by default).
+- **Alerts for QC and planned maintenance (Admin › Alerts):** besides line-down messages, each person can be told when a **QC check is overdue** by their number of minutes (re-checks too), when a **QC check fails** and waits for a supervisor, and when **planned maintenance falls due**. Each is one message per check or request. A person can now get only these (line down set to 0).
+- **Traceability (Quality › Traceability):** search a roll, lot, material, MO or part and see which media rolls went into which MOs, with the filters each roll made for each MO, the QC checks while the roll was on, and the picture of its tag. A roll counts from when its tag is scanned until the next roll's tag on that line. Download it as CSV.
+- **Roll off:** Roll tags shows the roll on the line now and has **Roll off**, for a roll taken off (used up or put away part-used) before the next one goes on.
+- **Read a roll tag from a picture:** Roll tags › **Take a picture of the tag**. The tablet reads the tag itself (nothing leaves the plant network) and fills in the roll ID, lot, material and footage for the operator to check, and the picture is kept with the roll. It finds each field by the label printed next to it; Quality › Traceability › **Reading roll tags** sets the labels your suppliers' tags use, a pattern for a value with no label, and which field a plain barcode fills (GS1 barcodes fill the lot and roll themselves). A material that isn't the MO's media is pointed out.
+
 ## What's new in 1.9.2
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
