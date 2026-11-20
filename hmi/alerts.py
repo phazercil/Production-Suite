@@ -2,6 +2,9 @@
 
 When a line has been stopped for a person's "down after" minutes (planned breaks, lunch and start-up time
 don't count), they get one message for that stop, and optionally one more when the line runs again.
+The same people can also be told when a QC check is overdue by their "QC late" minutes, when a QC check fails
+and waits for a supervisor, and when planned maintenance falls due (Maintenance › PM schedule). Each is one
+message per check, stop or request.
 
 Email goes through your mail server (SMTP). It must be on the plant network unless "the mail server is on the
 internet" is ticked. Text messages go through Twilio, a cloud service, so like Paycom they are an internet
@@ -153,6 +156,67 @@ def _down_minutes(sh, now):
 _busy = threading.Lock()
 
 
+def _told(key, contact, kind):
+    return AlertLog.objects.filter(stop_key=key, contact=contact, kind=kind).exists()
+
+
+def _for(c, line):
+    return not c.lines or not line or line in c.lines
+
+
+def quality_jobs(now, contacts, running):
+    """QC checks overdue by each person's "QC late" minutes, and failed checks waiting for a supervisor.
+    One message per check per person. The kiosk shows the same check as due / late on the line's own screen."""
+    from plant.models import PlantSettings
+
+    from . import qc
+    from .models import QCCheck
+    jobs = []
+    late_people = [c for c in contacts if c.qc_late and c.qc_late > 0]
+    if late_people:
+        st = PlantSettings.load()
+        for line, sh in running.items():
+            rc = qc.recheck_for(line)
+            due = qc.due_at(sh, st.settings, now, rc)
+            if not due:
+                continue
+            over = (now - due).total_seconds() / 60
+            key = f"qc|{line}|{due.isoformat()}"
+            what = "QC re-check" if rc else "QC check"
+            for c in late_people:
+                if _for(c, line) and over >= c.qc_late and not _told(key, c.name, "qclate"):
+                    body = (f"The {what.lower()} on {line} was due at {timezone.localtime(due):%I:%M %p} and is {round(over)} min overdue."
+                            f"{' MO ' + sh.mo.number + '.' if sh.mo else ''} Operator: {sh.user_name or 'not logged in'}.")
+                    jobs.append((c.name, c.email, c.phone, f"{what} overdue on {line}", body, "qclate", line, key))
+    fail_people = [c for c in contacts if c.qc_fail]
+    if fail_people:
+        for q in QCCheck.objects.filter(passed=False, review="pending", t__gte=now - timedelta(hours=8)):
+            key = f"qcfail|{q.pk}"
+            for c in fail_people:
+                if _for(c, q.line) and not _told(key, c.name, "qcfail"):
+                    body = (f"A QC check on {q.line} at {timezone.localtime(q.t):%I:%M %p} by {q.by} is out of spec"
+                            f"{' (' + ', '.join(q.fails) + ')' if q.fails else ''}. MO {q.mo or '—'}, part {q.item}. "
+                            "It needs a supervisor to approve, disapprove or Process Out.")
+                    jobs.append((c.name, c.email, c.phone, f"QC check failed on {q.line}", body, "qcfail", q.line, key))
+    return jobs
+
+
+def pm_jobs(now, contacts):
+    """Planned maintenance that fell due (its request opened in the last day)."""
+    from .models import Ticket
+    people = [c for c in contacts if c.pm_due]
+    if not people:
+        return []
+    jobs = []
+    for t in Ticket.objects.filter(pm__isnull=False, t__gte=now - timedelta(days=1)).exclude(status="Closed"):
+        key = f"pm|{t.pk}"
+        for c in people:
+            if _for(c, t.machine) and not _told(key, c.name, "pmdue"):
+                jobs.append((c.name, c.email, c.phone, f"Planned maintenance due on {t.machine}", f"{t.type} on {t.machine} is due. "
+                             "The request is on the Maintenance page.", "pmdue", t.machine, key))
+    return jobs
+
+
 def check(now=None):
     """Called by the ticker. Works out who should be told what, then sends in the background."""
     now = now or timezone.now()
@@ -169,11 +233,13 @@ def check(now=None):
         for c in contacts:
             if c.lines and line not in c.lines:
                 continue
-            if mins >= max(1, c.down_after) and not AlertLog.objects.filter(stop_key=key, contact=c.name, kind="down").exists():
+            if c.down_after > 0 and mins >= c.down_after and not AlertLog.objects.filter(stop_key=key, contact=c.name, kind="down").exists():
                 subject = f"{line} is down"
                 body = (f"{line} has been stopped for {round(mins)} min (since {timezone.localtime(sh.stop_start):%I:%M %p})."
                         f"{' MO ' + sh.mo.number + '.' if sh.mo else ''} Operator: {sh.user_name or 'not logged in'}.")
                 jobs.append((c.name, c.email, c.phone, subject, body, "down", line, key))
+    jobs += quality_jobs(now, contacts, running)
+    jobs += pm_jobs(now, contacts)
     # back running: a stop someone was told about has ended
     since = now - timedelta(hours=24)
     told = AlertLog.objects.filter(kind="down", t__gte=since, ok=True).values("stop_key", "contact", "line").distinct()

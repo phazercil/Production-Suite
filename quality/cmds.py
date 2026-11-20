@@ -111,3 +111,43 @@ def quality_issues_set(p, ctx):
     st.save(update_fields=["config"])
     audit(ctx, "Process Out quality issues: " + ", ".join(out))
     return {"msg": "Quality issues saved."}
+
+
+@cmd("rollTagSet", PERM)
+def roll_tag_set(p, ctx):
+    """How the Operator Kiosk reads a roll tag from a picture (Quality › Traceability › Reading roll tags):
+    the labels printed next to each field (comma-separated), a pattern of its own for a field (optional), and
+    which field a plain barcode fills."""
+    import re
+
+    from hmi import rolltag
+    labels, patterns = {}, {}
+    for k, name in rolltag.FIELDS:
+        raw = str(p.get(f"{k}_labels") or "")
+        labs = []
+        for x in re.split(r"[,\n]", raw):
+            x = re.sub(r"\s+", " ", x).strip().lower()[:40]
+            if x and x not in labs:
+                labs.append(x)
+        need(len(labs) <= 30, f"{name}: keep it to 30 labels or fewer.")
+        labels[k] = labs
+        pat = str(p.get(f"{k}_pattern") or "").strip()
+        err = rolltag.check_pattern(pat)
+        need(not err, f"{name} pattern: {err}")
+        patterns[k] = pat
+    need(any(labels.values()) or any(patterns.values()), "Give at least one field a label or a pattern.")
+    bc = p.get("barcode") if p.get("barcode") in dict(rolltag.FIELDS) else ""
+    st = settings_obj()
+    st.config = {**st.config, "rollTag": {"labels": labels, "patterns": patterns, "barcode": bc}}
+    st.save(update_fields=["config"])
+    audit(ctx, "Roll tag reading settings changed")
+    return {"msg": "Roll tag reading saved."}
+
+
+@cmd("rollTagReset", PERM)
+def roll_tag_reset(p, ctx):
+    st = settings_obj()
+    st.config = {k: v for k, v in st.config.items() if k != "rollTag"}
+    st.save(update_fields=["config"])
+    audit(ctx, "Roll tag reading settings back to the standard ones")
+    return {"msg": "Roll tag reading is back to the standard labels."}

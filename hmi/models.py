@@ -151,6 +151,8 @@ class RollTag(models.Model):
     mo = models.CharField(max_length=40, blank=True)
     count_at = models.IntegerField(default=0)
     by = models.CharField(max_length=120)
+    off_t = models.DateTimeField(null=True, blank=True, help_text="Taken off the machine (Roll tags › Roll off); blank = on until the next roll")
+    off_by = models.CharField(max_length=120, blank=True)
 
     class Meta:
         db_table = "hmi_rolls"
@@ -171,6 +173,8 @@ class Ticket(models.Model):
     status = models.CharField(max_length=20, default="Open")
     updated = models.DateTimeField(null=True, blank=True)
     updated_by = models.CharField(max_length=120, blank=True)
+    pm = models.ForeignKey("PMTask", null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets",
+                           help_text="The planned maintenance task this request is for (opened by the PM schedule)")
 
     class Meta:
         db_table = "hmi_tickets"
@@ -209,6 +213,48 @@ class TicketPhoto(models.Model):
 
     class Meta:
         db_table = "hmi_ticket_photo"
+        ordering = ["t", "id"]
+
+
+class PMTask(models.Model):
+    """Planned (preventive) maintenance, Maintenance › PM schedule: a job done every so many days, run hours or
+    filters made. When it falls due the server opens a maintenance request for it; completing that request
+    (or logging the job done) starts the count again. See hmi/pm.py."""
+    UNITS = (("days", "days"), ("hours", "run hours"), ("units", "filters made"))
+    machine = models.CharField(max_length=60, help_text="A machine, or other equipment from Admin › Maintenance lists")
+    title = models.CharField(max_length=120)
+    steps = models.TextField(blank=True, help_text="What to do, one step per line")
+    every = models.FloatField(default=30)
+    unit = models.CharField(max_length=6, choices=UNITS, default="days")
+    priority = models.CharField(max_length=10, default="Medium")
+    active = models.BooleanField(default=True)
+    created = models.DateTimeField()
+    last_done = models.DateTimeField(null=True, blank=True, help_text="Blank = never: counted from when the task was added")
+    last_by = models.CharField(max_length=120, blank=True)
+    updated_by = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        db_table = "hmi_pm_tasks"
+        ordering = ["machine", "title", "id"]
+
+
+class RollTagPhoto(models.Model):
+    """The picture of a roll tag an operator took to fill in Roll tags, with what the screen read from it.
+    Kept with the roll it was saved with (traceability); pictures never saved with a roll are removed after a day."""
+    roll = models.ForeignKey(RollTag, null=True, blank=True, related_name="photos", on_delete=models.CASCADE)
+    t = models.DateTimeField()
+    by = models.CharField(max_length=120)
+    line = models.CharField(max_length=60, blank=True)
+    data = models.BinaryField()
+    thumb = models.BinaryField(default=b"", blank=True)
+    size = models.IntegerField(default=0)
+    width = models.IntegerField(default=0)
+    height = models.IntegerField(default=0)
+    text = models.TextField(blank=True, help_text="The text and barcodes read from the picture")
+    found = models.JSONField(default=dict, blank=True, help_text="The fields filled in from it")
+
+    class Meta:
+        db_table = "hmi_roll_photos"
         ordering = ["t", "id"]
 
 
@@ -426,6 +472,9 @@ class AlertContact(models.Model):
     lines = models.JSONField(default=list, blank=True, help_text="Line names; empty = every line")
     down_after = models.IntegerField(default=15, help_text="Minutes a line must be down before this person is told")
     notify_back = models.BooleanField(default=True)
+    qc_late = models.IntegerField(default=0, help_text="Minutes a QC check may be overdue before this person is told (0 = not told)")
+    qc_fail = models.BooleanField(default=False, help_text="Told when a QC check fails and waits for a supervisor")
+    pm_due = models.BooleanField(default=False, help_text="Told when planned maintenance falls due")
     active = models.BooleanField(default=True)
 
     class Meta:
@@ -435,7 +484,7 @@ class AlertContact(models.Model):
 
 class AlertLog(models.Model):
     t = models.DateTimeField(db_index=True)
-    kind = models.CharField(max_length=12)  # down | back | test
+    kind = models.CharField(max_length=12)  # down | back | qclate | qcfail | pmdue | test
     line = models.CharField(max_length=60, blank=True)
     stop_key = models.CharField(max_length=100, blank=True, db_index=True)
     contact = models.CharField(max_length=120, blank=True)

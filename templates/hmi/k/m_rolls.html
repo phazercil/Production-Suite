@@ -1,8 +1,25 @@
 {% extends "hmi/k/m_base.html" %}
 {% block title %}Roll tags{% endblock %}
-{% block form_attrs %}hx-post="/kiosk/do/rollAdd"{% endblock %}
+{% block form_attrs %}hx-post="/kiosk/do/rollAdd" hx-encoding="multipart/form-data"{% endblock %}
 {% block body %}
-  <div class="grid2"><label class="f">Scan roll tag<input type="text" name="roll" autofocus placeholder="Roll ID"></label><label class="f">Material<input type="text" name="material" value="{{ media }}"></label><label class="f">Lot<input type="text" name="lot"></label><label class="f">Footage on roll<input type="number" name="feet" placeholder="ft"></label></div>
+  {% if cur %}<div class="row rt-cur"><span class="grow">On the line now: <b>{{ cur.roll }}</b>{% if cur.lot %} · lot {{ cur.lot }}{% endif %}{% if cur.material %} · {{ cur.material }}{% endif %} <span class="note">since {{ cur.t|plan:S.t }}</span></span>
+    {% if curPhoto %}<button type="button" class="thumb sm" hx-get="/kiosk/m/rollPhoto?id={{ curPhoto }}" hx-target="#modal" hx-swap="innerHTML" aria-label="Picture of roll {{ cur.roll }}'s tag"><img src="/api/hmi/roll-photo/{{ curPhoto }}?size=thumb" alt=""></button>{% endif %}
+    <button type="button" class="btn sm ghost" hx-post="/kiosk/do/rollOff" title="The roll came off (used up or put away) and no new one is on yet">Roll off</button></div>{% endif %}
+  <div class="rt-cam row" data-rolltag data-lib="{{ static_v.lib }}" data-worker="{{ static_v.worker }}" data-core="{{ static_v.core }}" data-lang="{{ static_v.lang }}">
+    <label class="btn primary">{% icon "camera" %}Take a picture of the tag<input type="file" name="tagphoto" accept="image/*" capture="environment" hidden data-rolltag-file></label>
+    <input type="hidden" name="ocr:j" value="" data-rolltag-ocr>
+    <button type="button" hidden data-rolltag-send hx-post="/kiosk/do/rollRead" hx-encoding="multipart/form-data">Read</button>
+    <span class="note grow" data-rolltag-status aria-live="polite">{% if photo %}Picture kept with this roll.{% else %}The screen reads the roll ID, lot, material and footage from the picture. Check them before adding the roll.{% endif %}</span>
+    {% if photo %}<input type="hidden" name="photo" value="{{ photo }}"><button type="button" class="thumb sm" hx-get="/kiosk/m/rollPhoto?id={{ photo }}" hx-target="#modal" hx-swap="innerHTML" aria-label="The picture of the tag"><img src="/api/hmi/roll-photo/{{ photo }}?size=thumb" alt=""></button>{% endif %}
+  </div>
+  {% if read %}<p class="rt-read {% if read.ok %}ok{% else %}bad{% endif %}">{{ read.text }}</p>{% endif %}
+  <div class="grid2">
+    <label class="f {% if how.roll %}rt-got{% endif %}">Roll ID{% if how.roll %} <small>· from the {{ how.roll }}</small>{% endif %}<input type="text" name="roll" {% if not read %}autofocus{% endif %} placeholder="Scan or type the roll ID" value="{{ pre.roll|default:'' }}"></label>
+    <label class="f {% if how.material %}rt-got{% endif %}">Material{% if how.material %} <small>· from the {{ how.material }}</small>{% endif %}<input type="text" name="material" value="{{ pre.material|default:'' }}">{% if how.material and media and pre.material|upper != media|upper %}<small class="rt-warn">This MO's part runs on {{ media }}</small>{% endif %}</label>
+    <label class="f {% if how.lot %}rt-got{% endif %}">Lot{% if how.lot %} <small>· from the {{ how.lot }}</small>{% endif %}<input type="text" name="lot" value="{{ pre.lot|default:'' }}"></label>
+    <label class="f {% if how.feet %}rt-got{% endif %}">Footage on roll{% if how.feet %} <small>· from the {{ how.feet }}</small>{% endif %}<input type="number" name="feet" placeholder="ft" value="{{ pre.feet|default:'' }}"></label></div>
+  {% if read.raw or read.barcodes %}<details class="rt-raw"><summary>What the screen read</summary><pre>{{ read.raw }}{% if read.barcodes %}
+Barcodes: {{ read.barcodes|join:", " }}{% endif %}</pre></details>{% endif %}
   <div><h3 class="h2">Roll production report</h3><div class="tblwrap" style="margin-top:8px"><table class="xl"><thead><tr><th>Roll</th><th>Material</th><th>Lot</th><th>MO</th><th>Loaded</th><th>Units on roll</th></tr></thead><tbody>
   {% for x in rows %}<tr><td>{{ x.r.roll }}</td><td>{{ x.r.material }}</td><td>{{ x.r.lot }}</td><td>{{ x.r.mo }}</td><td>{{ x.r.t|clock }}</td><td>{{ x.units|num }}</td></tr>{% empty %}<tr><td colspan="6">No rolls scanned this shift.</td></tr>{% endfor %}</tbody></table></div></div>
 {% endblock %}

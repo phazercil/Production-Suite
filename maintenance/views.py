@@ -1,5 +1,12 @@
 """Maintenance: every pending request from the lines (with its status and the parts used on it), what was
-completed, the inventory, and the parts used on each machine. People with "Open Maintenance" (Admin › Permissions)."""
+completed, planned maintenance (PM schedule and PM history), the inventory, and the parts used on each machine.
+
+  PM schedule   planned maintenance by machine: every so many days, run hours or filters made; what is due, due
+                soon and open, with an estimate of when each falls due. Tasks are added and changed here.
+  PM history    planned maintenance done, by whom, and whether it was done on time.
+
+People with "Open Maintenance" (Admin › Permissions). Changing the PM schedule needs "PM schedule", logging a job
+done needs "Work maintenance requests". PM rules are in hmi/pm.py and hmi/engine.py."""
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -8,10 +15,10 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
-from hmi import engine
-from hmi.models import Ticket, TicketNote, TicketPhoto
+from hmi import engine, pm
+from hmi.models import PMTask, Ticket, TicketNote, TicketPhoto
 from hmi.views import current_person, touch
 from plant import perms
 
@@ -19,7 +26,11 @@ from .actions import machines
 from .models import InventoryItem, InventoryMove
 
 PERM = "section.maintenance"
-TABS = [("requests", "Pending requests"), ("done", "Completed"), ("inventory", "Inventory"), ("machines", "Parts by machine")]
+TABS = [("requests", "Pending requests"), ("done", "Completed"), ("pm", "PM schedule"), ("history", "PM history"), ("inventory", "Inventory"),
+        ("machines", "Parts by machine")]
+PM_ACTIONS = {"pmSave", "pmDelete", "pmDone", "pmOpenNow"}   # posted to the page itself, so a refused PM task form keeps what was typed
+STATE = {"due": ("bad", "DUE"), "open": ("warn", "REQUEST OPEN"), "soon": ("warn", "DUE SOON"), "ok": ("ok", "OK"), "off": ("idle", "PAUSED")}
+ORDER = {"due": 0, "open": 1, "soon": 2, "ok": 3, "off": 4}
 POSTS = {"ticketSet", "itemSave", "itemArchive", "itemStock", "itemUse", "itemUseUndo"}
 PRIORITY = {"High": 0, "Medium": 1, "Low": 2}
 
@@ -31,7 +42,8 @@ def _gate(request):
         return me, None
     msg = note or (f"{me.name} doesn't have permission to open Maintenance (Admin › Permissions › Open Maintenance)." if me else None)
     return None, render(request, "supervisor/login.html", {"mode": "maintenance", "note": msg, "perm": PERM, "title": "Maintenance",
-                                                           "blurb": "Pending requests from the lines, their status and the parts used, and the inventory."})
+                                                           "blurb": "Pending requests from the lines, their status and the parts used, planned maintenance, "
+                                                                    "and the inventory."})
 
 
 def _tickets(qs, now):
@@ -48,8 +60,47 @@ def _tickets(qs, now):
              "took": round((t.updated - t.t).total_seconds() / 60) if t.status == "Closed" and t.updated else None} for t in tickets]
 
 
+def schedule(t, machine=""):
+    """Every PM task with where it stands, the ones that need doing first."""
+    tasks = PMTask.objects.all()
+    if machine:
+        tasks = tasks.filter(machine=machine)
+    opened = {}
+    for x in Ticket.objects.filter(pm__isnull=False).exclude(status="Closed").order_by("t"):
+        opened.setdefault(x.pm_id, x)
+    rows = []
+    for task in tasks:
+        st = pm.status(task, t, opened.get(task.id))
+        rows.append({"task": task, **st, "pill": STATE[st["state"]], "usedTxt": pm.fmt_amount(st["used"], task.unit),
+                     "everyTxt": pm.fmt_amount(task.every, task.unit),
+                     "leftTxt": pm.fmt_amount(abs(st["left"]), task.unit) + (" over" if st["left"] < 0 else " left")})
+    rows.sort(key=lambda r: (ORDER[r["state"]], -r["pct"], r["task"].machine, r["task"].title))
+    return rows
+
+
+def pm_history(t, machine=""):
+    rows = []
+    for x in pm.history(since=t - timedelta(days=365)):
+        task = x.pm
+        late = None
+        prev = Ticket.objects.filter(pm=task, status="Closed", updated__lt=x.updated).order_by("-updated").first() if task else None
+        if task and task.unit == "days":
+            start = prev.updated if prev else task.created
+            late = (x.updated - start).total_seconds() / 86400 - task.every
+        rows.append({"t": x, "task": task, "late": late, "waited": round((x.updated - x.t).total_seconds() / 60) if x.updated else None,
+                     "note": (x.repairs.filter(kind="closed").order_by("-t").values_list("text", flat=True).first() or "")})
+    return [r for r in rows if r["t"].machine == machine] if machine else rows
+
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 @ensure_csrf_cookie
-@require_GET
+@require_http_methods(["GET", "POST"])
 def page(request):
     me, denied = _gate(request)
     if denied:
@@ -58,7 +109,23 @@ def page(request):
     q = request.GET
     tab = q.get("tab") if q.get("tab") in dict(TABS) else "requests"
     mach, st = str(q.get("machine") or "")[:60], str(q.get("status") or "")[:20]
-    ctx = {"mode": "maintenance", "me": me, "tab": tab, "tabs": TABS, "now": now, "msg": q.get("msg", ""), "err": q.get("err", ""),
+    err, form = q.get("err", ""), None
+    if request.method == "POST":   # a PM schedule form ("machine" there is the task's own; the list filter comes as "m")
+        a = request.POST.get("action") or ""
+        mach = str(request.POST.get("m") or "")[:60]
+        tab = "pm"
+        if a in PM_ACTIONS:
+            p = {k: request.POST.get(k) for k in request.POST if k not in ("csrfmiddlewaretoken", "action", "m")}
+            if a == "pmSave":
+                p["active"] = request.POST.get("active") == "1"
+            r = engine.execute(a, p, engine.Ctx(user=me))
+            if r.get("ok"):
+                return HttpResponseRedirect("/maintenance/?" + urlencode({"tab": "pm", **({"machine": mach} if mach else {}), "msg": r.get("msg") or "Saved."}))
+            err = r.get("error") or "That didn't save."
+            form = p if a == "pmSave" else None
+        else:
+            err = "Unknown action."
+    ctx = {"mode": "maintenance", "me": me, "tab": tab, "tabs": TABS, "now": now, "msg": q.get("msg", ""), "err": err,
            "fmachine": mach, "fstatus": st, "statuses": Ticket.STATUSES, "machines": machines(),
            "canWork": perms.can(me, "tickets.work"), "canStock": perms.can(me, "inventory.edit"),
            "here": request.get_full_path(),
@@ -94,6 +161,13 @@ def page(request):
                    edit=int(q.get("edit")) if str(q.get("edit") or "").isdigit() else None,
                    moves=list(InventoryMove.objects.select_related("item", "ticket")[:60]),
                    pending=list(Ticket.objects.exclude(status="Closed").order_by("machine", "t")))
+    elif tab == "pm":
+        rows = schedule(now, mach)
+        ctx.update(rows=rows, edit=_int(q.get("edit")), canEdit=perms.can(me, "pm.edit"), units=PMTask.UNITS,
+                   pmcounts={k: sum(1 for r in rows if r["state"] == k) for k in ("due", "open", "soon")},
+                   form={**{k: "" for k in ("machine", "title", "every", "unit", "priority", "steps")}, **(form or {})})
+    elif tab == "history":
+        ctx["hist"] = pm_history(now, mach)
     else:   # parts by machine
         names = list(dict.fromkeys(ctx["machines"] + list(InventoryMove.objects.exclude(machine="").values_list("machine", flat=True).distinct())))
         sel = mach if mach in names else ""
@@ -106,6 +180,8 @@ def page(request):
                                  .annotate(n=Sum("qty"), last=Max("t"), times=Count("id")).order_by("-last"))
             ctx["uses"] = list(InventoryMove.objects.filter(kind="used", machine=sel).select_related("item", "ticket")[:200])
     ctx["tabq"] = {k: urlencode({"tab": k}) for k, _ in TABS}
+    if tab in ("pm", "history"):
+        ctx["pmq"] = {k: urlencode({"tab": k, **({"machine": mach} if mach else {})}) for k in ("pm", "history")}
     return render(request, "maintenance/page.html", ctx)
 
 

@@ -1,5 +1,5 @@
 {% load suite %}<article class="card mt-req {% if x.t.priority == 'High' and x.t.status != 'Closed' %}high{% endif %}" id="r{{ x.t.id }}">
-  <div class="mt-rh"><h2>{{ x.t.machine }} <span class="muted">· {{ x.t.type|default:"Request" }}</span></h2><span class="grow"></span>
+  <div class="mt-rh"><h2>{{ x.t.machine }} <span class="muted">· {{ x.t.type|default:"Request" }}</span>{% if x.t.pm_id %} <a class="pill idle" href="?tab=pm#edit" title="Opened by the PM schedule">PM</a>{% endif %}</h2><span class="grow"></span>
     {% if x.t.priority == "High" %}<span class="pill bad">High · line down</span>{% elif x.t.priority == "Low" %}<span class="pill idle">Low</span>{% endif %}
     {% include "maintenance/_status.html" with st=x.t.status %}</div>
   <p class="note">#{{ x.t.id }} · requested by {{ x.t.by }} · {{ x.t.t|day }} {{ x.t.t|clock }}{% if x.t.line and x.t.line != x.t.machine %} · from {{ x.t.line }}{% endif %}

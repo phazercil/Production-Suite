@@ -4,6 +4,7 @@ from django.views.generic import RedirectView
 
 from datakiosk import views as dk
 from labor import views as labor
+from maintenance import views as maintenance
 from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
@@ -41,6 +42,7 @@ urlpatterns = [
     path("api/updates/upload", hmi.update_upload),
     path("api/hmi/ticket-photo", hmi.ticket_photo_upload),
     path("api/hmi/ticket-photo/<int:pk>", hmi.ticket_photo),
+    path("api/hmi/roll-photo/<int:pk>", hmi.roll_photo),
     # Scheduler
     path("scheduler/", sch.board, name="scheduler"),
     path("api/scheduler/state", sch.state),

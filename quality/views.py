@@ -22,10 +22,11 @@ from plant.util import local, part_spec
 
 PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
-TABS = [("report", "Quality report"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"), ("viewer", "3D viewer")]
+TABS = [("report", "Quality report"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"),
+        ("viewer", "3D viewer")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
            "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
-           "specFeatureAdd": "tol", "specFeatureDel": "tol"}
+           "specFeatureAdd": "tol", "specFeatureDel": "tol", "rollTagSet": "trace", "rollTagReset": "trace"}
 PART_FIELDS = [("pleats", "Pleats/unit", "1"), ("len", "Length", ".001"), ("wid", "Width", ".001"), ("ph", "Pleat ht", ".001"),
                ("sb", "Side band", ".001"), ("tol", "Tol ±", ".001")]
 KINDS = [("", "All problems"), ("qc", "QC checks out of spec"), ("vision", "Machine vision fails"), ("hold", "Quality holds")]
@@ -57,14 +58,15 @@ def filters(q):
     if a > b:
         a, b = b, a
     a = max(a, b - timedelta(days=366))
-    return {"tab": q.get("tab") if q.get("tab") in dict(TABS) else "report", "line": str(q.get("line") or "")[:60],
+    return {"tab": q.get("tab") if q.get("tab") in dict(TABS) else "report", "line": str(q.get("line") or "")[:60], "q": str(q.get("q") or "").strip()[:80],
             "kind": q.get("kind") if q.get("kind") in dict(KINDS) else "", "part": str(q.get("part") or "").strip()[:40],
             "from": a, "to": b, "A": timezone.make_aware(datetime(a.year, a.month, a.day)),
             "B": timezone.make_aware(datetime(b.year, b.month, b.day)) + timedelta(days=1)}
 
 
 def _query(f, **change):
-    keep = {"tab": f["tab"], "line": f["line"], "kind": f["kind"], "part": f["part"], "from": f["from"].isoformat(), "to": f["to"].isoformat()}
+    keep = {"tab": f["tab"], "line": f["line"], "kind": f["kind"], "part": f["part"], "q": f.get("q", ""), "from": f["from"].isoformat(),
+            "to": f["to"].isoformat()}
     keep.update(change)
     return urlencode({k: v for k, v in keep.items() if v not in ("", None)})
 
@@ -245,6 +247,8 @@ def page(request):
                    uomWired="AS uom" in (getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""),
                    pasted=request.POST.get("parts", "") if err else "")
         return render(request, "quality/page.html", ctx)
+    if f["tab"] == "trace":
+        return trace_tab(request, f, ctx, err)
     if f["tab"] == "tol":
         from hmi import integrations
         ctx["tols"] = tol_rows()
@@ -262,4 +266,35 @@ def page(request):
             w.writerow(row)
         return resp
     ctx.update(R=R, csv=_query(f, csv="1"), lines=sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set())))
+    return render(request, "quality/page.html", ctx)
+
+
+def trace_tab(request, f, ctx, err):
+    """Traceability: which rolls and lots went into which MOs (hmi/trace.py), and how roll tags are read from a picture."""
+    from hmi import rolltag, trace
+    from hmi.models import RollTagPhoto
+    from plant.util import now
+    t = now()
+    q = f["q"]
+    R = trace.search(q, t, None if q else f["A"], None if q else f["B"], f["line"])
+    if request.GET.get("csv") == "1":
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="traceability{"-" + q if q else ""}.csv"'
+        w = csv.writer(resp)
+        for row in trace.csv_rows(R):
+            w.writerow(row)
+        return resp
+    pics = {}
+    for x in RollTagPhoto.objects.filter(roll__in=[r["tag"] for r in R["rolls"]]).values("id", "roll_id"):
+        pics.setdefault(x["roll_id"], x["id"])
+    for r in R["rolls"]:
+        r["photo"] = pics.get(r["tag"].pk)
+    cfg = rolltag.settings()
+    if err:   # what was typed, so it can be fixed
+        cfg = {"labels": {k: [x.strip() for x in request.POST.get(f"{k}_labels", "").split(",") if x.strip()] for k, _ in rolltag.FIELDS},
+               "patterns": {k: request.POST.get(f"{k}_pattern", "") for k, _ in rolltag.FIELDS}, "barcode": request.POST.get("barcode", "")}
+    ctx.update(T=R, t=t, csv=_query(f, csv="1"), rt=[{"k": k, "label": lbl, "labels": ", ".join(cfg["labels"].get(k, [])),
+                                                     "pattern": cfg["patterns"].get(k, "")} for k, lbl in rolltag.FIELDS],
+               rtBarcode=cfg.get("barcode", ""), rtFields=rolltag.FIELDS,
+               lines=sorted({m.name for m in Machine.objects.filter(stage="s1")} | ({f["line"]} if f["line"] else set())))
     return render(request, "quality/page.html", ctx)

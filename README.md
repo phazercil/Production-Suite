@@ -2,7 +2,7 @@
 
 Suite of tools for APS Filter MFG.
 
-One Django app for the pleating floor, with five modes behind one top bar:
+One Django app for the pleating floor, with its modes behind one top bar:
 
 | Mode | Address | Who uses it |
 |---|---|---|
@@ -12,6 +12,8 @@ One Django app for the pleating floor, with five modes behind one top bar:
 | **Data Kiosk** | `/data/` | Wall TV: live numbers per line plus your Grafana panels |
 | **Reports** | `/reports/` | Line summaries; click to drill plant → line → shift → MO and year → month → day → hour |
 | **Labor Budget** | `/labor/` | Shift leads: crews, wages and the work calendar the Scheduler plans with |
+| **Quality** | `/quality/` | Quality report, traceability (rolls and lots → MOs), QC checks, parts & specs, tolerances, 3D viewer |
+| **Maintenance** | `/maintenance/` | Maintenance team: pending and completed requests from the lines, PM schedule, PM history, inventory, parts by machine |
 
 All modes share one database. When a planner places or moves a Stage 1 run, the Scheduler rebuilds that
 machine's queue, and the operator sees it right away as **Up next** (with a notice in the banner).
@@ -25,6 +27,10 @@ All plant logic is Python:
 - `scheduler/engine.py` — run lengths from the cost sheet, shift calendars with breaks, changeovers,
   downstream stages paced so they never outrun Stage 1, and the Stage 1 queue written onto the MOs
 - `hmi/integrations.py` — Grafana, Paycom, S2K, people list, webhook, read-only asset database
+- `hmi/pm.py` — planned maintenance: days, run hours or filters made, and the request opened when a task falls due
+- `hmi/trace.py` — traceability: which roll tags (and lots) went into which MOs, and how many filters each made
+- `hmi/rolltag.py` — reading a roll tag from a picture: which text and barcodes are the roll ID, lot, material, footage
+- `hmi/alerts.py` — email / text alerts: line down, QC check overdue or failed, planned maintenance due
 - `hmi/influx.py` — InfluxDB: machine data by query, and the copy of the suite's records
 - `plant/updates.py`, `tools/updater.py` — updates from Admin › Updates or the update folder
 
@@ -216,6 +222,26 @@ network. Settings are kept in `.env` (`INFLUX_*`).
 - Admin › Alerts: people to email or text when a line has been down for their chosen number of minutes, and
   optionally when it runs again. Email uses your mail server (plant network unless you tick "on the
   internet"); texts use Twilio, or a carrier's email-to-text address.
+
+### Planned maintenance
+
+Maintenance › PM schedule (people with *PM schedule*): a task is a job on a machine or other equipment done every
+so many days, run hours or filters made. Run hours are the minutes `hmi_ppm.run` is 1 for that machine; filters made
+are `hmi_ppm.units`. Equipment without readings can only go by days. Every 5 minutes the ticker opens a maintenance
+request (`hmi_tickets.pm_id` set) for each active task that has used up its interval and has none open; completing
+that request, or *Log done*, sets the task's last done time and starts the count again. Tasks are in `hmi_pm_tasks`.
+
+### Roll tags and traceability
+
+Roll tags on the kiosk record each roll scanned onto a line (`hmi_rolls`). A roll counts from its scan until the next
+roll's scan on that line or *Roll off* (`off_t`). Quality › Traceability matches those windows against the MO runs
+(`hmi_mo_runs`, plus the MO running now) and counts the filters from `hmi_ppm.units` in the overlap.
+
+*Take a picture of the tag* reads the picture on the tablet with Tesseract.js, served from `static/vendor/tesseract`
+(about 15 MB, cached by the browser after the first use), and the browser's own barcode reader where it has one
+(Chrome on Android). Nothing is sent outside the plant network. The server (`hmi/rolltag.py`) matches the text to
+fields by the labels set in Quality › Traceability › Reading roll tags and keeps the picture with the roll
+(`hmi_roll_photos`; pictures never added to a roll are removed after a day).
 
 ### Incoming data (machine vision QC and other systems)
 

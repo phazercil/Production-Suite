@@ -1,0 +1,4 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}Roll tag{% if ph.roll %} · {{ ph.roll.roll }}{% endif %}{% endblock %}
+{% block body %}<img class="photo-big" src="/api/hmi/roll-photo/{{ ph.id }}" alt="Picture of the roll tag"><p class="note" style="margin-top:6px">Taken by {{ ph.by }} · {{ ph.t|day }} {{ ph.t|clock }}{% if ph.line %} · {{ ph.line }}{% endif %}</p>{% endblock %}
+{% block foot %}{% if back %}<button type="button" class="btn" hx-get="/kiosk/m/rolls" hx-target="#modal" hx-swap="innerHTML">Back to Roll tags</button>{% endif %}<a class="btn ghost" href="/api/hmi/roll-photo/{{ ph.id }}" target="_blank" rel="noopener">Open full size</a>{% endblock %}

@@ -277,6 +277,24 @@ def ticket_photo(request, pk):
     return r
 
 
+@require_GET
+def roll_photo(request, pk):
+    """The picture of a roll tag kept with the roll (Roll tags, Quality › Traceability)."""
+    from django.http import HttpResponse, HttpResponseNotFound
+
+    from .models import RollTagPhoto
+    thumb = request.GET.get("size") == "thumb"
+    ph = RollTagPhoto.objects.filter(pk=pk).only("thumb" if thumb else "data").first()
+    if not ph:
+        return HttpResponseNotFound("No such picture.")
+    r = HttpResponse(bytes(ph.thumb) if thumb and ph.thumb else bytes(ph.data), content_type="image/jpeg")
+    r["Cache-Control"] = "private, max-age=86400"
+    r["X-Content-Type-Options"] = "nosniff"
+    r["Content-Disposition"] = f'inline; filename="roll-tag-{ph.pk}.jpg"'
+    r["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+    return r
+
+
 @require_POST
 def update_upload(request):
     """A shift lead uploads an update file (Admin > Updates). It is checked, then waits in updates/ready."""
