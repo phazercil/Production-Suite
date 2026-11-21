@@ -5,6 +5,8 @@ Admin > Network, setup, or start-up) it writes updates/network-request.json. The
 production-suite-network.path sees the file and runs this script as root, which:
 
   - writes /etc/httpd/conf.d/production-suite-allow.inc (the addresses Apache lets in),
+  - writes /etc/httpd/conf.d/production-suite-video.inc (live camera video: only /video/ws?src=cam<number> goes
+    on to go2rtc at 127.0.0.1:8009, from the plant network) and makes the suite's Apache site include it,
   - makes firewalld allow Apache's port from exactly those ranges (rich rules it owns, in the default zone),
   - reloads Apache, and writes updates/network-result.json for Admin > Network.
 
@@ -24,6 +26,23 @@ from datetime import datetime
 from pathlib import Path
 
 ALLOW_INC = Path("/etc/httpd/conf.d/production-suite-allow.inc")
+CONF_D = Path("/etc/httpd/conf.d")
+VIDEO_INC = "production-suite-video.inc"
+VIDEO_PORT = 8009   # an http_port_t port, so SELinux already lets Apache connect to it
+VIDEO_RULES = """# Written by Production Suite (cameras/live.py, tools/linux_apply.py). Changes here are replaced.
+# Live camera video: Apache passes only /video/ws?src=cam<number> on to go2rtc (127.0.0.1:{port}), and only from the
+# plant network, so nothing else of go2rtc (its settings, other addresses) can be reached.
+<Location "/video/ws">
+    ProxyPass "http://127.0.0.1:{port}/api/ws" upgrade=websocket timeout=3600
+    <RequireAll>
+        <RequireAny>
+            Include conf.d/production-suite-allow.inc
+        </RequireAny>
+        Require expr "%{{QUERY_STRING}} =~ /^src=cam[0-9]+$/"
+    </RequireAll>
+</Location>
+"""
+INCLUDE_LINE = f"    IncludeOptional conf.d/{VIDEO_INC}"
 STATE = Path("/etc/production-suite/firewalld-rules.json")
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")]
 
@@ -79,6 +98,46 @@ def run(args):
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return -1, str(e)
+
+
+def video_include(conf_d=CONF_D):
+    """Write the live-video rules and add them to the end of each of the suite's Apache sites (after its
+    <Location />, so their address rules win for /video/ws). Returns the sites changed."""
+    conf_d = Path(conf_d)
+    tmp = conf_d / (VIDEO_INC + ".tmp")
+    tmp.write_text(VIDEO_RULES.format(port=VIDEO_PORT), encoding="ascii")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, conf_d / VIDEO_INC)
+    changed = []
+    for site in sorted(conf_d.glob("production-suite*.conf")):
+        try:
+            text = site.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "127.0.0.1:8008" not in text or "</VirtualHost>" not in text or VIDEO_INC in text:
+            continue
+        text = text.replace("</VirtualHost>", INCLUDE_LINE + "\n</VirtualHost>")
+        stmp = site.with_suffix(".conf.tmp")
+        stmp.write_text(text, encoding="utf-8")
+        os.chmod(stmp, 0o644)
+        os.replace(stmp, site)
+        changed.append(site)
+    if shutil.which("restorecon"):
+        run(["restorecon", str(conf_d / VIDEO_INC)] + [str(x) for x in changed])
+    return changed
+
+
+def video_undo(changed, conf_d=CONF_D):
+    """Apache refused the configuration: take the live-video rules back out."""
+    for site in changed:
+        try:
+            site.write_text(site.read_text(encoding="utf-8").replace(INCLUDE_LINE + "\n", ""), encoding="utf-8")
+        except OSError:
+            pass
+    try:
+        (Path(conf_d) / VIDEO_INC).unlink()
+    except OSError:
+        pass
 
 
 def apache_include(nets):
@@ -140,10 +199,20 @@ def apply_network(folder):
     nets = private_nets(data.get("networks")) or private_nets([x for x in env_value(folder, "PLANT_NETWORKS", "192.168.100.0/24").split(",")])
     pub = env_value(folder, "PUBLIC_PORT", "80") or "80"
     ports = sorted({pub, "80"} | ({"443"} if Path("/etc/httpd/conf.d/production-suite-ssl.conf").exists() else set()))
+    video, v_msg = True, "Live camera video is passed on (/video/ws)."
+    try:
+        changed = video_include()
+    except OSError as e:
+        changed, video, v_msg = [], False, f"Couldn't write the live video rules: {e}"
     a_ok, a_msg = apache_include(nets)
+    if not a_ok and video:
+        video_undo(changed)            # never leave Apache broken for live video: try again without it
+        video, v_msg = False, "Live camera video isn't passed on: Apache refused its rules. " + a_msg
+        a_ok, a_msg = apache_include(nets)
     f_ok, f_msg = firewalld(nets, ports)
     ok = a_ok and f_ok is not False
-    res = {"ok": ok, "msg": f"{a_msg} {f_msg}", "networks": nets, "at": datetime.now().astimezone().isoformat(timespec="seconds")}
+    res = {"ok": ok, "msg": f"{a_msg} {f_msg}", "networks": nets, "video": video, "videoMsg": v_msg,
+           "at": datetime.now().astimezone().isoformat(timespec="seconds")}
     out = folder / "updates" / "network-result.json"
     if not out.parent.exists():   # make it the suite's folder, not root's, or the suite can't write requests to it
         out.parent.mkdir(parents=True, exist_ok=True)

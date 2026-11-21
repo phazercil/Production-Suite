@@ -323,6 +323,11 @@ def loop(stop=None, interval=5):
                 waiting = False
                 tick_machines(t, renew=lambda: claim_lease(owner))
                 timed_pulls(state, t)
+                try:
+                    from cameras import live
+                    live.keep()          # live camera video (go2rtc) while an RTSP camera is set to it
+                except Exception:  # noqa: BLE001 - never let video stop the plant clock
+                    log.exception("live video")
             elif not waiting:
                 waiting = True
                 log.warning("another plant ticker is already running; this one is standing by")

@@ -1,5 +1,13 @@
 ## What's new in 1.9.7
 
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Live camera video at the camera's own frame rate (25 fps and up):**
+  - RTSP cameras now play as real video on Operator Kiosk › Cameras, about half a second behind live, instead of a picture at a time. It's on by default for RTSP cameras (**Live video** in Admin › Cameras).
+  - **How it works:** the suite runs go2rtc (open source, MIT licence, included in the update) on the server. It connects to each camera once and passes its video to the tablets untouched, and the tablet plays it. The server decodes nothing, so its CPU stays low, and the camera's H.264 profile doesn't matter (no RPM Fusion ffmpeg needed for live video).
+  - **Network:** go2rtc listens on the server itself only (127.0.0.1:8009) and its own RTSP and WebRTC servers are off. Apache passes on only a camera the suite set up (/video/ws?src=cam<number>), and only to the plant network. Camera logins stay in .env, and go2rtc's settings file is readable by the suite only.
+  - **After the update:** Apache's live-video rules are put in place by the server's network helper, which can take up to 10 minutes. Admin › Cameras shows whether live video is running and passed on. Until then, and on any tablet that can't play the camera's video (H.265 on some tablets), the tile shows pictures.
+  - Live video needs the Linux server (x86-64). Windows installs keep pictures.
 - **Cameras up to 10 pictures a second:** RTSP and MJPEG cameras now stay connected while a screen watches. The server keeps one connection per camera, however many screens watch, holds only the newest picture, and lets go 30 seconds after the last screen stops. Before, each RTSP picture started ffmpeg again, so it was held to 1 a second. Picture (JPEG) addresses go up to 5 a second (each one is a request to the camera). **Test** still takes a single picture.
 - **Cameras (RTSP):** when the server's ffmpeg can't decode a camera's H.264 (Fedora's own ffmpeg-free decodes with OpenH264, which only reads the simplest H.264), the camera says so in plain words with the fix: install the full ffmpeg from RPM Fusion, set the camera's stream to H.264 Baseline, or use its picture (JPEG) address. Before, it showed ffmpeg's raw error.
 - Admin › Cameras: on a phone, each camera's Test and Change buttons sit side by side under its machines.

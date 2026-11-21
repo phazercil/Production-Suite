@@ -16,7 +16,7 @@ from hmi.views import current_person, touch
 from plant import liveconfig, perms
 from plant.models import Machine
 
-from . import grab
+from . import grab, live
 from .models import Camera
 
 PERM = "cameras.edit"
@@ -53,7 +53,8 @@ def page(request):
     return render(request, "cameras/page.html", {
         "mode": "admin", "me": me, "cams": cams, "machines": machines(), "kinds": Camera.KINDS,
         "edit": edit, "cur": cur, "curMachines": {m.pk for m in cur.machines.all()} if cur else set(),
-        "msg": q.get("msg", ""), "err": q.get("err", ""), "ffmpeg": bool(grab.ffmpeg()), "rotations": (0, 90, 180, 270)})
+        "msg": q.get("msg", ""), "err": q.get("err", ""), "ffmpeg": bool(grab.ffmpeg()), "rotations": (0, 90, 180, 270),
+        "live": live.status(), "anyLive": any(c.kind == "rtsp" and c.live and c.enabled for c in cams)})
 
 
 def _back(**kw):
@@ -91,6 +92,7 @@ def do(request, name):
         cam.name, cam.kind, cam.url, cam.fps = label, kind, url, fps
         cam.rotate = int(p.get("rotate")) if p.get("rotate") in ("0", "90", "180", "270") else 0
         cam.enabled = p.get("enabled") == "1"
+        cam.live = p.get("live") == "1"
         cam.sort = int(p.get("sort") or 0) if str(p.get("sort") or "0").lstrip("-").isdigit() else 0
         cam.updated, cam.updated_by = timezone.now(), me.name
         cam.save()

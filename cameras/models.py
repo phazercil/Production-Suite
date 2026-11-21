@@ -13,6 +13,7 @@ class Camera(models.Model):
     machines = models.ManyToManyField("plant.Machine", blank=True, related_name="cameras")
     sort = models.IntegerField(default=0)
     enabled = models.BooleanField(default=True)
+    live = models.BooleanField(default=True)         # RTSP: live video on the screens (cameras/live.py), pictures if not
     has_login = models.BooleanField(default=False)   # a user name / password is in .env
     updated = models.DateTimeField(null=True, blank=True)
     updated_by = models.CharField(max_length=120, blank=True)

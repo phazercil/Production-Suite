@@ -185,3 +185,106 @@ class CameraTests(TestCase):
             time.sleep(3)                                              # nobody watching: it lets go
             self.assertFalse(r.is_alive())
             self.assertIsNotNone(r.proc is None or r.proc.poll())
+
+
+class LiveVideoTests(TestCase):
+    """Live video: go2rtc set up from Admin › Cameras (cameras/live.py), and Apache's rules for it (tools/linux_apply.py)."""
+    def setUp(self):
+        seed_demo(reset=True)
+        import tempfile
+        from pathlib import Path
+        self.tmp = Path(tempfile.mkdtemp())
+        self.env = {}
+        p1 = mock.patch("plant.envfile.read_env", side_effect=lambda path: dict(self.env))
+        p2 = mock.patch("cameras.live.folder", return_value=self.tmp / "go2rtc")
+        p1.start(), p2.start()
+        self.addCleanup(p1.stop), self.addCleanup(p2.stop)
+        self.bar = Machine.objects.get(name="Barbara")
+
+    def cam(self, **k):
+        c = Camera.objects.create(**{"name": "Barbara live", "kind": "rtsp", "url": "rtsp://127.0.0.1:554/live/0", **k})
+        c.machines.set([self.bar])
+        return c
+
+    def test_config_has_only_live_rtsp_cameras_with_their_login_and_nothing_else_listening(self):
+        from cameras import live
+        a = self.cam(has_login=True)
+        self.env.update({f"CAM_{a.pk}_USER": "op", f"CAM_{a.pk}_PASSWORD": "p@ss word"})
+        self.cam(name="pictures", live=False)
+        self.cam(name="off", enabled=False)
+        self.cam(name="snap", kind="snapshot", url="http://127.0.0.1/snap")
+        st = live.streams()
+        self.assertEqual(st, {f"cam{a.pk}": "rtsp://op:p%40ss%20word@127.0.0.1:554/live/0#media=video"})
+        cfg = live.config_text(st)
+        self.assertIn('listen: "127.0.0.1:8009"', cfg)
+        for off in ('rtsp:\n  listen: ""', 'webrtc:\n  listen: ""', 'srtp:\n  listen: ""'):
+            self.assertIn(off, cfg)
+
+    def test_keeper_runs_go2rtc_while_a_camera_wants_it(self):
+        import os
+        import stat
+        import sys
+        from cameras import live
+        fake = self.tmp / "fake-go2rtc"
+        fake.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(60)\n")
+        os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+        k = live.Keeper()
+        with mock.patch.object(live, "BIN", fake), mock.patch.object(live, "supported", return_value=True), \
+                mock.patch.object(k, "_apache"):
+            k.keep()
+            self.assertIsNone(k.proc)                                  # no live camera: nothing runs
+            c = self.cam()
+            k.keep()
+            self.assertIsNotNone(k.proc)
+            self.assertIsNone(k.proc.poll())
+            cfg = self.tmp / "go2rtc" / "go2rtc.yaml"
+            self.assertEqual(stat.S_IMODE(cfg.stat().st_mode), 0o600)  # it holds camera logins
+            self.assertIn(f"cam{c.pk}:", cfg.read_text())
+            self.assertTrue(live.status()["running"])
+            p = k.proc
+            k.keep()
+            self.assertIs(k.proc, p)                                   # unchanged: left running
+            c.url = "rtsp://127.0.0.1:554/live/1"
+            c.save()
+            k.keep()
+            self.assertIsNot(k.proc, p)                                # changed: started again with the new address
+            self.assertIsNotNone(p.poll())
+            Camera.objects.all().delete()
+            q = k.proc
+            k.keep()
+            self.assertIsNone(k.proc)                                  # nobody wants it: stopped
+            self.assertIsNotNone(q.poll())
+            self.assertFalse(live.status()["running"])
+
+    def test_kiosk_tile_plays_live_video_for_live_cameras(self):
+        self.cam()
+        self.cam(name="pictures", live=False)
+        from hmi import kviews
+        d = kviews.view_data(mock.Mock(station="Barbara"), "cameras", None)
+        self.assertEqual([(c["name"], c["live"]) for c in d["cams"]], [("Barbara live", True), ("pictures", False)])
+        from django.template.loader import render_to_string
+        html = render_to_string("hmi/k/v_cameras.html", d)
+        self.assertEqual(html.count("<video data-live="), 1)
+
+    def test_apache_rules_only_pass_a_suite_camera_from_the_plant_network(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("linux_apply", Path(__file__).resolve().parent.parent / "tools" / "linux_apply.py")
+        la = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(la)
+        site = self.tmp / "production-suite.conf"
+        site.write_text("<VirtualHost *:80>\n    ProxyPass / http://127.0.0.1:8008/\n    <Location />\n    </Location>\n</VirtualHost>\n")
+        other = self.tmp / "production-suite-allow.conf"
+        other.write_text("# not a site\n")
+        changed = la.video_include(self.tmp)
+        self.assertEqual(changed, [site])
+        text = site.read_text()
+        self.assertLess(text.index("</Location>"), text.index("IncludeOptional conf.d/production-suite-video.inc"))   # after <Location />
+        self.assertEqual(la.video_include(self.tmp), [])                # only once
+        rules = (self.tmp / "production-suite-video.inc").read_text()
+        self.assertIn('ProxyPass "http://127.0.0.1:8009/api/ws" upgrade=websocket', rules)
+        self.assertIn("Include conf.d/production-suite-allow.inc", rules)
+        self.assertIn('Require expr "%{QUERY_STRING} =~ /^src=cam[0-9]+$/"', rules)
+        la.video_undo(changed, self.tmp)
+        self.assertNotIn("production-suite-video.inc", site.read_text())
+        self.assertFalse((self.tmp / "production-suite-video.inc").exists())
