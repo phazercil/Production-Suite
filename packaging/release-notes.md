@@ -1,3 +1,16 @@
+## What's new in 1.9.5
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Sensors & alarms (Admin › Sensors & alarms):** add your own sensors to a machine or the whole plant and alarm on them.
+  - **Connections:** Modbus TCP (PLC, remote I/O block or IO-Link master: registers, coils, 16/32-bit, float, one bit, 40001-style addresses), a web address that answers JSON, a database table, an InfluxDB query, an extra field of the machine's own reading, pushed to the server (`POST /api/sensors` with the machine feed key), an Incoming data source, values the suite already has (speed, filters made, MO left, uptime, minutes stopped, minutes since QC), a formula over other sensors, or typed in. The **Connection types** tab lists them all, and how MQTT, OPC UA, EtherNet/IP and S7 come in through Node-RED.
+  - **Scaling:** turn the raw reading into real units with two points (0–5 V = 0–500 mm), with ready-made ranges (0–10 V, 4–20 mA, Siemens 0–27648, 16/12/10-bit), an offset, averaging and fault limits (below 3.6 mA = broken wire). On / off sensors get their own words.
+  - **Alarm rules:** below, above, between, outside, equals, turns on / off, changes faster than X per minute, doesn't change, no new reading, faulty; with a delay, a deadband, only while the machine runs or is stopped, a severity and your own text.
+  - **What an alarm does:** shows in the machine's kiosk Alarms (or every kiosk), can stay until acknowledged, emails or texts people from Admin › Alerts (after N minutes, repeating, and when it clears), opens a maintenance request and goes to the webhook. Live values can show on the kiosk's Status page. Grafana tables: `sensor_values` and `sensor_alarms`.
+  - New permission **Sensors & custom alarms** (shift leads and Admin).
+- **Packaging Kiosk: pallet tags.** The Packaging tab is open: make and print a pallet tag with the part number (or pick the MO), manufacturing line, pallet number (the next one is filled in), quantity and description. The person logged in is the packer; **Verify** (another person's PIN) and **Sign off** (a shift lead's PIN) add names, otherwise the printed tag has lines to sign by hand. Prints full page, landscape letter. A pallet number that already has a tag is refused until the old tag is voided. New permissions: **Verify pallet tags** and **Supervisor sign-off on pallet tags**.
+- **Alarms: Acknowledge clears it right away.** Acknowledging in the Alarms dialog used to leave the alarm showing until the page was reloaded.
+
 ## What's new in 1.9.4
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
