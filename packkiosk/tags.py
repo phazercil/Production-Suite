@@ -27,14 +27,48 @@ def lines():
     return [n for n, s in ms if s == "pk"] + [n for n, s in ms if s != "pk"]
 
 
-def open_mos():
-    """Open MOs to pack against: the finished-part MO of each order (or the order itself)."""
-    out = []
-    for m in MO.objects.filter(status="OPEN", example=False).order_by("due", "number")[:400]:
-        if m.stage in ("s1", "eb"):
-            continue
-        out.append({"number": m.number, "part": m.part, "qty": m.qty})
-    return out
+TODAY_KEY = "packkiosk.todays_orders"
+
+
+def _todays_orders():
+    """The orders (top-level MO ids) running today: on the Scheduler's board today on any line and stage, running
+    on a line now, or run on one earlier today."""
+    from datetime import datetime, time, timedelta
+
+    from hmi.models import MoRun, ShiftRun
+    from scheduler.engine import compute, load_world, ms
+
+    day = timezone.localdate()
+    a = timezone.make_aware(datetime.combine(day, time.min))
+    b = a + timedelta(days=1)
+    ids = set()
+    try:
+        sch = compute(load_world())
+        sa, sb = ms(a), ms(b)
+        ids |= {r["moId"] for r in sch["res"].values() if r.get("segs") and r["start"] < sb and r["end"] > sa}
+    except Exception:   # a board that can't be worked out still leaves what is running and what ran today
+        import logging
+        logging.getLogger("plant").exception("Packaging Kiosk: today's MOs from the Scheduler")
+    numbers = set(MoRun.objects.filter(end_time__gte=a, start_time__lt=b).values_list("mo", flat=True))
+    ran = MO.objects.filter(number__in=numbers).values_list("id", "parent_id")
+    live = MO.objects.filter(pk__in=ShiftRun.objects.filter(active=True, mo__isnull=False).values("mo_id")).values_list("id", "parent_id")
+    ids |= {parent or pk for pk, parent in list(ran) + list(live)}
+    return ids
+
+
+def todays_mos(keep=""):
+    """Open MOs running today to pack against (the order and its finished-part MOs, not Stage 1 or end band MOs):
+    never the whole MO list. `keep`: an MO already picked on the form stays in the list."""
+    from django.core.cache import cache
+    from django.db.models import Q
+    ids = cache.get(TODAY_KEY)
+    if ids is None:
+        ids = _todays_orders()
+        cache.set(TODAY_KEY, ids, 60)
+    qs = MO.objects.filter(Q(pk__in=ids) | Q(parent_id__in=ids), status="OPEN", example=False).exclude(stage__in=("s1", "eb"))
+    if keep:
+        qs = qs | MO.objects.filter(number=keep)
+    return [{"number": m.number, "part": m.part, "qty": m.qty} for m in qs.distinct().order_by("due", "number")]
 
 
 def _live(qs):

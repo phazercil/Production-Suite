@@ -218,6 +218,11 @@ def line_status():
         last = PpmReading.objects.filter(machine=m).order_by("-t").values("t", "ppm").first()
         fresh = bool(last and (now - last["t"]).total_seconds() < 180)
         pill = pills.get(sh.state, ("idle", sh.state.title())) if sh else (("idle", "No shift") if m.active else ("bad", "Out of service"))
+        # Running / stopped come from the machine's readings: none for 3 minutes (or never) and the state is only the last
+        # one known, so say so instead of showing it running (a changeover is the operator's, not the machine's).
+        nodata = bool(sh and sh.state in ("running", "stopped") and not fresh)
+        if nodata:
+            pill = ("warn", "No machine data")
         mo = sh.mo if sh else None
         nxt = None
         if sh and sh.state == "changeover" and (sh.co or {}).get("newMo"):
@@ -233,11 +238,15 @@ def line_status():
                       "ppm": last["ppm"] if fresh else None, "since": last["t"] if last else None, "stale": bool(last) and not fresh,
                       "who": (sh.user_name or "") if sh else "", "stats": stats, "recheck": qc.recheck_for(m.name),
                       "co": bool(sh and sh.co and sh.co.get("step", 1) >= 2), "coSince": co_since,
-                      "coMin": round((now - co_since).total_seconds() / 60) if co_since else None})
-    run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running")
-    return cards, {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped"),
-                   "Changeover": sum(1 for c in cards if c["sh"] and c["sh"].state == "changeover"),
-                   "Made this shift": sum(c["sh"].count for c in cards if c["sh"])}
+                      "coMin": round((now - co_since).total_seconds() / 60) if co_since else None, "nodata": nodata})
+    run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running" and not c["nodata"])
+    tot = {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped" and not c["nodata"]),
+           "No machine data": sum(1 for c in cards if c["nodata"]),
+           "Changeover": sum(1 for c in cards if c["sh"] and c["sh"].state == "changeover"),
+           "Made this shift": sum(c["sh"].count for c in cards if c["sh"])}
+    if not tot["No machine data"]:
+        del tot["No machine data"]
+    return cards, tot
 
 
 def open_changeovers():

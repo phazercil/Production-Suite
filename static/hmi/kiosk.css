@@ -602,3 +602,7 @@ label.f small{font-size:12px;color:var(--ink-3,var(--ink-2))}
 /* Connector builder pages */
 .cpages{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .cpages .pill{margin-left:6px;font-size:11px}
+
+/* Never sideways: something wider than the screen scrolls in its own box (tables, the builder), so the browser can't
+   shove the whole page left (Log out half off the screen, no way to swipe it back) */
+.adminpage > .view, #view { overflow-x: clip; }

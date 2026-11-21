@@ -61,3 +61,24 @@ class SupervisorHistoryTests(TestCase):
         self.assertContains(r, "1 of 8")
         # a line filter
         self.assertTrue(all(x.line == "Salvatore" for x in self.c.get("/supervisor/?tab=logs&line=Salvatore").context["rows"]))
+
+
+class LineStatusMachineDataTests(TestCase):
+    """A shift left 'running' with no readings from the machine isn't shown as running."""
+    def setUp(self):
+        seed_demo(reset=True)
+
+    def test_no_readings_says_no_machine_data(self):
+        from hmi.models import PpmReading
+        from plant.models import Machine
+        from supervisor.views import line_status
+        bar = Machine.objects.get(name="Barbara")
+        ShiftRun.objects.filter(machine=bar, active=True).update(state="running")
+        PpmReading.objects.filter(machine=bar).delete()
+        cards, tot = line_status()
+        c = next(c for c in cards if c["m"] == bar)
+        self.assertEqual(c["pill"], ("warn", "No machine data"))
+        self.assertGreaterEqual(tot["No machine data"], 1)
+        PpmReading.objects.create(machine=bar, t=timezone.now(), ppm=150)
+        cards, tot = line_status()
+        self.assertEqual(next(c for c in cards if c["m"] == bar)["pill"], ("ok", "Running"))

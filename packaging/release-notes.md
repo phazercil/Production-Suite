@@ -1,3 +1,22 @@
+## What's new in 1.9.6
+
+**Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
+
+- **Cameras:**
+  - **Operator Kiosk › Cameras** shows the cameras set up for that machine, updating live. Tap one to fill the screen; tap again (or Esc) to go back.
+  - **Admin › Cameras › Set up cameras** (/cameras/) adds each camera and picks the machines that show it. A camera can be:
+    - a picture (JPEG snapshot) address, which most IP cameras have;
+    - an MJPEG stream;
+    - or RTSP, which needs ffmpeg on the server (`sudo dnf install ffmpeg`, with RPM Fusion for H.264).
+  - Each camera has its own pictures a second, a turn (90° / 180° / 270°) and **Test**.
+  - **How the pictures get to the screens:** the server gets each picture from the camera and every screen shares it, so the tablets never connect to a camera. A camera answers at most its pictures a second, however many screens watch, and isn't asked at all when nobody does.
+  - **Logins and the plant network:** a camera's user name and password are kept in the server's .env, never in the database. Only cameras on the plant network can be added.
+  - A camera that isn't answering says why on its tile (wrong password, wrong address…) and is asked again every 5 seconds.
+  - The new **Cameras** permission (shift leads and admins) sets them up. Watching needs nothing more than being on the plant network.
+- **Supervisor › Line status: No machine data.** A machine with no readings for 3 minutes was still shown as Running (or Stopped), which was only the last state known. It now shows **No machine data** with the time of the last reading, and isn't counted as running.
+- **Pages no longer get stuck sideways on a phone:** a phone browser could shift a page (Admin, Supervisor, Maintenance…) left, with Log out half off the screen and no way to swipe it back. Wide tables now scroll in their own box, and a shifted page goes back the next time the screen updates.
+- **Packaging Kiosk › New pallet tag:** the MO list only has the MOs running today, never every open MO: what the Scheduler has on a line today (any stage), what is running on a line now and what ran earlier today. It lists each order and its finished-part MO, not the Stage 1 or end band MOs. With nothing on today's schedule it says so, and a tag can still be made without an MO.
+
 ## What's new in 1.9.5
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).

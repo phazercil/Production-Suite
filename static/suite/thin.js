@@ -100,6 +100,17 @@
     htmx.trigger(body, "suite:changed");
   }, 0));
 
+  // ------------------------------------------------------------ a page shoved sideways goes back
+  // (a phone browser can scroll a box sideways to show a field near the edge, and it can't be swiped back)
+  const unshove = () => {
+    for (const el of [document.scrollingElement, ...document.querySelectorAll(".mbody, .view, .sv")]) {
+      if (el && el.scrollLeft && !el.closest(".tblwrap")) el.scrollLeft = 0;
+    }
+  };
+  body.addEventListener("htmx:afterSettle", unshove);
+  window.addEventListener("orientationchange", () => setTimeout(unshove, 300));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) unshove(); });
+
   // ------------------------------------------------------------ offline and errors
   body.addEventListener("htmx:sendError", () => { setOnline(false); toast("The server is not answering. Check the network and try again.", "bad"); });
   body.addEventListener("htmx:responseError", e => {

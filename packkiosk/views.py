@@ -58,7 +58,7 @@ def page(request):
     live = [r for r in rows if not r.voided]
     form = {k: q.get(k, "") for k in ("part", "mo", "line", "pallet_no", "qty", "description")} if q.get("err") else {}
     ctx = {"mode": "packaging", "me": me, "now": now, "msg": q.get("msg", ""), "err": q.get("err", ""), "rows": rows, "range": rng,
-           "ranges": RANGES, "find": find, "lines": tags.lines(), "mos": tags.open_mos(), "form": form,
+           "ranges": RANGES, "find": find, "lines": tags.lines(), "mos": tags.todays_mos(form.get("mo", "")), "form": form,
            "parts": sorted(set(PalletTag.objects.values_list("part", flat=True)[:500])),
            "printId": q.get("print", ""),
            "kpi": {"pallets": len(live), "pcs": sum(r.qty for r in live), "unverified": sum(1 for r in live if not r.verified_by)},

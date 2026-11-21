@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Cameras · Production Suite{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'suite/cams.css' %}"><link rel="stylesheet" href="{% static 'maintenance/maintenance.css' %}"><script src="{% static 'suite/cams.js' %}" defer></script>{% endblock %}
+{% block content %}<div class="sv">
+  <div class="sv-head"><h1>Cameras</h1><span class="muted">Camera connections and the machines whose Operator Kiosk shows them</span><span class="grow"></span><span class="who">{{ me.name }}</span><a class="btn ghost" href="/admin/">Admin</a><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+
+  {% if edit %}<div class="card"><h2>{% if cur %}Change {{ cur.name }}{% else %}Add a camera{% endif %}</h2>
+    <form method="post" action="/cameras/do/save" class="sv-form mt-grid">{% csrf_token %}{% if cur %}<input type="hidden" name="id" value="{{ cur.pk }}">{% endif %}
+      <label class="fld"><span>Name</span><input name="name" maxlength="80" required value="{{ cur.name|default:'' }}" placeholder="e.g. Barbara · infeed"></label>
+      <label class="fld"><span>Connection</span><select name="kind" id="cam-kind">{% for k, l in kinds %}<option value="{{ k }}" {% if cur.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="fld" style="grid-column:1/-1"><span>Address (no user name or password in it)</span><input name="url" maxlength="500" required value="{{ cur.url|default:'' }}" placeholder="http://192.168.100.60/ISAPI/Streaming/channels/101/picture"></label>
+      <label class="fld"><span>User name</span><input name="user" maxlength="120" autocomplete="off" placeholder="{% if cur.has_login %}kept · type to change{% else %}if the camera needs one{% endif %}"></label>
+      <label class="fld"><span>Password</span><input name="password" type="password" maxlength="200" autocomplete="new-password" placeholder="{% if cur.has_login %}kept · type to change{% endif %}"></label>
+      <label class="fld"><span>Pictures a second</span><input name="fps" type="number" min="0.2" max="5" step="0.1" value="{{ cur.fps|default:1 }}"></label>
+      <label class="fld"><span>Turn the picture</span><select name="rotate">{% for r in rotations %}<option value="{{ r }}" {% if cur.rotate == r %}selected{% endif %}>{% if r %}{{ r }}°{% else %}No{% endif %}</option>{% endfor %}</select></label>
+      <label class="fld"><span>Order</span><input name="sort" type="number" value="{{ cur.sort|default:0 }}"></label>
+      <label class="fld chk"><input type="checkbox" name="enabled" value="1" {% if not cur or cur.enabled %}checked{% endif %}> <span>On</span></label>
+      <fieldset class="fld" style="grid-column:1/-1;border:0;padding:0;margin:0"><legend class="note">Show it on these machines' Operator Kiosk (Cameras)</legend>
+        <div class="row" style="flex-wrap:wrap;gap:8px 18px;margin-top:6px">{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}" {% if m.pk in curMachines %}checked{% endif %}> {{ m.name }}</label>{% endfor %}</div></fieldset>
+      {% if cur.has_login %}<label class="chk" style="grid-column:1/-1"><input type="checkbox" name="clear_login" value="1"> Remove the saved user name and password</label>{% endif %}
+      <p class="note" style="grid-column:1/-1">Only addresses on the plant network. The user name and password are kept in the server's .env, never in the database or on the tablets. {% if not ffmpeg %}<b>RTSP:</b> the server has no ffmpeg yet (on Fedora: <code>sudo dnf install ffmpeg</code>, with RPM Fusion for H.264); until then use the camera's picture or MJPEG address.{% else %}RTSP is read with ffmpeg on the server, at most one picture a second.{% endif %}</p>
+      <div class="row" style="grid-column:1/-1"><button class="btn go">Save</button><a class="btn ghost" href="/cameras/">Cancel</a></div></form>
+    {% if cur %}<form method="post" action="/cameras/do/delete" class="row" style="margin-top:10px">{% csrf_token %}<input type="hidden" name="id" value="{{ cur.pk }}"><button class="btn sm bad">Remove this camera</button></form>{% endif %}
+  </div>
+  {% else %}<div class="row" style="margin:6px 0 12px"><a class="btn go" href="?edit=new">Add a camera</a><span class="note">Most IP cameras have a picture (JPEG) address: e.g. Hikvision <code>/ISAPI/Streaming/channels/101/picture</code>, Axis <code>/axis-cgi/jpg/image.cgi</code>, Dahua <code>/cgi-bin/snapshot.cgi</code>.</span></div>{% endif %}
+
+  <div class="camgrid">{% for c in cams %}<div class="card" style="padding:10px">
+    <div class="camtile" data-cam-tile>{% if c.enabled %}<img data-cam="{{ c.pk }}" data-every="1000" alt="Camera {{ c.name }}">{% endif %}<span class="camname">{{ c.name }}{% if not c.enabled %} · off{% endif %}</span><span class="cammsg" data-cam-msg {% if c.enabled %}hidden{% endif %}>{% if not c.enabled %}Turned off{% endif %}</span></div>
+    <p class="note" style="margin:8px 0 4px">{{ c.get_kind_display }} · {{ c.fps|floatformat:"-1" }}/s{% if c.has_login %} · login saved{% endif %}</p>
+    <div class="row" style="flex-wrap:wrap;gap:6px;align-items:center"><span class="grow">{% for m in c.machines.all %}<span class="chip">{{ m.name }}</span>{% empty %}<span class="warn">On no machine yet</span>{% endfor %}</span>
+      <form method="post" action="/cameras/do/test">{% csrf_token %}<input type="hidden" name="id" value="{{ c.pk }}"><button class="btn sm">Test</button></form><a class="btn sm ghost" href="?edit={{ c.pk }}">Change</a></div>
+  </div>{% empty %}<div class="card"><p class="muted">No cameras yet. Add the first one; the Operator Kiosk shows a machine's cameras under <b>Cameras</b>.</p></div>{% endfor %}</div>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}
