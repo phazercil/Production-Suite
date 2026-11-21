@@ -1,0 +1,23 @@
+@page{size:letter landscape;margin:0.35in}
+*{box-sizing:border-box}
+html,body{margin:0;background:#fff;color:#000;font-family:"IBM Plex Sans",Arial,sans-serif}
+.bar{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#eee;border-bottom:1px solid #ccc}
+.bar a{color:#0b5;font-weight:600;text-decoration:none}.bar .grow{flex:1}
+.bar button{font:600 16px inherit;padding:8px 22px;border-radius:6px;border:1px solid #333;background:#111;color:#fff;cursor:pointer}
+.tag{width:10.3in;height:7.8in;margin:12px auto;display:grid;grid-template-rows:auto 1.25fr .7fr auto auto;gap:.12in;border:4px solid #000;padding:.18in}
+.lbl{display:block;font-size:14pt;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#333}
+section.part{text-align:center;border-bottom:3px solid #000;padding-bottom:.06in}
+section.part b{display:block;font-size:92pt;line-height:1;font-weight:700;letter-spacing:.02em}
+section.part .desc{display:block;font-size:22pt;font-weight:600;margin-top:2px}
+.two,.three{display:grid;gap:.12in}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:1.3fr 1fr 1fr}
+.box{border:3px solid #000;padding:.06in .14in;display:flex;flex-direction:column;justify-content:center;text-align:center;min-width:0}
+.box b{font-size:30pt;line-height:1.1;overflow-wrap:anywhere}
+.box b.xl{font-size:96pt;line-height:1}
+.box .unit{font-size:16pt;font-weight:600}
+.sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:.18in;padding-top:.04in}
+.sig{display:flex;flex-direction:column;justify-content:flex-end;min-height:.75in}
+.sig .name{font-size:20pt;font-weight:700;border-bottom:2px solid #000;padding-bottom:2px}
+.sig .when{font-size:11pt;color:#333;margin-top:2px}
+.sig .line{display:block;height:.5in;border-bottom:2px solid #000}
+footer{font-size:10pt;color:#444;text-align:right}
+@media print{.noprint{display:none}.tag{margin:0;width:100%;height:7.75in}}

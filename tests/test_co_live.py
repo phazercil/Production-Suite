@@ -117,9 +117,9 @@ class ReasonsByShiftTests(TestCase):
 
 
 class PackagingKioskTests(TestCase):
-    def test_in_the_top_bar_for_later(self):
+    def test_in_the_top_bar(self):
         seed_demo(reset=True)
         r = Client().get("/packaging/")
         self.assertContains(r, "Packaging Kiosk")
-        self.assertContains(r, "coming in a later update")
+        self.assertContains(r, "Pallet tags for finished filters")
         self.assertContains(Client().get("/supervisor/"), 'href="/packaging/"')

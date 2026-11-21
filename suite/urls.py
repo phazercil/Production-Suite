@@ -13,6 +13,7 @@ from quality import viewer as fviewer
 from quality import views as quality
 from supervisor import views as supervisor
 from maintenance import views as maintenance
+from packkiosk import views as packkiosk
 from suite import sections, thin
 
 urlpatterns = [
@@ -93,7 +94,11 @@ urlpatterns = [
     path("supervisor/coend/<int:pk>/", supervisor.co_force_end, name="supervisor-coend"),
     path("maintenance/", maintenance.page, name="maintenance-section"),
     path("maintenance/do/<str:name>", maintenance.do, name="maintenance-do"),
-    path("packaging/", sections.soon, {"key": "packaging"}, name="packaging-section"),   # (coming later)   # the Labor Budget alone (no other sections), e.g. for the office
+    # Packaging Kiosk: pallet tags
+    path("packaging/", packkiosk.page, name="packaging-section"),
+    path("packaging/suggest", packkiosk.suggest),
+    path("packaging/do/<str:name>", packkiosk.do, name="packaging-do"),
+    path("packaging/tag/<int:pk>/", packkiosk.print_tag, name="packaging-tag"),
     path("api/labor/state", labor.state),
     path("api/labor/save", labor.save),
     path("api/labor/history", labor.history),

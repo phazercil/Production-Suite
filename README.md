@@ -7,6 +7,7 @@ One Django app for the pleating floor, with its modes behind one top bar:
 | Mode | Address | Who uses it |
 |---|---|---|
 | **Operator Kiosk** | `/operator/` | Line touchscreens on Barbara, Salvatore and any other pleater |
+| **Packaging Kiosk** | `/packaging/` | Packers: make and print pallet tags (part, line, pallet #, quantity, who packed / verified / signed off) |
 | **Station screen** | `/station/<machine>/` | One machine's operator view only (no other tabs, no line switcher) |
 | **Scheduler** | `/scheduler/` | Planners: drag MO stages onto lines, import S2K exports, edit lines and shifts |
 | **Data Kiosk** | `/data/` | Wall TV: live numbers per line plus your Grafana panels |
@@ -251,6 +252,17 @@ Map the fields once (time, line, part, MO, length, width, pleat height, side ban
 are converted). Without a pass/fail field, results are judged against the part's drawing specs. QC results
 show on the kiosk's QC Log and in Reports, and land in `hmi_qc_auto` for Grafana; other readings in `hmi_inbound`.
 
+### Packaging Kiosk: pallet tags
+
+`/packaging/` (Admin › Permissions › Open Packaging Kiosk). Log in with a PIN, then fill in the part number (or pick the
+MO), the manufacturing line, pallet #, quantity and an optional description, and **Save & print tag**. The pallet # is
+filled in with the next one: one more than the highest on that MO, or on that part today when there is no MO. A
+pallet that already has a tag is refused until the old tag is voided.
+
+The person logged in is the packer. **Verify** (another person's PIN, not the packer's) and **Sign off** (a shift lead's
+PIN) put their names on the tag; until then the printed tag has a blank line to sign by hand. The tag prints on
+letter paper, landscape, from the browser. Tags are kept in `pack_pallet_tag` for Grafana and Reports.
+
 ### Labor Budget and the Scheduler
 
 The Labor Budget is kept in step with the rest of the suite. Every machine in Scheduler › Lines & Shifts is a
@@ -463,6 +475,7 @@ scheduler/   Job model, scheduling engine, imports, JSON API
 datakiosk/   wall screen
 reports/     Reports page: summaries with drill up/down, Grafana reader
 labor/       Labor Budget (built from labor/source with tools/build_labor.py)
+packkiosk/   Packaging Kiosk: pallet tags (the packaging/ folder is the Windows installer)
 templates/, static/   the screens and the shared shell
 packaging/   Windows installer, Linux installer (packaging/linux), code signing, build, CI checks
 ```

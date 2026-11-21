@@ -3,10 +3,7 @@ from django.shortcuts import render
 
 from plant import perms
 
-SOON = {
-    "packaging": ("Packaging Kiosk", "The packaging lines' own kiosk: packing the finished filters of each order after Stage 1 and the end bands.",
-                  "section.packaging"),
-}
+SOON = {}   # the Packaging Kiosk was here; it is its own section now (packkiosk/)
 
 
 def soon(request, key):

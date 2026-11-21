@@ -1,0 +1,26 @@
+{% load static suite %}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pallet tag {{ tag.tag_no }} · {{ tag.part }} · pallet {{ tag.pallet_no }}</title>
+<link rel="stylesheet" href="{% static 'suite/fonts/plex.css' %}"><link rel="stylesheet" href="{% static 'packkiosk/tag.css' %}"></head>
+<body {% if auto %}data-auto="1"{% endif %}>
+<div class="bar noprint"><a href="/packaging/">‹ Back to Packaging</a><span class="grow"></span><button type="button" id="tag-print">Print</button></div>
+<main class="tag">
+  <section class="part"><span class="lbl">Part number</span><b>{{ tag.part }}</b>{% if tag.description %}<span class="desc">{{ tag.description }}</span>{% endif %}</section>
+  <section class="two">
+    <div class="box"><span class="lbl">Quantity</span><b class="xl">{{ tag.qty|num }}</b><span class="unit">pcs</span></div>
+    <div class="box"><span class="lbl">Pallet #</span><b class="xl">{{ tag.pallet_no }}</b></div>
+  </section>
+  <section class="three">
+    <div class="box"><span class="lbl">Manufacturing line</span><b>{{ tag.line }}</b></div>
+    <div class="box"><span class="lbl">Date</span><b>{{ tag.t|date:"m/d/Y" }}</b></div>
+    <div class="box"><span class="lbl">MO</span><b>{{ tag.mo|default:"—" }}</b></div>
+  </section>
+  <section class="sigs">
+    <div class="sig"><span class="lbl">Packed by</span><span class="name">{{ tag.packed_by }}</span><span class="when">{{ tag.t|date:"m/d/Y g:i A" }}</span></div>
+    <div class="sig"><span class="lbl">Verified</span>{% if tag.verified_by %}<span class="name">{{ tag.verified_by }}</span><span class="when">{{ tag.verified_t|date:"m/d/Y g:i A" }}</span>{% else %}<span class="line"></span>{% endif %}</div>
+    <div class="sig"><span class="lbl">Supervisor</span>{% if tag.supervisor %}<span class="name">{{ tag.supervisor }}</span><span class="when">{{ tag.supervisor_t|date:"m/d/Y g:i A" }}</span>{% else %}<span class="line"></span>{% endif %}</div>
+  </section>
+  <footer>Tag {{ tag.tag_no }}{% if tag.prints > 1 %} · reprint {{ tag.prints }}{% endif %} · names shown were signed with their PIN in Production Suite</footer>
+</main>
+<script src="{% static 'packkiosk/tag.js' %}"></script>
+</body></html>
