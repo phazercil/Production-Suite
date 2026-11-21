@@ -8,7 +8,7 @@
 
   <div class="card"><h2>New pallet tag</h2>
     <form method="post" action="/packaging/do/create" class="pk-new" id="pk-new" autocomplete="off">{% csrf_token %}
-      <label class="fld"><span>MO <i>(optional)</i></span><select name="mo" id="pk-mo"><option value="">No MO</option>{% for m in mos %}<option value="{{ m.number }}" data-part="{{ m.part }}" {% if m.number == form.mo %}selected{% endif %}>{{ m.number }} · {{ m.part }} · {{ m.qty|num }}</option>{% endfor %}</select></label>
+      <label class="fld"><span>MO running today <i>(optional)</i></span><select name="mo" id="pk-mo"><option value="">{% if mos %}No MO{% else %}No MO (none on the schedule today){% endif %}</option>{% for m in mos %}<option value="{{ m.number }}" data-part="{{ m.part }}" {% if m.number == form.mo %}selected{% endif %}>{{ m.number }} · {{ m.part }} · {{ m.qty|num }}</option>{% endfor %}</select></label>
       <label class="fld"><span>Part number</span><input name="part" id="pk-part" maxlength="40" required list="pk-parts" value="{{ form.part }}" placeholder="e.g. MG3672" class="big"></label>
       <datalist id="pk-parts">{% for p in parts %}<option value="{{ p }}">{% endfor %}</datalist>
       <label class="fld"><span>Manufacturing line</span><select name="line" id="pk-line" required><option value="">Pick the line…</option>{% for l in lines %}<option {% if l == form.line %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>

@@ -81,3 +81,52 @@ class PalletTagTests(TestCase):
             self.assertContains(r, s)
         t.refresh_from_db()
         self.assertEqual(t.prints, 1)
+
+
+class TodaysMosTests(TestCase):
+    """The pallet tag's MO list is the MOs running today, never every open MO."""
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        seed_demo(reset=True)
+        MO.objects.all().delete()
+        mk = lambda n, **k: MO.objects.create(number=n, part=k.pop("part", "MG3672"), qty=1000, **k)   # noqa: E731
+        self.planned = mk("ORD-TODAY", stage="")
+        self.kid_pk = mk("ORD-TODAY-PK", stage="pk", parent=self.planned)
+        self.kid_s1 = mk("1ORD-TODAY", stage="s1", parent=self.planned)
+        self.later = mk("ORD-NEXTWEEK", stage="")
+        self.running = mk("ORD-RUNNING", stage="")
+        self.ran = mk("ORD-RAN", stage="")
+        self.ran_s1 = mk("1ORD-RAN", stage="s1", parent=self.ran)
+        self.closed = mk("ORD-CLOSED", stage="", status="CLOSE")
+        self.idle = mk("ORD-IDLE", stage="")
+
+    def test_only_mos_on_the_schedule_running_or_run_today(self):
+        from datetime import timedelta
+        from unittest import mock
+
+        from django.utils import timezone
+
+        from hmi.models import MoRun, ShiftRun
+        from plant.models import Machine
+        from plant.util import ms
+        now = timezone.now()
+        bar = Machine.objects.get(name="Barbara")
+        ShiftRun.objects.create(machine=bar, line="Barbara", user_name="J. Ortiz", shift_name="1st shift", start=now, state="running", mo=self.running)
+        MoRun.objects.create(line="Barbara", mo="1ORD-RAN", start_time=now - timedelta(minutes=50), end_time=now - timedelta(minutes=5), qty=10)
+        res = {"a": {"moId": self.planned.id, "segs": [1], "start": ms(now), "end": ms(now + timedelta(hours=1))},
+               "b": {"moId": self.later.id, "segs": [1], "start": ms(now + timedelta(days=7)), "end": ms(now + timedelta(days=7, hours=2))},
+               "c": {"moId": self.closed.id, "segs": [1], "start": ms(now), "end": ms(now + timedelta(hours=1))}}
+        with mock.patch("scheduler.engine.compute", return_value={"res": res}):
+            got = [m["number"] for m in tags.todays_mos()]
+        self.assertEqual(sorted(got), ["ORD-RAN", "ORD-RUNNING", "ORD-TODAY", "ORD-TODAY-PK"])   # no Stage 1 MO, nothing later, closed or idle
+        self.assertIn("ORD-IDLE", [m["number"] for m in tags.todays_mos(keep="ORD-IDLE")])     # what the form already had stays
+
+    def test_page_lists_only_todays(self):
+        from unittest import mock
+        c = Client()
+        self.assertTrue(sup_login(c, "9999", "section.packaging", "/packaging/")["ok"])
+        with mock.patch("scheduler.engine.compute", return_value={"res": {}}):
+            r = c.get("/packaging/").content.decode()
+        self.assertNotIn("ORD-IDLE", r)
+        self.assertIn("none on the schedule today", r)

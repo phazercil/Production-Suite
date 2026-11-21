@@ -27,7 +27,7 @@ from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
 VIEWS = PAGES | {"admin"}   # Admin is its own section (/admin/) but its view is built the same way
-BUILT = {"controls", "schedule", "part-info", "model", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
+BUILT = {"controls", "schedule", "part-info", "model", "cameras", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -201,6 +201,11 @@ def view_data(s, page, request):
         sh = s.shift
         mo = sh.mo if sh else None
         return {"line": s.station, "mo": mo}
+    if page == "cameras":   # this line's cameras (Admin › Cameras)
+        from cameras.grab import every
+        from cameras.models import Camera
+        cams = list(Camera.objects.filter(enabled=True, machines__name=s.station).distinct()) if s.station else []
+        return {"line": s.station, "cams": [{"pk": c.pk, "name": c.name, "ms": round(every(c) * 1000)} for c in cams]}
     if page == "part-info":
         P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
         return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}

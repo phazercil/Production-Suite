@@ -21,7 +21,7 @@ from . import integrations
 from .engine import shift_stats
 from .models import Downtime, LineState, MachineError, Notice, PpmReading, ShiftRun, Ticket
 
-PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("part-info", "Part Info"), ("model", "3D Model"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
+PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("part-info", "Part Info"), ("model", "3D Model"), ("cameras", "Cameras"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
          ("status", "Status"), ("end-of-shift", "End of Shift"), None, ("team", "Team")]
 LOCKED_OUT = {"team", "admin"}           # not on a machine's own screen (/station/<machine>/)
 ADMIN_PAGES = {"admin"}
