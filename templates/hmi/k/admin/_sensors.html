@@ -1,0 +1,8 @@
+{% load suite %}<div class="panel"><div class="row"><h2 class="h2 grow">Sensors &amp; alarms</h2><a class="btn primary" href="/sensors/">Open the sensor &amp; alarm builder</a></div>
+  <p class="sub" style="margin-top:4px">Your own sensors on each machine (Modbus TCP, a web address, a database table, InfluxDB, pushed to the server, an extra field of the machine's reading, Incoming data, suite values, formulas or typed in), scaled to real units, with alarm rules that show on the kiosk, email or text people, open maintenance requests and go to the webhook.{% if not C.canEdit %} Changing them needs <b>Sensors &amp; custom alarms</b> (Admin › Permissions).{% endif %}</p>
+  {% if C.on %}<div style="margin-top:10px">{% for a in C.on %}<div class="note"><span class="pill {% if a.severity == 'bad' %}bad{% else %}warn{% endif %}">ON</span> {{ a.text }}</div>{% endfor %}</div>{% endif %}
+  {% if C.sensors %}<div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Sensor</th><th>Machine</th><th>Now</th><th></th></tr></thead><tbody>
+  {% for x in C.sensors %}<tr><td class="l"><b>{{ x.label }}</b>{% if not x.enabled %} <span class="pill idle">OFF</span>{% endif %}</td><td>{{ x.machine|default:"Plant-wide" }}</td><td class="num">{{ x.fmt }}</td>
+    <td>{% if x.enabled and not x.ok %}<span class="pill bad">NOT READING</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="note" style="margin-top:8px">No sensors yet.</p>{% endif %}
+</div>

@@ -1,0 +1,53 @@
+{% load suite %}<div class="card" id="rules">
+  <div class="row sn-rhead"><h2>Alarms for {{ sel.label }}</h2><span class="muted">{{ sel.machine|default:"Plant-wide" }} · now {{ sel.fmt }}</span><span class="grow"></span>
+    {% if not ruleEdit %}<a class="btn go" href="?rules={{ sel.pk }}&amp;rule=new#rules">+ Add an alarm rule</a>{% endif %}<a class="btn ghost" href="/sensors/">Close</a></div>
+  <div class="tblwrap"><table class="st"><thead><tr><th>Rule</th><th>When it applies</th><th>What happens</th><th>Now</th><th></th></tr></thead><tbody>
+  {% for r in sel.rules.all %}<tr class="{% if not r.enabled %}muted{% endif %}">
+    <td><span class="pill {{ r.severity }}">{% if r.severity == "bad" %}CRITICAL{% elif r.severity == "warn" %}WARNING{% else %}NOTICE{% endif %}</span> <b>{{ r.name|default:sel.label }}</b><div class="note">{{ r.words }}{% if r.deadband %} · clears {{ r.deadband|floatformat:"-3" }} {{ sel.unit }} back{% endif %}{% if r.clear_delay %} after {{ r.clear_delay }} s{% endif %}</div>{% if r.message %}<div class="note">“{{ r.message }}”</div>{% endif %}</td>
+    <td class="nw">{{ r.get_when_display }}</td>
+    <td>{% if r.show_kiosk %}<div class="note">Kiosk alarm{% if r.show_all %} on every machine{% endif %}{% if r.latch %}, stays until acknowledged{% endif %}</div>{% endif %}
+      {% if r.notify %}<div class="note">Email / text{% if r.notify_after %} after {{ r.notify_after }} min{% endif %}{% if r.repeat %}, again every {{ r.repeat }} min{% endif %}{% if r.notify_clear %}, and when it clears{% endif %}</div>{% endif %}
+      {% if r.ticket %}<div class="note">Maintenance request ({{ r.ticket_priority }})</div>{% endif %}{% if r.webhook %}<div class="note">Webhook</div>{% endif %}</td>
+    <td class="nw">{% if r.alarm_id %}<span class="pill bad">ON</span>{% elif r.pending_since %}<span class="pill warn">WAITING</span>{% else %}<span class="pill ok">CLEAR</span>{% endif %}</td>
+    <td class="nw" style="text-align:right"><a class="btn ghost po" href="?rules={{ sel.pk }}&amp;rule={{ r.pk }}#rules">Edit</a>
+      <form method="post" action="/sensors/do/ruleToggle" class="inl">{% csrf_token %}<input type="hidden" name="rule" value="{{ r.pk }}"><button class="btn ghost po">{% if r.enabled %}Turn off{% else %}Turn on{% endif %}</button></form>
+      <form method="post" action="/sensors/do/ruleDelete" class="inl">{% csrf_token %}<input type="hidden" name="rule" value="{{ r.pk }}"><button class="btn ghost po">Remove</button></form></td></tr>
+  {% empty %}<tr><td colspan="5" class="empty">No alarm rules yet.</td></tr>{% endfor %}</tbody></table></div>
+
+  {% if ruleEdit %}{% with f=ruleEdit.f s=sel %}<form method="post" action="/sensors/?rules={{ s.pk }}" class="sn-form sn-rule" id="sn-rule" autocomplete="off" data-dtype="{{ s.dtype }}">{% csrf_token %}
+    <input type="hidden" name="action" value="rule"><input type="hidden" name="id" value="{{ s.pk }}"><input type="hidden" name="rule" value="{{ f.id }}">
+    <h3>{% if f.id %}Change the rule{% else %}New alarm rule{% endif %}</h3>
+    <div class="sn-grid">
+      <label class="fld wide"><span>Name</span><input name="name" maxlength="80" value="{{ f.name }}" placeholder="Roll almost empty"></label>
+      <label class="fld"><span>Alarm when {{ s.label }}</span><select name="op" id="sn-op">{% for k, l in ops %}<option value="{{ k }}" {% if k == f.op %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="fld" data-op-a><span data-a-label>Limit{% if s.unit %} ({{ s.unit }}){% endif %}</span><input name="a" type="number" step="any" value="{{ f.a }}"></label>
+      <label class="fld" data-op-b><span>…and{% if s.unit %} ({{ s.unit }}){% endif %}</span><input name="b" type="number" step="any" value="{{ f.b }}"></label>
+      <label class="fld"><span>For at least (seconds)</span><input name="delay" type="number" min="0" max="86400" value="{{ f.delay }}"><small>Ignores a blip shorter than this</small></label>
+      <label class="fld" data-op-db><span>Clears only once back by{% if s.unit %} ({{ s.unit }}){% endif %}</span><input name="deadband" type="number" min="0" step="any" value="{{ f.deadband }}"><small>Deadband: stops it flickering on and off at the limit</small></label>
+      <label class="fld"><span>…and stays clear for (seconds)</span><input name="clear_delay" type="number" min="0" max="86400" value="{{ f.clear_delay }}"></label>
+      <label class="fld"><span>Applies</span><select name="when">{% for k, l in whens %}<option value="{{ k }}" {% if k == f.when %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="fld"><span>Severity</span><select name="severity">{% for k, l in sevs %}<option value="{{ k }}" {% if k == f.severity %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="fld wide"><span>Alarm text <small>(blank = written for you)</small></span><input name="message" maxlength="300" value="{{ f.message }}" placeholder="{machine}: change the media roll — {value} left"><small>Fill-ins: {value} {limit} {limit2} {unit} {raw} {sensor} {machine} {name}</small></label>
+    </div>
+    <h3>What happens</h3>
+    <div class="sn-acts">
+      <fieldset><legend>On the kiosk</legend>
+        <label class="chk"><input type="checkbox" name="show_kiosk" value="1" {% if f.show_kiosk %}checked{% endif %}> Show it in the machine's Alarms (and the alarm badge)</label>
+        <label class="chk"><input type="checkbox" name="show_all" value="1" {% if f.show_all %}checked{% endif %}> On every machine's kiosk, not only {{ s.machine|default:"this one" }}</label>
+        <label class="chk"><input type="checkbox" name="latch" value="1" {% if f.latch %}checked{% endif %}> Stays until someone acknowledges it, even after it clears</label></fieldset>
+      <fieldset><legend>Email / text</legend>
+        <label class="chk"><input type="checkbox" name="notify" value="1" {% if f.notify %}checked{% endif %}> Send a message</label>
+        {% if contacts %}<label class="fld"><span>To <small>(none ticked = everyone in Admin › Alerts set up for this machine)</small></span><select name="contacts" multiple size="{% if contacts|length > 5 %}5{% else %}{{ contacts|length }}{% endif %}">{% for c in contacts %}<option value="{{ c.pk }}" {% if c.pk in f.contacts %}selected{% endif %}>{{ c.name }}{% if c.phone %} · text{% endif %}{% if c.email %} · email{% endif %}</option>{% endfor %}</select></label>{% else %}<p class="note">No one to send to yet: add people in Admin › Alerts.</p>{% endif %}
+        <div class="sn-grid"><label class="fld"><span>Once it has lasted (min)</span><input name="notify_after" type="number" min="0" value="{{ f.notify_after }}"></label>
+          <label class="fld"><span>Repeat every (min, 0 = once)</span><input name="repeat" type="number" min="0" value="{{ f.repeat }}"></label></div>
+        <label class="chk"><input type="checkbox" name="notify_clear" value="1" {% if f.notify_clear %}checked{% endif %}> Also when it clears</label></fieldset>
+      <fieldset><legend>Maintenance &amp; other systems</legend>
+        <label class="chk"><input type="checkbox" name="ticket" value="1" {% if f.ticket %}checked{% endif %}> Open a maintenance request</label>
+        <div class="sn-grid"><label class="fld"><span>Request type</span><input name="ticket_type" maxlength="80" value="{{ f.ticket_type }}" placeholder="Sensor alarm"></label>
+          <label class="fld"><span>Priority</span><select name="ticket_priority">{% for p in "High,Medium,Low"|split %}<option {% if p == f.ticket_priority %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></label></div>
+        <label class="chk"><input type="checkbox" name="webhook" value="1" {% if f.webhook %}checked{% endif %}> Send to the webhook (Admin › Connections), when one is set</label></fieldset>
+    </div>
+    <label class="chk"><input type="checkbox" name="enabled" value="1" {% if f.enabled %}checked{% endif %}> Rule turned on</label>
+    <div class="row"><button class="btn go">Save the rule</button><a class="btn ghost" href="?rules={{ s.pk }}#rules">Cancel</a></div>
+  </form>{% endwith %}{% endif %}
+</div>

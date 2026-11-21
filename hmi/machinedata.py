@@ -101,6 +101,14 @@ def add_extras(machine, out, get, slot=None):
     if r2:
         out["run2"] = is_running(val("run2", r2["field"]), r2.get("runWhen"))
         out["run2Name"] = r2.get("name") or "Second machine"
+    if get is not None:   # Sensors › "Extra field of the machine's own reading" (taken off again before the minute is counted)
+        try:
+            from sensors.engine import feed_fields
+            fs = feed_fields(machine)
+        except Exception:  # noqa: BLE001 - sensors never stop a machine's reading
+            fs = []
+        if fs:
+            out["sensors"] = {f: get(f) for f in fs}
     return out
 
 

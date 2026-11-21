@@ -1,0 +1,50 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Sensors & alarms · {% for k, l in tabs %}{% if k == tab %}{{ l }}{% endif %}{% endfor %}{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'sensors/sensors.css' %}">{% endblock %}
+{% block content %}<div class="sv sn">
+  <div class="sv-head"><h1>Sensors &amp; alarms</h1><span class="muted">Your own sensors on each machine, scaled to real units, with the alarms you set</span><span class="grow"></span><a class="btn ghost" href="/admin/">‹ Admin</a><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  <nav class="sv-tabs" aria-label="Sensors & alarms">{% for k, label in tabs %}<a href="?tab={{ k }}" {% if tab == k %}aria-current="page"{% endif %}>{{ label }}{% if k == "log" and counts.alarms %} ({{ counts.alarms }} on){% endif %}</a>{% endfor %}</nav>
+
+{% if tab == "sensors" %}
+  {% if edit %}{% include "sensors/_sensor_form.html" %}{% else %}
+  <div class="sv-kpis"><div class="kpi"><span>Sensors</span><b>{{ counts.sensors }}</b></div><div class="kpi {% if counts.alarms %}bad{% endif %}"><span>Alarms on now</span><b>{{ counts.alarms }}</b></div><div class="kpi"><span>Not reading</span><b class="{% if counts.problems %}warn{% endif %}">{{ counts.problems }}</b></div>
+    <div class="kpi sn-add"><a class="btn go" href="?edit=new">+ Add a sensor</a></div></div>
+  <div class="card"><div class="tblwrap"><table class="st sn-tbl"><thead><tr><th>Sensor</th><th>Machine</th><th>Connection</th><th class="n">Now</th><th>Alarm rules</th><th></th></tr></thead><tbody>
+  {% for s in sensors %}<tr id="s{{ s.pk }}" class="{% if not s.enabled %}muted{% endif %}{% if sel and sel.pk == s.pk %} on{% endif %}">
+    <td><b>{{ s.label }}</b><div class="note">{{ s.name }}{% if not s.enabled %} · OFF{% endif %}</div></td>
+    <td class="nw">{{ s.machine|default:"Plant-wide" }}</td>
+    <td>{{ s.kind_label }}{% if s.kind == "modbus" or s.kind == "url" or s.kind == "db" or s.kind == "influx" or s.kind == "suite" or s.kind == "calc" %}<div class="note">every {{ s.every }} s</div>{% endif %}</td>
+    <td class="n nw"><b class="sn-val">{{ s.fmt }}</b>{% if s.raw is not None and s.scale %}<div class="note">raw {{ s.raw|floatformat:"-3" }} {{ s.raw_unit }}</div>{% endif %}
+      {% if s.enabled %}{% if not s.ok %}<div class="note bad">✕ {{ s.msg|truncatechars:90 }}</div>{% elif s.fault %}<div class="note bad">Faulty reading</div>{% elif s.value_t %}<div class="note">{{ s.value_t|plan:now }}</div>{% else %}<div class="note">no reading yet</div>{% endif %}{% endif %}
+      {% if s.kind == "manual" and s.enabled %}<form method="post" action="/sensors/do/manual" class="sn-manual">{% csrf_token %}<input type="hidden" name="id" value="{{ s.pk }}"><input name="value" inputmode="decimal" required placeholder="Reading" aria-label="Type the reading for {{ s.label }}"><button class="btn po">Enter</button></form>{% endif %}</td>
+    <td>{% for al in s.active_alarms %}<div><span class="pill {{ al.severity }}">{% if al.severity == "bad" %}ALARM{% elif al.severity == "warn" %}WARNING{% else %}NOTICE{% endif %}</span> {{ al.label }}</div>{% endfor %}
+      {% for r in s.rules.all %}<div class="note{% if not r.enabled %} off{% endif %}">{% if r.name %}<b>{{ r.name }}:</b> {% endif %}{{ r.words }}{% if not r.enabled %} (off){% endif %}</div>{% empty %}<span class="note">none yet</span>{% endfor %}</td>
+    <td class="nw" style="text-align:right"><a class="btn go po" href="?rules={{ s.pk }}#rules">Alarms</a> <a class="btn ghost po" href="?edit={{ s.pk }}">Edit</a>
+      <form method="post" action="/sensors/do/sensorToggle" class="inl">{% csrf_token %}<input type="hidden" name="id" value="{{ s.pk }}"><button class="btn ghost po">{% if s.enabled %}Turn off{% else %}Turn on{% endif %}</button></form>
+      <details class="inl"><summary class="btn ghost po">Remove</summary><form method="post" action="/sensors/do/sensorDelete" class="sn-pop">{% csrf_token %}<input type="hidden" name="id" value="{{ s.pk }}"><p class="note">Remove {{ s.label }} and its alarm rules? The alarm log and minute values stay.</p><button class="btn">Remove it</button></form></details></td></tr>
+  {% empty %}<tr><td colspan="6" class="empty">No sensors yet. <a href="?edit=new">Add the first one</a>, or see <a href="?tab=types">every connection type</a>.</td></tr>{% endfor %}
+  </tbody></table></div></div>
+  {% if sel %}{% include "sensors/_rules.html" %}{% endif %}
+  {% endif %}
+
+{% elif tab == "log" %}
+  <form class="sv-filter" method="get"><input type="hidden" name="tab" value="log">
+    <label>Machine<select name="machine"><option value="">All</option>{% for m in machines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <label>Sensor<select name="sensor"><option value="">All</option>{% for n, l in sensorNames %}<option value="{{ n }}" {% if n == fsensor %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>Last<select name="days">{% for d in "1,7,30,90,365"|split %}<option value="{{ d }}" {% if d|add:0 == days %}selected{% endif %}>{{ d }} day{{ d|add:0|pluralize }}</option>{% endfor %}</select></label>
+    <button class="btn go">Show</button></form>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Started</th><th>Machine</th><th>Alarm</th><th class="n">Value</th><th class="n">Worst</th><th>Ended</th><th>Acknowledged</th><th>Sent</th></tr></thead><tbody>
+  {% for a in log %}<tr><td class="nw">{{ a.start|day }} {{ a.start|clock }}</td><td class="nw">{{ a.machine|default:"Plant" }}</td>
+    <td><span class="pill {{ a.severity }}">{% if a.severity == "bad" %}ALARM{% elif a.severity == "warn" %}WARNING{% else %}NOTICE{% endif %}</span> {{ a.text }}{% if a.ticket_id %}<div class="note"><a href="/maintenance/?tab=requests#r{{ a.ticket_id }}">Maintenance request #{{ a.ticket_id }}</a></div>{% endif %}</td>
+    <td class="n">{{ a.value|floatformat:"-2" }}</td><td class="n">{{ a.worst|floatformat:"-2" }}</td>
+    <td class="nw">{% if a.end %}{{ a.end|clock }} <span class="note">({{ a.start|timesince:a.end }})</span>{% else %}<span class="pill bad">ON NOW</span>{% endif %}</td>
+    <td class="nw">{% if a.acked_t %}{{ a.acked_by }}<div class="note">{{ a.acked_t|clock }}</div>{% elif a.on_screen %}<form method="post" action="/sensors/do/ack" class="inl">{% csrf_token %}<input type="hidden" name="alarm" value="{{ a.pk }}"><input type="hidden" name="tab" value="log"><button class="btn po">Acknowledge</button></form>{% else %}—{% endif %}</td>
+    <td class="n">{% if a.sent %}{{ a.sent }}×{% else %}—{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="8" class="empty">No sensor alarms in this time.</td></tr>{% endfor %}</tbody></table></div></div>
+  <p class="note">Every minute's values are in the <b>sensor_values</b> table (sensor, machine, t, value, vmin, vmax, raw, alarm) and alarms in <b>sensor_alarms</b>, for Grafana.</p>
+
+{% else %}{% include "sensors/_types.html" %}{% endif %}
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script><script src="{% static 'sensors/sensors.js' %}"></script>{% endblock %}

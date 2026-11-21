@@ -1,0 +1,31 @@
+<p class="muted">Every way a sensor can reach the suite, and everything an alarm rule can do. Any connection the server makes must be on the plant network.</p>
+<div class="sn-types">
+  {% for k in kinds %}<div class="card"><div class="row"><h2>{{ k.label }}</h2><span class="grow"></span><span class="pill {% if k.group == 'read' %}ok{% else %}info{% endif %}">{% if k.group == "read" %}SERVER READS IT{% else %}ARRIVES ON ITS OWN{% endif %}</span></div>
+    <p>{{ k.about }}</p>{% if k.fields %}<p class="note">Settings: {% for f in k.fields %}{{ f.label }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    {% if k.key == "push" %}<pre>POST {{ origin }}/api/sensors
+X-Feed-Key: (Admin › Connections)
+Content-Type: application/json
+
+{"barb_roll": 2.41, "sal_roll": 3.02}</pre>{% endif %}
+    <a class="btn ghost po" href="?edit=new&amp;kind={{ k.key }}">Add one</a></div>{% endfor %}
+</div>
+<div class="card"><h2>Through a gateway</h2><p class="note">Protocols the suite doesn't speak itself come in through Node-RED or the device's own converter, as <b>Sent to the server</b> or a <b>Web address</b>:</p>
+  <table class="st"><tbody>{% for n, how in gateway %}<tr><td class="nw"><b>{{ n }}</b></td><td>{{ how }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="sv-grid">
+  <div class="card"><h2>Turning the raw reading into real units</h2><ul class="sn-list">
+    <li><b>Two-point scaling</b>: raw low / high → value low / high (0–5 V = 0–500 mm). Ready-made raw ranges: {% for k, l, lo, hi, u in presets %}{{ l }}{% if not forloop.last %}, {% endif %}{% endfor %}.</li>
+    <li><b>Reversed scales</b> work too (0 V = 500 mm, 5 V = 0 mm, for a sensor that reads distance to a shrinking roll).</li>
+    <li><b>Keep inside the range</b> or let it run past the ends · <b>calibration offset</b> · <b>decimals</b> · <b>average of the last N readings</b>.</li>
+    <li><b>Fault limits</b> on the raw reading (below 3.6 mA = broken wire) mark the sensor faulty.</li>
+    <li><b>On / off sensors</b>: your own words for on and off, and active-low inputs.</li>
+    <li><b>Formulas</b> across sensors (average of two, a difference, a ratio).</li></ul></div>
+  <div class="card"><h2>Alarm conditions</h2><ul class="sn-list">{% for k, l in ops %}<li>{{ l }}</li>{% endfor %}</ul>
+    <p class="note">Each with: a delay before it alarms · a deadband and a delay before it clears · only while the machine runs / is stopped / has a shift / has none · severity (notice, warning, critical) · your own text.</p></div>
+  <div class="card"><h2>What an alarm can do</h2><ul class="sn-list">
+    <li>Show in the machine's kiosk Alarms with the badge, or on every machine's kiosk</li>
+    <li>Stay until someone acknowledges it (who and when is logged)</li>
+    <li>Email or text people from Admin › Alerts: everyone for that machine or the ones you pick, after N minutes, repeating every N minutes, and when it clears</li>
+    <li>Open a maintenance request with its type and priority</li>
+    <li>Go to the webhook as <code>sensor_alarm</code> / <code>sensor_alarm_clear</code></li>
+    <li>Kept in the alarm log, with the value when it started and the worst while it lasted; minute values in <code>sensor_values</code> for Grafana</li></ul></div>
+</div>

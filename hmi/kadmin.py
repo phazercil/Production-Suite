@@ -22,7 +22,7 @@ from . import engine, integrations
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
-        ("rules", "Rules"), ("alerts", "Alerts"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
+        ("rules", "Rules"), ("alerts", "Alerts"), ("sensors", "Sensors & alarms"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
                       "reorder or remove reasons here; the order here is the order on the screen. Maintenance and shift leads can also type a "
@@ -170,6 +170,10 @@ def tab_data(s, tab, request):
     if tab == "alerts":
         r = run(request, s, "alertInfo", {}) if s.can("alerts.edit") else {"ok": False}
         return {"I": r.get("data") if r.get("ok") else None}
+    if tab == "sensors":
+        from sensors.models import Sensor, SensorAlarm
+        return {"sensors": list(Sensor.objects.all()[:200]), "on": list(SensorAlarm.objects.filter(end__isnull=True)[:50]),
+                "canEdit": s.can("sensors.edit")}
     if tab == "connections":
         return connections_data(s, request)
     if tab == "connector":
