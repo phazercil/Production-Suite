@@ -793,7 +793,7 @@ def maintenance_page(s, show="open"):
     return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
             "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status__in=("Reviewed", "In progress", "Waiting on parts")).count(),
                        "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
-            "canWork": s.can("tickets.work"), "statuses": Ticket.STATUSES}
+            "canWork": s.can("tickets.work")}
 
 
 def status_page(s):

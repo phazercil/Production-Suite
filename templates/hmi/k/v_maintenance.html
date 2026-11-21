@@ -5,7 +5,7 @@
   <div class="panel stat"><span>Completed</span><b class="num">{{ P.counts.done }}</b><small>in the last 7 days</small></div>
 </div>
 <div class="row"><div class="seg">{% for f, label in "open:Pending,done:Completed,all:All (30 days)"|pairs %}<button class="{% if P.show == f %}on{% endif %}" hx-get="/kiosk/v/maintenance?show={{ f }}" hx-target="#view">{{ label }}</button>{% endfor %}</div>
-  <span class="grow"></span>{% if not P.canWork %}<span class="note">Adding repair notes and closing requests needs maintenance, a shift lead, or the Supervisor button.</span>{% endif %}</div>
+  <span class="grow"></span><span class="note">A request's status (started, waiting on parts, completed) is set on the Maintenance page{% if not lock %} (<a href="/maintenance/">open it</a>){% endif %}.{% if not P.canWork %} Adding repair notes needs maintenance, a shift lead, or the Supervisor button.{% endif %}</span></div>
 <div class="tickets">
 {% for x in P.tickets %}<article class="panel ticket {% if x.t.status == 'Closed' %}done{% elif x.t.priority == 'High' %}high{% endif %}">
   <div class="th"><div class="grow"><b>{{ x.t.machine }}</b> · {{ x.t.type|default:"Request" }}
@@ -21,7 +21,6 @@
     {% empty %}<div class="note">No repair notes yet.</div>{% endfor %}
     {% if x.t.status != "Closed" %}<form class="rnadd" hx-post="/kiosk/do/ticketNote" data-reset><input type="hidden" name="id" value="{{ x.t.id }}"><textarea name="text" rows="2" maxlength="4000" placeholder="What did you find or do? Parts used?" aria-label="Repair note for {{ x.t.machine }}" required></textarea><button class="btn">Add note</button></form>{% endif %}
   </div>
-  {% if x.t.status != "Closed" %}<div class="row" style="justify-content:flex-end;gap:8px;flex-wrap:wrap">{% if P.canWork %}<form class="row tstat" hx-post="/kiosk/do/ticketSet" style="gap:6px;margin-right:auto"><input type="hidden" name="id" value="{{ x.t.id }}"><label class="note" for="ts-{{ x.t.id }}">Status</label><select id="ts-{{ x.t.id }}" name="status">{% for v, l in P.statuses %}<option value="{{ v }}" {% if v == x.t.status %}selected{% endif %}>{{ l }}</option>{% endfor %}</select><button class="btn sm">Set</button></form>{% endif %}{% if x.t.status != "In progress" %}<button class="btn" hx-post="/kiosk/do/ticketStatus" hx-vals='{"id": "{{ x.t.id }}"}'>Start work</button>{% endif %}<button class="btn go" hx-get="/kiosk/m/ticketDone?id={{ x.t.id }}" hx-target="#modal" hx-swap="innerHTML">Mark complete</button></div>{% endif %}
 </article>
 {% empty %}<div class="panel note">{% if P.show == "open" %}No open maintenance requests.{% elif P.show == "done" %}Nothing completed in the last 30 days.{% else %}No requests in the last 30 days.{% endif %}</div>{% endfor %}
 </div>

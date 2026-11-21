@@ -1,8 +1,0 @@
-{% extends "hmi/k/m_base.html" %}
-{% block title %}Complete request · {{ t.machine }}{% endblock %}
-{% block form_attrs %}hx-post="/kiosk/do/ticketDone"{% endblock %}
-{% block body %}<input type="hidden" name="id" value="{{ t.id }}"><input type="hidden" name="close" value="1">
-  <p class="sub">{{ t.type }}{% if t.notes %} · {{ t.notes|truncatechars:120 }}{% endif %} · opened by {{ t.by }} {{ t.t|plan:S.t }}</p>
-  <label class="f" style="margin-top:8px">What was done? (optional)<textarea name="note" rows="4" maxlength="4000" placeholder="e.g. Replaced the score wheel bearing, ran 20 test pleats, all good." autofocus></textarea></label>
-{% endblock %}
-{% block foot %}<button type="button" class="btn ghost" data-close>Cancel</button><button class="btn go" type="submit">Mark complete</button>{% endblock %}

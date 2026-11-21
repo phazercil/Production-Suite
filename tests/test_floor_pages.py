@@ -1,9 +1,8 @@
 """Maintenance requests with repair notes, and the Downtime page header."""
-import json
-
 from django.core.cache import cache
 from django.test import Client, TestCase
 
+from hmi import engine
 from hmi.models import Ticket, TicketNote
 from plant.demo import seed_demo
 
@@ -37,20 +36,26 @@ class FloorPageTests(TestCase):
         self.login("3333")                              # maintenance
         self.do("ticketNote", id=t.id, text="Score wheel guide worn; shimmed it.")
         t.refresh_from_db()
-        self.assertEqual(t.status, "In progress")       # a note starts the work
-        r = self.c.get(f"/kiosk/m/ticketDone?id={t.id}")
-        self.assertContains(r, "What was done?")
-        self.do("ticketDone", id=t.id, close="1", note="Replaced the guide.")
-        t.refresh_from_db()
-        self.assertEqual((t.status, t.updated_by), ("Closed", "K. Patel"))
-        self.assertEqual(list(TicketNote.objects.values_list("kind", flat=True)), ["note", "closed"])
+        self.assertEqual(t.status, "Open")              # a note doesn't change the status
+        r = self.c.get("/kiosk/v/maintenance").content.decode()
+        self.assertIn("Score wheel guide worn", r)
+        for gone in ("Mark complete", "Start work", "ticketSet", "ticketStatus", "ticketDone"):
+            self.assertNotIn(gone, r)                   # status is only set on the Maintenance page
+        self.assertIn('href="/maintenance/"', r)
+        for action in ("ticketStatus", "ticketDone", "ticketSet"):
+            self.do(action, id=t.id, close="1", status="Closed")
+            t.refresh_from_db()
+            self.assertEqual(t.status, "Open", action)  # and can't be done from the kiosk at all
+        self.assertEqual(self.c.get(f"/kiosk/m/ticketDone?id={t.id}").status_code, 404)   # no completing dialog
+        # completed on the Maintenance page, the kiosk shows it as completed
+        from hmi.models import Person
+        r = engine.execute("ticketSet", {"id": t.id, "status": "Closed", "note": "Replaced the guide."}, engine.Ctx(user=Person.objects.get(pin="3333")))
+        self.assertTrue(r["ok"], r)
         r = self.c.get("/kiosk/v/maintenance")
         self.assertContains(r, "No open maintenance requests.")
         r = self.c.get("/kiosk/v/maintenance?show=done")
         self.assertContains(r, "Replaced the guide.")
         self.assertContains(r, "COMPLETED")
-        r = self.do("ticketStatus", id=t.id)
-        self.assertIn("already completed", json.dumps(dict(r.headers)) + r.content.decode())
 
     def test_downtime_header(self):
         r = self.c.get("/kiosk/v/downtime")

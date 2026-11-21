@@ -52,6 +52,9 @@ def ticket_set(p, ctx):
     kind = "closed" if st == "Closed" and old != "Closed" else "started" if st == "In progress" and old != st else "note"
     text = (f"{STATUS[old]} → {STATUS[st]}" if st != old else "") + (": " if st != old and note else "") + note
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind=kind, text=text)
+    if kind == "closed" and t.pm_id:   # planned maintenance done: its count starts again
+        from hmi import pm
+        pm.completed(t, ctx.now, ctx.by)
     event("maintenance_status", {"id": t.id, "status": t.status})
     if st != old:
         notify(f"Maintenance on {t.machine} · {t.type}: {STATUS[st]} ({ctx.by})" + (f": {note}" if note else ""), "maint",

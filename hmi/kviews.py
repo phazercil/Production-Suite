@@ -431,17 +431,6 @@ def m_qc_disapprove(request, s):
     return modal_response(request, "hmi/k/m_qc_disapprove.html", **ctx_for(s, q=q))
 
 
-@modal("ticketDone")
-def m_ticket_done(request, s):
-    if not s.can("tickets.work"):
-        return login_needed(request, s, {"perm": "tickets.work"})
-    from .models import Ticket
-    t = Ticket.objects.filter(pk=request.GET.get("id")).first()
-    if not t or t.status == "Closed":
-        return thin.refused("That request is already completed.")
-    return modal_response(request, "hmi/k/m_ticket_done.html", **ctx_for(s, t=t))
-
-
 @modal("rolls", login=True)
 def m_rolls(request, s, pre=None, photo=None, how=None, read=None):
     """Roll tags: scan or type a roll's tag, or take a picture of it and let the screen read it (hmi/rolltag.py)."""
@@ -939,10 +928,9 @@ def a_roll_read(request, s, p):
 ACTIONS["noteAdd"] = simple("noteAdd", toast=False, then=lambda request, s, r: m_notes(request, s))
 ACTIONS["overrideSet"] = simple("overrideSet", close=True)
 ACTIONS["overrideClear"] = simple("overrideClear", toast=False, close=True)
-ACTIONS["ticketStatus"] = simple("ticketStatus")
-ACTIONS["ticketDone"] = simple("ticketStatus", close=True)
 ACTIONS["ticketNote"] = simple("ticketNote")
-ACTIONS["ticketSet"] = simple("ticketSet")
+# a request's status (start, waiting on parts, complete) is only changed on the Maintenance page (/maintenance/),
+# never from the Operator Kiosk
 def _ack_then(request, s, r):
     """Acknowledged from the Alarms dialog: draw the dialog again without that notice (and refresh the badge)."""
     if request.POST.get("from") == "alarms":
