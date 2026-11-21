@@ -81,7 +81,7 @@ def do(request, name):
             except grab.CamError as e:
                 err = str(e)
         try:
-            fps = max(0.2, min(5.0, float(p.get("fps") or 1)))
+            fps = max(0.2, min(grab.MAX_FPS.get(kind, 5.0), float(p.get("fps") or 1)))
         except ValueError:
             fps = 1.0
         if err:

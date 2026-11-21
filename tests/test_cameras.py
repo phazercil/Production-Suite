@@ -135,6 +135,11 @@ class CameraTests(TestCase):
             c.kind, c.url = "rtsp", "rtsp://127.0.0.1:554/s"
             with self.assertRaisesMessage(grab.CamError, "needs ffmpeg"):
                 grab.fetch(c)
+        err = b"[vist#0:0/h264 @ 0x55] [dec:libopenh264 @ 0x55] Terminating thread with return code -1145393733"
+        with mock.patch("cameras.grab.ffmpeg", return_value="/usr/bin/ffmpeg"), \
+                mock.patch("subprocess.run", return_value=mock.Mock(returncode=1, stdout=b"", stderr=err)):
+            with self.assertRaisesMessage(grab.CamError, "RPM Fusion"):
+                grab.fetch(c)
 
     def test_setup_needs_the_permission(self):
         c = Client()
@@ -142,3 +147,41 @@ class CameraTests(TestCase):
         self.assertNotIn("Add a camera", c.get("/cameras/").content.decode())
         self.assertEqual(c.post("/cameras/do/save", {"name": "x"}).status_code, 200)    # the login page, nothing saved
         self.assertFalse(Camera.objects.exists())
+
+    # RTSP and MJPEG: one reader per camera while watched, the newest picture shared, let go when nobody watches
+    def test_mjpeg_reader_keeps_the_newest_picture(self):
+        self.save(kind="mjpeg", url=self.base + "/mjpeg", fps="10")
+        cam = Camera.objects.get()
+        self.assertEqual(grab.every(cam), 0.1)
+        f = grab.frame(cam)
+        self.assertTrue(f["img"].startswith(b"\xff\xd8"), f["err"])
+        grab.forget(cam.pk)
+
+    def test_rtsp_reader_reads_ffmpegs_pictures_and_lets_go(self):
+        import os
+        import stat
+        import sys
+        import tempfile
+        d = tempfile.mkdtemp()
+        fake = os.path.join(d, "ffmpeg")
+        frame_hex = jpeg().hex()
+        with open(fake, "w") as f:
+            f.write(f"#!{sys.executable}\nimport sys, time\nargs = ' '.join(sys.argv)\n"
+                    f"assert 'transpose=1' in args and 'fps=10' in args and 'image2pipe' in args, args\n"
+                    f"j = bytes.fromhex('{frame_hex}')\nfor i in range(400):\n    sys.stdout.buffer.write(j); sys.stdout.buffer.flush(); time.sleep(0.05)\n")
+        os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+        self.save(kind="rtsp", url="rtsp://127.0.0.1:554/live/0", fps="25", rotate="90", user="", password="")
+        cam = Camera.objects.get()
+        self.assertEqual(cam.fps, 10)                                  # RTSP goes up to 10 a second
+        with mock.patch("cameras.grab.ffmpeg", return_value=fake), mock.patch.object(grab, "IDLE", 2):
+            f = grab.frame(cam)
+            self.assertTrue(f["img"] and f["img"].startswith(b"\xff\xd8"), f["err"])
+            r = grab._readers[cam.pk]
+            t1 = r.t
+            import time
+            time.sleep(0.3)
+            self.assertGreater(grab.frame(cam)["t"], t1)               # new pictures keep coming
+            self.assertIs(grab._readers[cam.pk], r)                    # the same reader for every screen
+            time.sleep(3)                                              # nobody watching: it lets go
+            self.assertFalse(r.is_alive())
+            self.assertIsNotNone(r.proc is None or r.proc.poll())

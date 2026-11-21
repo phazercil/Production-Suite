@@ -1,3 +1,9 @@
+## What's new in 1.9.7
+
+- **Cameras up to 10 pictures a second:** RTSP and MJPEG cameras now stay connected while a screen watches. The server keeps one connection per camera, however many screens watch, holds only the newest picture, and lets go 30 seconds after the last screen stops. Before, each RTSP picture started ffmpeg again, so it was held to 1 a second. Picture (JPEG) addresses go up to 5 a second (each one is a request to the camera). **Test** still takes a single picture.
+- **Cameras (RTSP):** when the server's ffmpeg can't decode a camera's H.264 (Fedora's own ffmpeg-free decodes with OpenH264, which only reads the simplest H.264), the camera says so in plain words with the fix: install the full ffmpeg from RPM Fusion, set the camera's stream to H.264 Baseline, or use its picture (JPEG) address. Before, it showed ffmpeg's raw error.
+- Admin › Cameras: on a phone, each camera's Test and Change buttons sit side by side under its machines.
+
 ## What's new in 1.9.6
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).
