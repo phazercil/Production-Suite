@@ -205,7 +205,8 @@ def view_data(s, page, request):
         from cameras.grab import every
         from cameras.models import Camera
         cams = list(Camera.objects.filter(enabled=True, machines__name=s.station).distinct()) if s.station else []
-        return {"line": s.station, "cams": [{"pk": c.pk, "name": c.name, "ms": round(every(c) * 1000)} for c in cams]}
+        return {"line": s.station, "cams": [{"pk": c.pk, "name": c.name, "ms": round(every(c) * 1000), "live": c.kind == "rtsp" and c.live}
+                                            for c in cams]}
     if page == "part-info":
         P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
         return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}

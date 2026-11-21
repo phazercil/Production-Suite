@@ -51,7 +51,10 @@ What it sets up
                                    (/etc/httpd/conf.d/production-suite.conf; allow list in production-suite-allow.inc)
   firewalld                        port 80 (and 443) open to the plant network only, when firewalld is running
   production-suite-updater         installs updates from Operator Kiosk > Admin > Updates (root, on request)
-  production-suite-network         keeps Apache and firewalld in step with Admin > Network (root, on request)
+  production-suite-network         keeps Apache and firewalld in step with Admin > Network (root, on request),
+                                   and passes live camera video (/video/ws) on to go2rtc for the plant network
+  go2rtc (live camera video)       run by the ticker while an RTSP camera is set to live video, on 127.0.0.1:8009
+                                   only (program and settings in /opt/production-suite/updates/go2rtc)
 SELinux stays enforcing.
 
 Screens open http://SERVERNAME/operator/ (no :8000 on Linux). Each machine's own screen is
@@ -86,3 +89,5 @@ If something goes wrong
   Apache:        /var/log/httpd/production-suite-error.log
   A "403" page:  the screen is outside the plant network (Admin > Network, or /etc/httpd/conf.d/production-suite-allow.inc)
   SELinux:       ausearch -m avc -ts recent
+  Live video:    Admin > Cameras shows its state; /opt/production-suite/updates/go2rtc/go2rtc.log, and
+                 /etc/httpd/conf.d/production-suite-video.inc (the Apache rules)

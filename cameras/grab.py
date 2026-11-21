@@ -4,8 +4,9 @@ second per camera, however many screens watch it, and none when nobody does.
 
   snapshot  a JPEG picture address (most IP cameras have one: Hikvision /ISAPI/Streaming/channels/101/picture,
             Axis /axis-cgi/jpg/image.cgi, Dahua /cgi-bin/snapshot.cgi, Reolink /cgi-bin/api.cgi?cmd=Snap…)
-  mjpeg     an MJPEG stream address: one picture is read from it each time
-  rtsp      an RTSP stream: one picture is taken with ffmpeg on the server (it must be installed, with H.264/H.265)
+  mjpeg     an MJPEG stream address: read continuously while a screen watches (up to 10 pictures a second)
+  rtsp      an RTSP stream: read continuously by ffmpeg on the server while a screen watches (up to 10 a second;
+            ffmpeg must be installed, able to decode the camera's H.264/H.265). Test takes one picture.
 Only addresses on the plant network are used (plant/netsafety.py), checked when saved and again on every fetch."""
 import io
 import shutil
@@ -46,6 +47,13 @@ def check_url(kind, url):
     except netsafety.NotPrivate as e:
         raise CamError(str(e))
     return url
+
+
+OPENH264 = ("The server's ffmpeg can't decode this camera's H.264 video: Fedora's own ffmpeg (ffmpeg-free) uses OpenH264, "
+            "which only reads the simplest H.264 and most cameras send Main or High. Install the full ffmpeg from RPM Fusion "
+            "(sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm, "
+            "then sudo dnf swap ffmpeg-free ffmpeg --allowerasing), or set the camera's stream to H.264 Baseline, "
+            "or use the camera's picture (JPEG) address.")
 
 
 def ffmpeg():
@@ -132,6 +140,8 @@ def _rtsp(url, user, pw):
             msg = msg.replace(quote(pw, safe=""), "•••") if pw else msg
         if "401" in msg or "Unauthorized" in msg:
             raise CamError("The camera refused the user name or password.")
+        if "openh264" in msg.lower() or "openh264" in (r.stderr or b"").decode("utf-8", "replace").lower():
+            raise CamError(OPENH264)
         if "ecoder" in msg:
             raise CamError(f"ffmpeg on the server can't decode this stream ({msg}). Install the full ffmpeg (RPM Fusion) or use the picture address.")
         raise CamError(f"ffmpeg couldn't read the stream: {msg}")
@@ -156,16 +166,153 @@ def fetch(cam):
     return _rotate(img, cam.rotate)
 
 
+MAX_FPS = {"snapshot": 5.0, "mjpeg": 10.0, "rtsp": 10.0}
+IDLE = 30          # seconds without a screen watching before a stream reader lets go of the camera
+
+
 def every(cam):
-    fps = max(0.2, min(5.0, float(cam.fps or 1)))
-    if cam.kind == "rtsp":
-        fps = min(fps, 1.0)   # each RTSP picture starts ffmpeg
+    fps = max(0.2, min(MAX_FPS.get(cam.kind, 5.0), float(cam.fps or 1)))
     return 1.0 / fps
 
 
+# ------------------------------------------------------------------ streams: one reader per camera, while watched
+class Reader(threading.Thread):
+    """Keeps one connection to an RTSP (through ffmpeg) or MJPEG camera while screens watch it, holding only the
+    newest picture. Every screen shares it; it lets go of the camera IDLE seconds after the last screen asked."""
+
+    def __init__(self, cam, sig):
+        super().__init__(daemon=True, name=f"camera-{cam.pk}")
+        self.cam, self.sig = cam, sig
+        self.img, self.t, self.err = None, 0.0, ""
+        self.seen = time.time()
+        self.stop = threading.Event()
+        self.proc = None
+
+    def run(self):
+        while not self.stop.is_set() and time.time() - self.seen < IDLE:
+            try:
+                self._rtsp() if self.cam.kind == "rtsp" else self._mjpeg()
+                if not self.stop.is_set() and time.time() - self.seen < IDLE:
+                    self.err = self.err or "The camera stopped sending pictures; connecting again."
+            except CamError as e:
+                self.err = str(e)
+            except Exception as e:  # noqa: BLE001 - keep the reader alive whatever the camera does
+                self.err = f"Camera stream error: {e}"
+            if self.stop.is_set() or time.time() - self.seen >= IDLE:
+                break             # nobody watching: let go now
+            self.stop.wait(5)     # then connect again
+        self.close()
+
+    def close(self):
+        self.stop.set()
+        p, self.proc = self.proc, None
+        if p and p.poll() is None:
+            p.kill()
+
+    def _frames(self, read):
+        """Split a stream of JPEGs into pictures, keeping the newest."""
+        buf = b""
+        while not self.stop.is_set() and time.time() - self.seen < IDLE:
+            chunk = read(64 * 1024)
+            if not chunk:
+                return
+            buf += chunk
+            while True:
+                a = buf.find(SOI)
+                b = buf.find(EOI, a + 2) if a >= 0 else -1
+                if b < 0:
+                    buf = buf[a:] if a >= 0 else b""
+                    if len(buf) > MAX_BYTES:
+                        buf = b""
+                    break
+                self.img, self.t, self.err = buf[a:b + 2], time.time(), ""
+                buf = buf[b + 2:]
+
+    def _rtsp(self):
+        exe = ffmpeg()
+        if not exe:
+            raise CamError("RTSP needs ffmpeg on the server (on Fedora: sudo dnf install ffmpeg). "
+                           "Or use the camera's picture (JPEG) or MJPEG address.")
+        url = check_url(self.cam.kind, self.cam.url)
+        user, pw = credentials(self.cam)
+        p = urlsplit(url)
+        if user or pw:
+            host = p.hostname + (f":{p.port}" if p.port else "")
+            url = urlunsplit((p.scheme, f"{quote(user, safe='')}:{quote(pw, safe='')}@{host}", p.path, p.query, ""))
+        vf = [f"fps={1 / every(self.cam):g}"] + {90: ["transpose=1"], 180: ["hflip", "vflip"], 270: ["transpose=2"]}.get(self.cam.rotate, [])
+        cmd = [exe, "-nostdin", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", url, "-an",
+               "-vf", ",".join(vf), "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
+        import tempfile
+        with tempfile.TemporaryFile() as errf:
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL)
+            try:
+                self._frames(self.proc.stdout.read1 if hasattr(self.proc.stdout, "read1") else self.proc.stdout.read)
+            finally:
+                if self.proc and self.proc.poll() is None:
+                    self.proc.kill()
+                if self.proc:
+                    self.proc.wait(5)
+                errf.seek(0)
+                err = errf.read().decode("utf-8", "replace")
+            if self.stop.is_set() or time.time() - self.seen >= IDLE:
+                return
+            if "openh264" in err.lower():
+                raise CamError(OPENH264)
+            lines = [x for x in err.strip().splitlines() if x.strip()]
+            msg = lines[-1][:200] if lines else ""
+            if pw:
+                msg = msg.replace(quote(pw, safe=""), "•••")
+            if "401" in msg or "Unauthorized" in msg:
+                raise CamError("The camera refused the user name or password.")
+            if msg:
+                raise CamError(f"ffmpeg couldn't read the stream: {msg}")
+
+    def _mjpeg(self):
+        url = check_url(self.cam.kind, self.cam.url)
+        user, pw = credentials(self.cam)
+        try:
+            r = _opener(url, user, pw).open(url, timeout=TIMEOUT)
+        except Exception as e:  # noqa: BLE001
+            raise _http_error(e)
+        with r:
+            self._frames(r.read1 if hasattr(r, "read1") else r.read)
+
+
+_readers = {}
+
+
+def _sig(cam):
+    return (cam.kind, cam.url, cam.fps, cam.rotate, cam.has_login, str(cam.updated))
+
+
+def _reader(cam):
+    with _guard:
+        r = _readers.get(cam.pk)
+        if r and (r.sig != _sig(cam) or not r.is_alive()):
+            r.close()
+            r = None
+        if r is None:
+            r = _readers[cam.pk] = Reader(cam, _sig(cam))
+            r.start()
+        r.seen = time.time()
+        return r
+
+
 def frame(cam, now=None):
-    """The camera's latest picture for a screen: {"img", "t", "err"}. Fetched at most once per 1/fps seconds per
-    camera; screens asking while a fetch is under way get the last picture."""
+    """The camera's latest picture for a screen: {"img", "t", "err"}. Streams (RTSP, MJPEG) are read by one reader per
+    camera while it is watched; picture addresses are fetched at most once per 1/fps seconds per camera. Either way
+    every screen shares the same picture."""
+    if cam.kind in ("rtsp", "mjpeg"):
+        r = _reader(cam)
+        if r.img is None and not r.err:
+            for _ in range(60):          # the first picture: wait up to 6 s for it
+                time.sleep(0.1)
+                if r.img is not None or r.err:
+                    break
+        img = r.img
+        if img is not None and cam.kind == "mjpeg" and cam.rotate:
+            img = _rotate(img, cam.rotate)
+        return {"img": img, "t": r.t, "err": r.err}
     now = time.time() if now is None else now
     with _guard:
         c = _cache.setdefault(cam.pk, {"t": 0, "img": None, "err": "", "tried": 0})
@@ -189,3 +336,6 @@ def frame(cam, now=None):
 def forget(cam_id):
     with _guard:
         _cache.pop(cam_id, None)
+        r = _readers.pop(cam_id, None)
+    if r:
+        r.close()
