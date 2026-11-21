@@ -937,7 +937,14 @@ ACTIONS["ticketStatus"] = simple("ticketStatus")
 ACTIONS["ticketDone"] = simple("ticketStatus", close=True)
 ACTIONS["ticketNote"] = simple("ticketNote")
 ACTIONS["ticketSet"] = simple("ticketSet")
-ACTIONS["ackNotices"] = simple("ackNotices", toast=False)
+def _ack_then(request, s, r):
+    """Acknowledged from the Alarms dialog: draw the dialog again without that notice (and refresh the badge)."""
+    if request.POST.get("from") == "alarms":
+        return thin.trigger(m_alarms(request, s), changed=True)
+    return thin.done()
+
+
+ACTIONS["ackNotices"] = simple("ackNotices", toast=False, then=_ack_then)
 ACTIONS["settingSet"] = simple("settingSet", toast=False)
 ACTIONS["userSet"] = simple("userSet", toast=False)
 ACTIONS["paycomImport"] = simple("paycomImport")
