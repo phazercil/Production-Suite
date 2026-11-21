@@ -47,6 +47,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("lists.edit", "Day-to-day lists", "Downtime reasons, checklists, maintenance lists, shifts & breaks, rules.", LEAD),
         ("machines.edit", "Machines", "Add, rename and remove machines; their data sources.", ADMIN),
         ("connections.edit", "Connections", "Databases, accounts, Grafana, S2K, Paycom, incoming data, changeover data queries.", ADMIN),
+        ("sensors.edit", "Sensors & custom alarms", "Admin › Sensors & alarms: add sensors (Modbus, web address, database, InfluxDB, pushed…), their scaling and their alarm rules.", LEAD),
         ("alerts.edit", "Alerts", "Who is told when a line is down; mail server and Twilio.", ADMIN),
         ("network.edit", "Network", "The plant network and the firewall.", ADMIN),
         ("updates.install", "Updates", "Install updates, go back, updates from GitHub.", ADMIN),
@@ -65,7 +66,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
 # Admin tabs and the permission that changes them
 TAB_PERM = {"machines": "machines.edit", "connections": "connections.edit", "connector": "connections.edit", "codata": "connections.edit", "shifts": "lists.edit",
             "reasons": "lists.edit", "checklists": "lists.edit", "maintenance": "lists.edit",
-            "rules": "lists.edit", "alerts": "alerts.edit", "network": "network.edit", "updates": "updates.install",
+            "rules": "lists.edit", "alerts": "alerts.edit", "sensors": "sensors.edit", "network": "network.edit", "updates": "updates.install",
             "backup": "backup.manage", "permissions": "permissions.manage"}
 LOCKED = {("permissions.manage", "admin")}   # (permission, role) that can't be turned off
 

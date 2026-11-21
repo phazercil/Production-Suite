@@ -1,0 +1,68 @@
+{% load suite %}<form method="post" action="/sensors/" class="card sn-form" id="sn-form" autocomplete="off" data-dtype="{{ edit.dtype }}">{% csrf_token %}
+  <input type="hidden" name="id" value="{{ edit.id }}">
+  <h2>{% if edit.id %}Change {{ edit.label }}{% else %}Add a sensor{% endif %}</h2>
+
+  <h3>1 · What it is</h3>
+  <div class="sn-grid">
+    <label class="fld"><span>Name people see</span><input name="label" maxlength="80" required value="{{ edit.label }}" placeholder="Media roll diameter"></label>
+    <label class="fld"><span>Short id <small>(pushes, formulas, Grafana)</small></span><input name="name" maxlength="40" value="{{ edit.name }}" placeholder="barb_roll" pattern="[A-Za-z][A-Za-z0-9_]*" spellcheck="false"></label>
+    <label class="fld"><span>Machine</span><select name="machine"><option value="">Plant-wide (no machine)</option>{% for m in machines %}<option {% if m == edit.machine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <label class="fld"><span>It reads</span><select name="dtype" id="sn-dtype">{% for k, l in types %}<option value="{{ k }}" {% if k == edit.dtype %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  </div>
+
+  <h3>2 · How it's connected</h3>
+  <div class="sn-grid">
+    <label class="fld wide"><span>Connection</span><select name="kind" id="sn-kind">
+      <optgroup label="The server reads it">{% for k in kinds %}{% if k.group == "read" %}<option value="{{ k.key }}" {% if k.key == edit.kind %}selected{% endif %}>{{ k.label }}</option>{% endif %}{% endfor %}</optgroup>
+      <optgroup label="It arrives on its own">{% for k in kinds %}{% if k.group == "arrives" %}<option value="{{ k.key }}" {% if k.key == edit.kind %}selected{% endif %}>{{ k.label }}</option>{% endif %}{% endfor %}</optgroup></select></label>
+    <label class="fld" data-group="read"><span>Read every (seconds)</span><input name="every" type="number" min="1" max="3600" value="{{ edit.every }}"></label>
+  </div>
+  {% for k in kinds %}<fieldset class="sn-kind" data-kind="{{ k.key }}" {% if k.key != edit.kind %}hidden{% endif %}>
+    <p class="note">{{ k.about }}</p>
+    {% with c=edit.cfg|get:k.key %}<div class="sn-grid">{% for f in k.fields %}
+      <label class="fld{% if f.type == 'textarea' or f.key == 'url' or f.key == 'formula' %} wide{% endif %}"><span>{{ f.label }}</span>
+        {% if f.type == "select" %}<select name="c_{{ k.key }}_{{ f.key }}">{% for v, l in f.opts %}<option value="{{ v }}" {% if v == c|get:f.key %}selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+        {% elif f.type == "textarea" %}<textarea name="c_{{ k.key }}_{{ f.key }}" rows="4" placeholder="{{ f.ph }}" spellcheck="false">{{ c|get:f.key }}</textarea>
+        {% else %}<input name="c_{{ k.key }}_{{ f.key }}" type="{% if f.type == 'number' %}number{% else %}text{% endif %}" value="{{ c|get:f.key }}" placeholder="{{ f.ph }}" spellcheck="false"{% if f.type == 'number' %} step="any"{% endif %}>{% endif %}
+        {% if f.help %}<small>{{ f.help }}</small>{% endif %}</label>{% endfor %}</div>{% endwith %}
+    {% if k.key == "push" %}<div class="sn-code"><p class="note">Send it to <b>{{ origin }}/api/sensors</b> (POST, JSON) with the header <b>X-Feed-Key</b>{% if not feedKey %} — <span class="bad">no feed key is set yet: set one in Admin › Connections</span>{% endif %}:</p>
+      <pre>{"{{ edit.name|default:'barb_roll' }}": 2.41}</pre><p class="note">Several at once: <code>{"barb_roll": 2.41, "sal_roll": 3.02}</code>, or <code>{"sensor": "barb_roll", "value": 2.41}</code>.</p></div>{% endif %}
+    {% if k.key == "manual" %}<p class="note">After saving, type each reading in the sensor's row.</p>{% endif %}
+  </fieldset>{% endfor %}
+
+  <h3>3 · <span data-show="number">Scaling: raw reading → real units</span><span data-show="onoff">On / off</span></h3>
+  <div data-show="number">
+    <label class="chk"><input type="checkbox" name="scale" value="1" id="sn-scale" {% if edit.scale %}checked{% endif %}> Convert the raw reading (e.g. 0–5 V from the sensor = 0–500 mm)</label>
+    <div id="sn-scaling" {% if not edit.scale %}hidden{% endif %}>
+      <div class="sn-presets"><span class="note">Raw range:</span>{% for k, l, lo, hi, u in presets %}<button type="button" class="btn ghost po" data-preset="{{ lo }},{{ hi }},{{ u }}">{{ l }}</button>{% endfor %}</div>
+      <div class="sn-scale">
+        <span class="note">Raw</span><input name="raw_lo" type="number" step="any" value="{{ edit.raw_lo }}" aria-label="Raw low point" id="sn-rlo"><span>to</span><input name="raw_hi" type="number" step="any" value="{{ edit.raw_hi }}" aria-label="Raw high point" id="sn-rhi"><input name="raw_unit" maxlength="12" value="{{ edit.raw_unit }}" placeholder="V" aria-label="Raw unit" class="u" id="sn-ru">
+        <span class="arrow">→</span>
+        <span class="note">is</span><input name="eng_lo" type="number" step="any" value="{{ edit.eng_lo }}" aria-label="Scaled value at the low point" id="sn-elo"><span>to</span><input name="eng_hi" type="number" step="any" value="{{ edit.eng_hi }}" aria-label="Scaled value at the high point" id="sn-ehi"><input name="unit" maxlength="12" value="{{ edit.unit }}" placeholder="mm" aria-label="Unit" class="u" id="sn-u">
+      </div>
+      <p class="note sn-try"><label>Try a raw reading <input type="number" step="any" id="sn-try" placeholder="2.5"></label> <b id="sn-tryout"></b></p>
+      <label class="chk"><input type="checkbox" name="clamp" value="1" {% if edit.clamp %}checked{% endif %}> Keep the value inside the range (a reading past the ends shows the end value)</label>
+    </div>
+    <div class="sn-grid">
+      <label class="fld" id="sn-unit2"><span>Unit <small>(no scaling)</small></span><input name="unit" maxlength="12" value="{{ edit.unit }}" placeholder="mm" data-unit2></label>
+      <label class="fld"><span>Calibration offset <small>(added after scaling)</small></span><input name="offset" type="number" step="any" value="{{ edit.offset }}"></label>
+      <label class="fld"><span>Decimals shown</span><input name="decimals" type="number" min="0" max="6" value="{{ edit.decimals }}"></label>
+      <label class="fld"><span>Average of the last N readings</span><input name="smooth" type="number" min="1" max="60" value="{{ edit.smooth }}"><small>Smooths a noisy sensor; 1 = off</small></label>
+      <label class="fld"><span>Faulty if raw is below</span><input name="fault_lo" type="number" step="any" value="{{ edit.fault_lo }}" placeholder="e.g. 3.6 (4–20 mA broken wire)"></label>
+      <label class="fld"><span>Faulty if raw is above</span><input name="fault_hi" type="number" step="any" value="{{ edit.fault_hi }}" placeholder="e.g. 20.5"></label>
+    </div>
+  </div>
+  <div class="sn-grid" data-show="onoff">
+    <label class="fld"><span>Shown when on</span><input name="on_label" maxlength="20" value="{{ edit.on_label }}" placeholder="Roll present"></label>
+    <label class="fld"><span>Shown when off</span><input name="off_label" maxlength="20" value="{{ edit.off_label }}" placeholder="No roll"></label>
+    <label class="chk"><input type="checkbox" name="invert" value="1" {% if edit.invert %}checked{% endif %}> Low input = on (active-low)</label>
+  </div>
+
+  <h3>4 · Where it shows</h3>
+  <label class="chk"><input type="checkbox" name="show_kiosk" value="1" {% if edit.show_kiosk %}checked{% endif %}> Show the live value on the machine's Operator Kiosk (Status page)</label>
+  <label class="chk"><input type="checkbox" name="enabled" value="1" {% if edit.enabled %}checked{% endif %}> Turned on</label>
+
+  {% if test %}<div class="flash {% if test.ok %}ok{% else %}bad{% endif %}" role="status">{% if test.ok %}Read now: raw <b>{{ test.raw|floatformat:"-4" }}</b> → <b>{{ test.text }}</b>{% if test.fault %} · <span class="bad">outside the fault limits</span>{% endif %}. Nothing was saved.{% else %}Test: {{ test.error }}{% endif %}</div>{% endif %}
+  <div class="row"><button class="btn go" name="action" value="save">Save sensor</button><button class="btn" name="action" value="test" formnovalidate>Test the connection</button><a class="btn ghost" href="/sensors/">Cancel</a>
+    <span class="note">Alarm rules are added after saving.</span></div>
+</form>

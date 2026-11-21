@@ -945,6 +945,17 @@ def _ack_then(request, s, r):
 
 
 ACTIONS["ackNotices"] = simple("ackNotices", toast=False, then=_ack_then)
+
+
+@action("ackSensor")
+def a_ack_sensor(request, s, p):
+    """A sensor alarm acknowledged in the Alarms dialog: the dialog comes back without it."""
+    from sensors.engine import ack
+    who = s.actor.name if s.actor else f"{s.station or 'A'} screen (not logged in)"
+    r = ack(p.get("id"), who)
+    if not r["ok"]:
+        return err_in_modal(r["error"])
+    return thin.trigger(m_alarms(request, s), changed=True)
 ACTIONS["settingSet"] = simple("settingSet", toast=False)
 ACTIONS["userSet"] = simple("userSet", toast=False)
 ACTIONS["paycomImport"] = simple("paycomImport")

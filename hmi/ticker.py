@@ -105,6 +105,18 @@ def sample_for(m, ls, t):
     return s, feed
 
 
+def _sensors_from_feed(m, s, minute):
+    """Sensors that are extra fields of the machine's own reading (Admin › Sensors & alarms)."""
+    try:
+        from sensors.engine import from_feed
+        with transaction.atomic():
+            from_feed(m, s, minute)
+    except Exception as e:  # noqa: BLE001 - a sensor never stops the minute from counting
+        log.warning("sensors for %s: %s", m.name, e)
+    if s is not None:
+        s.pop("sensors", None)
+
+
 def _tick_one_minute(m, t):
     """Process the next due minute for one machine in its own transaction. Returns False when it is up to date."""
     with transaction.atomic():
@@ -128,6 +140,7 @@ def _tick_one_minute(m, t):
                 feed["error"] = machinedata_text(s.get("error"), s.get("errorText"))
         ls.feed = feed
         ls.save(update_fields=["feed", "demo_idx"])
+        _sensors_from_feed(m, s, minute)
         engine.tick(m, s, minute)
         LineState.objects.filter(pk=ls.pk).update(next_tick=minute + timedelta(minutes=1))
         return True
@@ -270,6 +283,12 @@ def timed_pulls(state, t):
                 influx.push(t)
         except Exception as e:  # InfluxDB being down never stops counting; it catches up later
             log.warning("InfluxDB copy failed: %s", e)
+    # Sensors & custom alarms (Admin > Sensors & alarms): read what's due, check the rules, every pass
+    try:
+        from sensors import engine as sensors
+        sensors.tick(t)
+    except Exception:
+        log.exception("sensors check failed")
     # Downtime alerts by email / text (Admin > Alerts), checked every 30 seconds
     if not state.get("alerts") or (t - state["alerts"]).total_seconds() >= 30:
         state["alerts"] = t

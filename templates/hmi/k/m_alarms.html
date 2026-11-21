@@ -2,6 +2,7 @@
 {% block title %}Alarms{% endblock %}
 {% block body %}{% if alarms %}<div style="display:flex;flex-direction:column;gap:8px">{% for x in alarms %}
   <div class="panel row" style="border-color:var(--{{ x.sev }})"><span class="grow">{{ x.text }}</span>
+    {% if x.sensorAlarm %}<button type="button" class="btn ghost" hx-post="/kiosk/do/ackSensor" hx-vals='{"id": "{{ x.sensorAlarm }}"}' hx-target="#modal" hx-swap="innerHTML">Acknowledge</button>{% endif %}
     {% if x.notice %}<button type="button" class="btn ghost" hx-post="/kiosk/do/ackNotices" hx-vals='{"id": "{{ x.notice }}", "from": "alarms"}' hx-target="#modal" hx-swap="innerHTML">Acknowledge</button>{% endif %}
     {% if x.modal %}<button type="button" class="btn" hx-get="/kiosk/m/{{ x.modal }}" hx-target="#modal" hx-swap="innerHTML">Open</button>
     {% else %}<a class="btn" href="{% if x.href %}{{ x.href }}{% else %}{{ base }}/{{ x.go }}/{% endif %}">Open</a>{% endif %}</div>{% endfor %}</div>

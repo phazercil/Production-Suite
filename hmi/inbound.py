@@ -206,6 +206,12 @@ def ingest(src, payload):
         if items and isinstance(items[-1], dict):
             src.sample = {k: v for k, v in list(items[-1].items())[:60]}
         src.save(update_fields=["received", "last_at", "last_ok", "last_msg", "sample"])
+    try:   # sensors that read a field of this source (Admin › Sensors & alarms)
+        from sensors.engine import from_source
+        from_source(src, items)
+    except Exception:  # noqa: BLE001 - never lose the stored records over a sensor
+        import logging
+        logging.getLogger("plant").exception("sensors from %s", src.name)
     return {"stored": stored, "skipped": len(items) - stored, "errors": errors}
 
 

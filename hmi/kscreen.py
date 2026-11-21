@@ -262,6 +262,15 @@ class Screen:
         for tk in self.open_tickets():
             if tk.priority == "High":
                 a.append({"sev": "bad", "text": f"Maintenance: {tk.machine} — {tk.type}", "go": "maintenance"})
+        try:   # custom alarms from sensors (Admin › Sensors & alarms)
+            from sensors.engine import kiosk_alarms
+            for x in kiosk_alarms(self.station):
+                a.append({"sev": x.severity if x.severity in ("bad", "warn") else "warn", "text": x.text + ("" if x.end is None else " (cleared)"),
+                          "sensorAlarm": x.pk, "go": "status"})
+        except Exception:  # noqa: BLE001 - the kiosk always draws
+            pass
+        order = {"bad": 0, "warn": 1}
+        a.sort(key=lambda x: order.get(x["sev"], 2))
         return a
 
     # ------------------------------------------------------------ shell
@@ -802,6 +811,15 @@ def status_page(s):
                       "errs": s.current_errors(m.name) if (m.error_src or {}).get("type") else None,
                       "errLog": (ls.err_state or {}) if ls else {}, "uptimeSrc": (m.uptime_src or {}).get("type"),
                       "feedLabel": dict(FEED_LABELS).get(m.feed_type, "—")})
+    try:   # live values of the machines' own sensors (Admin › Sensors & alarms › Show on the kiosk)
+        from sensors.models import Sensor
+        sens = {}
+        for x in Sensor.objects.filter(enabled=True, show_kiosk=True).exclude(machine=""):
+            sens.setdefault(x.machine, []).append(x)
+        for c in cards:
+            c["sensors"] = sens.get(c["m"].name, [])
+    except Exception:  # noqa: BLE001 - the kiosk always draws
+        pass
     panels = [(t, s.grafana_src(p)) for t, p in (("Pleater speed", g.get("ppm")), ("Uptime", g.get("uptime")), ("Count", g.get("count"))) if p] if gon else []
     from .snapshot import server_info
     return {"cards": cards, "grafana": g if gon else None, "panels": panels, "dash": f"{g.get('url', '').rstrip('/')}/d/{g.get('uid', '')}" if gon else "",

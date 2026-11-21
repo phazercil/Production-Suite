@@ -12,6 +12,7 @@ One Django app for the pleating floor, with its modes behind one top bar:
 | **Scheduler** | `/scheduler/` | Planners: drag MO stages onto lines, import S2K exports, edit lines and shifts |
 | **Data Kiosk** | `/data/` | Wall TV: live numbers per line plus your Grafana panels |
 | **Reports** | `/reports/` | Line summaries; click to drill plant → line → shift → MO and year → month → day → hour |
+| **Sensors & alarms** | `/sensors/` | Admin: your own sensors per machine, scaled, with custom alarm rules |
 | **Labor Budget** | `/labor/` | Shift leads: crews, wages and the work calendar the Scheduler plans with |
 | **Quality** | `/quality/` | Quality report, traceability (rolls and lots → MOs), QC checks, parts & specs, tolerances, 3D viewer |
 | **Maintenance** | `/maintenance/` | Maintenance team: pending and completed requests from the lines, PM schedule, PM history, inventory, parts by machine |
@@ -252,6 +253,41 @@ Map the fields once (time, line, part, MO, length, width, pleat height, side ban
 are converted). Without a pass/fail field, results are judged against the part's drawing specs. QC results
 show on the kiosk's QC Log and in Reports, and land in `hmi_qc_auto` for Grafana; other readings in `hmi_inbound`.
 
+### Sensors & custom alarms
+
+`/sensors/` (Admin › Sensors & alarms; permission *Sensors & custom alarms*, shift leads by default). Add your own
+sensors to a machine or the whole plant, scale them to real units and write alarm rules for them.
+
+**Connection types** (the *Connection types* tab lists them all):
+
+| Type | How the value gets here |
+|---|---|
+| Modbus TCP | The server reads a holding / input register, coil or discrete input from a PLC, remote I/O block or IO-Link master (16/32-bit, float, word order, one bit, 0- or 40001-style addresses) |
+| Web address (JSON) | The server reads a field from a JSON answer every few seconds |
+| Database table | Newest row of a table in the machine data or asset database, with an optional filter column |
+| InfluxDB query | Newest value from a Flux or InfluxQL query |
+| Extra field of the machine's own reading | Another field of the reading the pleater already sends (each minute) |
+| Sent to the server | `POST /api/sensors` with `X-Feed-Key`: `{"barb_roll": 2.41}` or `{"sensor": "barb_roll", "value": 2.41}` (or a list) |
+| Incoming data source | A field from an Admin › Connections › Incoming data source |
+| A value the suite already has | Speed, running, filters made, MO left, uptime, downtime, minutes stopped, minutes since QC, changeover |
+| Calculated | A formula over other sensors (`(barb_l + barb_r) / 2`) |
+| Typed in | Entered by hand on the Sensors page |
+
+MQTT, OPC UA, EtherNet/IP, S7 and serial Modbus come in through Node-RED or a gateway as *Sent to the server* or *Web address*.
+
+**Scaling:** two points (0–5 V = 0–500 mm; reversed works), presets (0–10 V, 4–20 mA, Siemens 0–27648, 16/12/10-bit…),
+keep inside the range, calibration offset, decimals, average of the last N readings, raw fault limits (below 3.6 mA = faulty),
+and on / off sensors with their own words and active-low inputs.
+
+**Alarm rules** (any number per sensor): falls below, at or below, rises above, at or above, equals, is not, between,
+outside, turns on / off, rises / falls faster than X per minute, doesn't change for N min, no new reading for N min,
+faulty. Each has a delay, a deadband and clear delay, *only while running / stopped / a shift is on / no shift*,
+severity, and its own text with `{value} {limit} {limit2} {unit} {raw} {sensor} {machine} {name}`.
+An alarm can show in the machine's kiosk Alarms (or every kiosk), stay until acknowledged, email / text Admin › Alerts
+people (after N min, repeating, and when it clears), open a maintenance request, and go to the webhook
+(`sensor_alarm`, `sensor_alarm_clear`). Live values can show on the kiosk's Status page. Grafana tables: `sensor_values`
+(per sensor per minute: value, vmin, vmax, raw, alarm) and `sensor_alarms`.
+
 ### Packaging Kiosk: pallet tags
 
 `/packaging/` (Admin › Permissions › Open Packaging Kiosk). Log in with a PIN, then fill in the part number (or pick the
@@ -476,6 +512,7 @@ datakiosk/   wall screen
 reports/     Reports page: summaries with drill up/down, Grafana reader
 labor/       Labor Budget (built from labor/source with tools/build_labor.py)
 packkiosk/   Packaging Kiosk: pallet tags (the packaging/ folder is the Windows installer)
+sensors/     Sensors & custom alarms: connection types (kinds.py), scaling and alarm rules (engine.py)
 templates/, static/   the screens and the shared shell
 packaging/   Windows installer, Linux installer (packaging/linux), code signing, build, CI checks
 ```

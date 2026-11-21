@@ -14,6 +14,7 @@ from quality import views as quality
 from supervisor import views as supervisor
 from maintenance import views as maintenance
 from packkiosk import views as packkiosk
+from sensors import views as sensors
 from suite import sections, thin
 
 urlpatterns = [
@@ -94,6 +95,10 @@ urlpatterns = [
     path("supervisor/coend/<int:pk>/", supervisor.co_force_end, name="supervisor-coend"),
     path("maintenance/", maintenance.page, name="maintenance-section"),
     path("maintenance/do/<str:name>", maintenance.do, name="maintenance-do"),
+    # Sensors & custom alarms
+    path("sensors/", sensors.page, name="sensors"),
+    path("sensors/do/<str:name>", sensors.do, name="sensors-do"),
+    path("api/sensors", sensors.api_push),
     # Packaging Kiosk: pallet tags
     path("packaging/", packkiosk.page, name="packaging-section"),
     path("packaging/suggest", packkiosk.suggest),
