@@ -128,6 +128,21 @@ class NotificationBarTests(TestCase):
         self.assertIn("Barbara only thing", cl.get("/station/Barbara/").content.decode())
         self.assertIn("For everyone", self.bar("Salvatore"))
 
+    def test_acknowledge_in_the_alarms_dialog_redraws_it_without_that_notice(self):
+        engine.notify("MO 314641-012 (MG4078) added as #1", "schedule", lines=["Barbara"], go="schedule")
+        engine.notify("MO 314641-012 (MG4078) taken off this line", "schedule", lines=["Barbara"], go="schedule")
+        n = Notice.objects.get(text__endswith="added as #1")
+        cl = Client(HTTP_HX_REQUEST="true")
+        cl.get("/station/Barbara/")
+        r = cl.get("/kiosk/m/alarms").content.decode()
+        self.assertIn("added as #1", r)
+        self.assertIn('hx-target="#modal"', r)
+        r = cl.post("/kiosk/do/ackNotices", {"id": n.id, "from": "alarms"})
+        html = r.content.decode()
+        self.assertNotIn("added as #1", html)                 # the dialog comes back without it, right away
+        self.assertIn("taken off this line", html)
+        self.assertIn("suite:changed-now", r["HX-Trigger"])  # and the badge and banner refresh
+
     def test_events_notify_the_right_lines(self):
         from hmi.models import QCCheck, Ticket
         ctx = engine.Ctx(user=None)
