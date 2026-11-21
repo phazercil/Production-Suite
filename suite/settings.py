@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "supervisor",
     "quality",
     "maintenance",
+    "packkiosk",   # the Packaging Kiosk (pallet tags); the packaging/ folder is the Windows installer
     "suite",   # display helpers for the server-built screens (suite/templatetags)
 ]
 

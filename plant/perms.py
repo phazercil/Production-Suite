@@ -26,6 +26,10 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("pm.edit", "PM schedule", "Add, change and remove planned maintenance tasks (Maintenance › PM schedule).", SUP),
         ("inventory.edit", "Maintenance inventory", "Maintenance › Inventory: add and change items, add stock and count it.", SUP),
     ]),
+    ("Packaging", [
+        ("pallets.verify", "Verify pallet tags", "Sign a pallet tag as the person who checked the pallet (with their PIN; not their own pallets).", ["operator", "maintenance", "lead", "admin"]),
+        ("pallets.supervise", "Supervisor sign-off on pallet tags", "Sign a pallet tag as supervisor, and void anyone's tag.", LEAD),
+    ]),
     ("Quality", [
         ("quality.tolerances", "Quality settings", "Quality › QC checks, Parts & specs and Tolerances: what each stage's QC check asks, each part's drawing specs (and importing them from the asset database), how far each measurement may be under or over for every filter, and the Process Out issue list.", LEAD),
     ]),
@@ -54,7 +58,7 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("section.supervisor", "Open Supervisor", "The Supervisor section.", LEAD),
         ("section.quality", "Open Quality", "The Quality section: the quality report and the tolerances.", LEAD),
         ("section.maintenance", "Open Maintenance", "The Maintenance section.", SUP),
-        ("section.packaging", "Open Packaging Kiosk", "The Packaging Kiosk (coming in a later update).", ["operator", "maintenance", "lead", "admin"]),
+        ("section.packaging", "Open Packaging Kiosk", "The Packaging Kiosk: make and print pallet tags.", ["operator", "maintenance", "lead", "admin"]),
     ]),
 ) for k, l, h, r in items)
 

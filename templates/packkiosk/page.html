@@ -1,0 +1,44 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Packaging Kiosk · Pallet tags{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'packkiosk/packkiosk.css' %}">{% endblock %}
+{% block content %}<div class="sv pk" {% if printId %}data-print="{{ printId }}"{% endif %}>
+  <div class="sv-head"><h1>Packaging Kiosk</h1><span class="muted">Pallet tags</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+
+  <div class="card"><h2>New pallet tag</h2>
+    <form method="post" action="/packaging/do/create" class="pk-new" id="pk-new" autocomplete="off">{% csrf_token %}
+      <label class="fld"><span>MO <i>(optional)</i></span><select name="mo" id="pk-mo"><option value="">No MO</option>{% for m in mos %}<option value="{{ m.number }}" data-part="{{ m.part }}" {% if m.number == form.mo %}selected{% endif %}>{{ m.number }} · {{ m.part }} · {{ m.qty|num }}</option>{% endfor %}</select></label>
+      <label class="fld"><span>Part number</span><input name="part" id="pk-part" maxlength="40" required list="pk-parts" value="{{ form.part }}" placeholder="e.g. MG3672" class="big"></label>
+      <datalist id="pk-parts">{% for p in parts %}<option value="{{ p }}">{% endfor %}</datalist>
+      <label class="fld"><span>Manufacturing line</span><select name="line" id="pk-line" required><option value="">Pick the line…</option>{% for l in lines %}<option {% if l == form.line %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label class="fld"><span>Pallet #</span><input name="pallet_no" id="pk-pallet" type="number" min="1" max="99999" inputmode="numeric" value="{{ form.pallet_no }}" placeholder="next" class="big"></label>
+      <label class="fld"><span>Quantity (pcs)</span><input name="qty" id="pk-qty" type="number" min="1" max="1000000" inputmode="numeric" required value="{{ form.qty }}" class="big"></label>
+      <label class="fld"><span>Description <i>(optional)</i></span><input name="description" id="pk-desc" maxlength="80" value="{{ form.description }}" placeholder="e.g. MicroGard"></label>
+      <p class="note pk-hint" id="pk-hint" aria-live="polite"></p>
+      <div class="row"><span class="note">Packed by <b>{{ me.name }}</b> — making the tag signs it as yours.</span><span class="grow"></span>
+        <button class="btn ghost" name="andPrint" value="0">Save</button><button class="btn go" name="andPrint" value="1">Save &amp; print tag</button></div>
+    </form></div>
+
+  <div class="sv-kpis"><div class="kpi"><span>Pallets</span><b>{{ kpi.pallets }}</b></div><div class="kpi"><span>Pieces</span><b>{{ kpi.pcs|num }}</b></div><div class="kpi"><span>Not verified yet</span><b class="{% if kpi.unverified %}warn{% endif %}">{{ kpi.unverified }}</b></div></div>
+  <form class="sv-filter" method="get">
+    <label>Show<select name="range">{% for k, l in ranges %}<option value="{{ k }}" {% if k == range %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>Find<input type="search" name="q" value="{{ find }}" placeholder="Part, MO, line or name"></label>
+    <button class="btn go" type="submit">Show</button></form>
+  <div class="card"><div class="tblwrap"><table class="st pk-tbl"><thead><tr><th>Tag</th><th>Part</th><th>MO</th><th>Line</th><th class="n">Pallet</th><th class="n">Qty</th><th>Packed</th><th>Verified</th><th>Supervisor</th><th></th></tr></thead><tbody>
+  {% for r in rows %}<tr id="t{{ r.pk }}" class="{% if r.voided %}muted voided{% endif %}">
+    <td class="nw">{{ r.tag_no }}{% if r.voided %}<div class="note">VOID · {{ r.void_reason }} ({{ r.voided_by }})</div>{% elif r.prints %}<div class="note">printed {{ r.prints }}×</div>{% endif %}</td>
+    <td><b>{{ r.part }}</b>{% if r.description %}<div class="note">{{ r.description }}</div>{% endif %}</td>
+    <td class="nw">{{ r.mo|default:"—" }}</td><td class="nw">{{ r.line }}</td>
+    <td class="n"><b>{{ r.pallet_no }}</b></td><td class="n">{{ r.qty|num }}</td>
+    <td class="nw">{{ r.packed_by }}<div class="note">{{ r.t|day }} {{ r.t|clock }}</div></td>
+    <td class="nw">{% if r.verified_by %}{{ r.verified_by }}<div class="note">{{ r.verified_t|clock }}</div>{% elif not r.voided %}<details class="inl"><summary class="btn po">Verify</summary>
+      <form method="post" action="/packaging/do/sign" class="sv-filter pk-sign">{% csrf_token %}<input type="hidden" name="id" value="{{ r.pk }}"><input type="hidden" name="kind" value="verify"><label>Verifier's PIN<input type="password" name="pin" inputmode="numeric" required autocomplete="off"></label><button class="btn go">Sign</button></form></details>{% endif %}</td>
+    <td class="nw">{% if r.supervisor %}{{ r.supervisor }}<div class="note">{{ r.supervisor_t|clock }}</div>{% elif not r.voided %}<details class="inl"><summary class="btn po">Sign off</summary>
+      <form method="post" action="/packaging/do/sign" class="sv-filter pk-sign">{% csrf_token %}<input type="hidden" name="id" value="{{ r.pk }}"><input type="hidden" name="kind" value="supervisor"><label>Supervisor's PIN<input type="password" name="pin" inputmode="numeric" required autocomplete="off"></label><button class="btn go">Sign</button></form></details>{% endif %}</td>
+    <td class="nw" style="text-align:right">{% if not r.voided %}<a class="btn go po" href="/packaging/tag/{{ r.pk }}/?auto=1" target="_blank" rel="noopener">Print</a>
+      {% if r.packed_by_id == me.pk or canSupervise %}<details class="inl"><summary class="btn ghost po">Void</summary><form method="post" action="/packaging/do/void" class="sv-filter pk-sign">{% csrf_token %}<input type="hidden" name="id" value="{{ r.pk }}"><label>Why<input name="reason" maxlength="200" required placeholder="Wrong count, re-stacked…"></label><button class="btn">Void tag</button></form></details>{% endif %}{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="10" class="empty">No pallet tags {% if find %}matching “{{ find }}”{% else %}for this time{% endif %}.</td></tr>{% endfor %}
+  </tbody></table></div></div>
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script><script src="{% static 'packkiosk/packkiosk.js' %}"></script>{% endblock %}
