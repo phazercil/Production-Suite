@@ -1353,10 +1353,9 @@ def ticket_note(p, ctx):
     need(text, "Write the repair note first.")
     need(len(text) <= 4000, "Keep the repair note under 4,000 characters.")
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, text=text)
-    if t.status in ("Open", "Reviewed"):
-        t.status = "In progress"
+    # a note never changes the status: that's only done on the Maintenance page (ticketSet)
     t.updated, t.updated_by = ctx.now, ctx.by
-    t.save(update_fields=["status", "updated", "updated_by"])
+    t.save(update_fields=["updated", "updated_by"])
     event("maintenance_note", {"id": t.id})
     notify(f"Repair note on {t.machine} · {t.type} from {ctx.by}: {text}", "maint", lines=[t.line or t.machine, t.machine], go="maintenance")
     return {"msg": "Repair note added"}

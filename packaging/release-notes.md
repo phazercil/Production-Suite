@@ -1,3 +1,12 @@
+## What's new in 1.9.8
+
+- **Maintenance requests are only completed on the Maintenance page:**
+  - The Operator Kiosk's Maintenance page still shows every request with its status, pictures and repair notes, and operators can still make a new request, add pictures and (with permission) add repair notes.
+  - Its status picker, **Start work** and **Mark complete** are gone, and the kiosk can't change a request's status at all.
+  - Starting, waiting on parts and completing are done on the Maintenance page (top bar › Maintenance), which the kiosk links to (except on a locked station).
+  - Adding a repair note no longer switches a request to In progress.
+- **Planned maintenance completed on the Maintenance page restarts its count:** completing a PM request with the status form now starts the task's count again, as completing it from the kiosk used to.
+
 ## What's new in 1.9.7
 
 **Back up before installing:** this update changes the database (Admin › Backup › Back up the database now).

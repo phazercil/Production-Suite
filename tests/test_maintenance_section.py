@@ -39,10 +39,18 @@ class MaintenanceTests(TestCase):
         self.assertFalse(self.run_("ticketSet", id=self.t1.pk, status="Shelved")["ok"])
         self.assertFalse(self.run_("ticketSet", self.op, id=self.t1.pk, status="Open")["ok"])     # needs Work maintenance requests
 
-    def test_kiosk_start_work_from_any_pending_status(self):
-        self.run_("ticketSet", id=self.t1.pk, status="Waiting on parts")
-        self.assertTrue(self.run_("ticketStatus", id=self.t1.pk)["ok"])
-        self.assertEqual(Ticket.objects.get(pk=self.t1.pk).status, "In progress")
+    def test_completing_a_pm_request_here_starts_its_count_again(self):
+        from datetime import timedelta
+
+        from hmi import pm
+        from hmi.models import PMTask
+        now = timezone.now()
+        task = PMTask.objects.create(machine="Barbara", title="Grease chain", every=7, unit="days", created=now - timedelta(days=8))
+        tk = pm.check(now)[0]
+        self.assertTrue(self.run_("ticketSet", id=tk.pk, status="Closed", note="Greased")["ok"])
+        task.refresh_from_db()
+        self.assertEqual(task.last_by, "K. Patel")
+        self.assertEqual(pm.status(task, now)["state"], "ok")
 
     def test_parts_used_link_the_item_to_the_machine_and_request(self):
         r = self.run_("itemUse", item=self.belt.pk, qty="1", ticket=self.t1.pk)
