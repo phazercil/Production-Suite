@@ -13,7 +13,9 @@
   function msgFor(img) { var t = img.closest("[data-cam-tile]"); return t ? t.querySelector("[data-cam-msg]") : null; }
   function say(img, text, stale) {
     var m = msgFor(img);
-    if (m) { m.textContent = text || ""; m.hidden = !text; m.classList.toggle("stale", !!stale); }
+    if (!m || (!text && m.dataset.live)) return;   // keep the reason live video isn't playing
+    delete m.dataset.live;
+    m.textContent = text || ""; m.hidden = !text; m.classList.toggle("stale", !!stale);
   }
   function load(img) {
     busy.set(img, true);
@@ -44,14 +46,25 @@
     if (!window.MediaSource) return "";
     return CODECS.filter(function (c) { return MediaSource.isTypeSupported('video/mp4; codecs="' + c + '"'); }).join(",");
   }
+  function mode(v, live, why) {   // the tile's LIVE / PICTURES label, and why it's on pictures
+    var tile = v.closest("[data-cam-tile]"), m = tile && tile.querySelector("[data-cam-mode]");
+    if (!m) return;
+    m.hidden = false;
+    m.textContent = live ? "LIVE" : "PICTURES";
+    m.classList.toggle("live", !!live);
+    m.title = live ? "Live video from the camera" : (why || "");
+    var img = tile.querySelector("img[data-cam]"), msg = tile.querySelector("[data-cam-msg]");
+    if (!live && why && msg && (msg.hidden || msg.dataset.live)) { msg.textContent = "Live video: " + why; msg.hidden = false; msg.dataset.live = "1"; }
+    if (live && msg && msg.dataset.live) { msg.hidden = true; delete msg.dataset.live; }
+  }
   function startLive(v) {
     var codecs = liveCodecs();
-    if (!codecs) return;   // no Media Source on this browser: pictures only
+    if (!codecs) { mode(v, false, "this browser can't play the camera's video"); return; }
     var st = lives.get(v) || { fails: 0, next: 0 };
     lives.set(v, st);
     if (st.ws || Date.now() < st.next) return;
     var tile = v.closest("[data-cam-tile]"), img = tile && tile.querySelector("img[data-cam]");
-    var ms = new MediaSource(), sb = null, q = [], mime = "", playing = false;
+    var ms = new MediaSource(), sb = null, q = [], mime = "", playing = false, opened = false;
     var ws = st.ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/video/ws?src=cam" + v.dataset.live);
     ws.binaryType = "arraybuffer";
     var wait = setTimeout(function () { ws.close(); }, 10000);   // no video within 10 s: pictures
@@ -75,7 +88,7 @@
       sb.addEventListener("updateend", function () { edge(); pump(); });
       pump();
     }, { once: true });
-    ws.onopen = function () { ws.send(JSON.stringify({ type: "mse", value: codecs })); };
+    ws.onopen = function () { opened = true; ws.send(JSON.stringify({ type: "mse", value: codecs })); };
     ws.onmessage = function (e) {
       if (!v.isConnected || document.hidden) { ws.close(); return; }
       if (typeof e.data === "string") {
@@ -94,7 +107,7 @@
       playing = true; clearTimeout(wait); st.fails = 0;
       v.hidden = false;
       if (img) img.dataset.paused = "1";
-      say(img || v, "");
+      mode(v, true);
     };
     ws.onclose = function () {
       clearTimeout(wait);
@@ -104,6 +117,9 @@
       v.hidden = true;
       if (img) delete img.dataset.paused;   // pictures again
       if (!v.isConnected || document.hidden) { st.next = 0; return; }
+      mode(v, false, playing ? "reconnecting" : !opened ? "the server isn't passing live video to this screen yet"
+        : st.err ? String(st.err).slice(0, 200) : !mime ? "no video came from the camera's stream"
+        : "this screen can't play the camera's video (" + mime + ")");
       st.fails = playing ? 0 : st.fails + 1;
       st.next = Date.now() + (playing ? 2000 : st.fails < 3 ? 4000 : 60000);
     };

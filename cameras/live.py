@@ -126,6 +126,7 @@ class Keeper:
             return
         sig = config_text(st)
         if self.proc and self.proc.poll() is None and self.sig == sig:
+            self._status(on=True, running=True, streams=len(st), err="", pid=self.proc.pid)   # still running: say so
             self._apache()
             return
         if self.proc and self.proc.poll() is not None:
@@ -163,7 +164,7 @@ class Keeper:
         self.sig, self.started = sig, time.time()
         (d / "go2rtc.pid").write_text(str(self.proc.pid))
         log.info("Live video: go2rtc started for %d camera(s)", len(st))
-        self._status(on=True, running=True, streams=len(st), err="")
+        self._status(on=True, running=True, streams=len(st), err="", pid=self.proc.pid)
         self._apache()
 
     def _log_tail(self):
@@ -215,4 +216,5 @@ def status():
     s["apacheMsg"] = r.get("videoMsg", "")
     s["supported"] = supported()
     s["fresh"] = bool(s.get("t") and time.time() - s["t"] < 60)
+    s["ago"] = round((time.time() - s["t"]) / 60) if s.get("t") else None
     return s

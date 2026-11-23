@@ -276,8 +276,16 @@ class UpdaterEndToEndTests(SimpleTestCase):
         r, svc = self.run_updater()
         zip_copy = self.tmp / "u1.zip"
         shutil.copy(self.zip, zip_copy)
-        with mock.patch.object(self.mod, "HERE", self.install / "updates" / "run"):
+        run_dir = self.install / "updates" / "run"
+        for f in ("linux_apply.py", "keys.json.old"):
+            (run_dir / f).unlink(missing_ok=True)
+        # run as root's own copy (Linux): the updater and network helper are refreshed from the update file
+        with mock.patch.object(self.mod, "HERE", run_dir), mock.patch.object(self.mod, "LINUX_ROOT_DIR", run_dir), \
+                mock.patch.object(self.mod, "WIN", False):
             self.assertTrue(r.apply(zip_copy))
+        import zipfile
+        with zipfile.ZipFile(self.zip) as z:
+            self.assertEqual((run_dir / "linux_apply.py").read_bytes(), z.read("app/tools/linux_apply.py"))   # before the file went
         self.assertEqual(updatefile.read_version(self.install), ("1.1.0", 2))
         self.assertTrue((self.install / "WHATS-NEW.txt").exists())
         self.assertFalse((self.install / "README.md").exists())

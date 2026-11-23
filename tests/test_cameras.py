@@ -242,8 +242,13 @@ class LiveVideoTests(TestCase):
             self.assertIn(f"cam{c.pk}:", cfg.read_text())
             self.assertTrue(live.status()["running"])
             p = k.proc
+            import json as _json
+            sf = self.tmp / "go2rtc" / "status.json"
+            sf.write_text(_json.dumps({**_json.loads(sf.read_text()), "t": 1}))   # last said long ago
+            self.assertFalse(live.status()["fresh"])
             k.keep()
             self.assertIs(k.proc, p)                                   # unchanged: left running
+            self.assertTrue(live.status()["fresh"] and live.status()["running"])   # and still says so
             c.url = "rtsp://127.0.0.1:554/live/1"
             c.save()
             k.keep()

@@ -1,5 +1,5 @@
 <div class="row"><h1 class="h1 grow">Cameras · {{ line }}</h1><span class="note">Tap a camera to make it big · tap again (or Esc) to go back.</span></div>
 {% if cams %}<div class="camgrid">{% for c in cams %}
-  <div class="camtile" id="camtile-{{ c.pk }}" hx-preserve="true" data-cam-tile>{% if c.live %}<video data-live="{{ c.pk }}" muted playsinline hidden></video>{% endif %}<img data-cam="{{ c.pk }}" data-every="{{ c.ms }}" alt="Camera {{ c.name }}"><span class="camname">{{ c.name }}</span><span class="cammsg" data-cam-msg hidden></span></div>
+  <div class="camtile" id="camtile-{{ c.pk }}" hx-preserve="true" data-cam-tile>{% if c.live %}<video data-live="{{ c.pk }}" muted playsinline hidden></video>{% endif %}<img data-cam="{{ c.pk }}" data-every="{{ c.ms }}" alt="Camera {{ c.name }}"><span class="camname">{{ c.name }}</span><span class="cammode" data-cam-mode hidden></span><span class="cammsg" data-cam-msg hidden></span></div>
 {% endfor %}</div>
 {% else %}<div class="panel"><p>No cameras are set up for {{ line }}.</p><p class="note">Admin › Cameras adds the plant's cameras and picks the machines that show each one.</p></div>{% endif %}
