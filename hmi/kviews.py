@@ -248,6 +248,8 @@ def part(request, name):
         return render(request, "hmi/k/_banner.html", ctx_for(s, B=s.banner(), page=page))
     if name == "prompt":
         return render(request, "hmi/k/_prompt.html", ctx_for(s, open=s.reason_prompt()))
+    if name == "coPick":
+        return render(request, "hmi/k/_co_pick.html", ctx_for(s, **co_pick(request.GET.get("line"), request.GET.get("mo"))))
     if name == "notibar":
         return render(request, "hmi/k/_notibar.html", ctx_for(s, N=s.notibar(), page=page))
     raise Http404("No such part")
@@ -795,13 +797,25 @@ def last_left(line, t):
     return list(RollTagPhoto.objects.filter(shift_id=last.shift_id, kind="end").defer("data", "thumb").order_by("what"))
 
 
+def co_pick(line, number):
+    """Start of shift on a line that ran another MO with nobody logged in: the stops to pick the changeover from."""
+    from .models import Downtime
+    m = engine.line_of(line)
+    cur = engine.active_run(m) if m else None
+    mo = engine.open_mo(str(number or "").strip()) if number else None
+    if not (cur and engine.unattended(cur) and cur.mo_id and cur.count and mo and mo.pk != cur.mo_id):
+        return {"ask": False}
+    stops = list(Downtime.objects.filter(shift=cur).order_by("start_time"))
+    return {"ask": True, "old": cur.mo, "new": mo, "since": cur.start, "made": cur.count, "stops": stops, "stopped": cur.stop_start}
+
+
 @action("startShift")
 def a_start(request, s, p):
     n_safety, n_pm = len(s.cfg.get("safety", [])), len(s.cfg.get("pm", []))
     on = set(request.POST.getlist("check"))
     p = {"line": p.get("line", ""), "mo": (p.get("mo") or "").strip(), "issues": p.get("issues", ""),
          "safety": [f"s{i}" in on for i in range(n_safety)], "pm": [f"p{i}" in on for i in range(n_pm)],
-         "acks": request.POST.getlist("ack")}
+         "acks": request.POST.getlist("ack"), "coAt": p.get("coAt", "")}
     from . import photos
     try:
         pics = _roll_pics(request, "start")

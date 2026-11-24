@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from django.conf import settings as dj_settings
 from django.db import IntegrityError, transaction
-from django.db.models import F, Max
+from django.db.models import F, Max, Sum
 from django.db.models.functions import Greatest
 
 from plant import netsafety
@@ -690,6 +690,18 @@ def start_shift(p, ctx):
         need(mo, f"MO {p['mo']} is not an open order. Check the number or pick one from the schedule.")
         need(not mo.line_id or mo.line_id == m.id, f"MO {mo.number} is scheduled on {mo.line.name if mo.line else ''}, not {m.name}.")
         need(not running_elsewhere(mo, m), f"MO {mo.number} is already running on another machine.")
+    picked = None
+    if cur and mo and cur.mo_id and cur.mo_id != mo.pk and cur.count:
+        # the line ran another MO while nobody was logged in: when did it change over? (a stop in this shift, or
+        # before this shift: then a supervisor sorts out the earlier logs)
+        at = str(p.get("coAt") or "")
+        need(at, f"{m.name} was on MO {cur.mo.number} with nobody logged in. Pick when it changed over to MO {mo.number}.")
+        if at == "now":   # stopped for it right now (the stop isn't over, so it isn't a downtime entry yet)
+            picked = Downtime(start_time=cur.stop_start or ctx.now, end_time=ctx.now, minutes=0)
+        elif at != "before":
+            sid = at.replace("stop:", "")
+            picked = Downtime.objects.filter(pk=int(sid), shift=cur).first() if sid.isdigit() else None
+            need(picked, "That stop isn't in this shift. Pick it again.")
     if cur:
         # take over what was recorded with nobody logged in: since the shift began it is this operator's
         sh = ShiftRun.objects.select_for_update().get(pk=cur.pk)
@@ -698,9 +710,36 @@ def start_shift(p, ctx):
         sh.issues, sh.safety = str(p.get("issues") or "").strip(), safety
         sh.pm = p.get("pm") if isinstance(p.get("pm"), list) else []
         sh.qc_last, sh.offer = ctx.now, ""
-        if mo and sh.mo_id != mo.pk:
+        if mo and sh.mo_id != mo.pk and picked:
+            # changed over during that stop: what was made before it stays on the old MO (its own MO run), what was
+            # made after it goes to the new one, and the stop is the changeover
+            old, start = sh.mo, sh.mo_start or sh.start
+            before = PpmReading.objects.filter(shift=sh, t__gte=start, t__lte=picked.start_time).aggregate(n=Sum("units"))["n"] or 0
+            before = max(0, min(int(before), sh.mo_count))
+            after = sh.mo_count - before
+            if after:
+                MO.objects.filter(pk=old.pk).update(produced=F("produced") - after)
+                MO.objects.filter(pk=mo.pk).update(produced=F("produced") + after)
+            MoRun.objects.create(shift=sh, line=sh.line, mo=old.number, item=old.part, qty=before, start_time=start, end_time=picked.start_time)
+            if picked.pk:
+                picked.reason = "Changeover"
+                picked.notes = (picked.notes + " · " if picked.notes else "") + f"Changeover with nobody logged in (picked by {ctx.user.name} at Start of shift)"
+                picked.save(update_fields=["reason", "notes"])
+            if picked.pk:
+                ChangeoverPiece.objects.create(machine=m, line=m.name, co_id=uuid.uuid4().hex[:16], shift=sh, by="", shift_name=sh.shift_name,
+                                               start=picked.start_time, end=picked.end_time, minutes=picked.minutes or 0, old_mo=old.number,
+                                               new_mo=mo.number, ended="nobody logged in", note=f"Picked by {ctx.user.name} at Start of shift")
+            sh.mo, sh.mo_start, sh.mo_count = mo, picked.end_time, after
+            audit(ctx, f"{m.name}: changed over from MO {old.number} to {mo.number} with nobody logged in, during the stop at "
+                       f"{fmt_t(picked.start_time)} ({before:,} on {old.number}, {after:,} on {mo.number})")
+        elif mo and sh.mo_id != mo.pk:
             if sh.mo_id and sh.mo_count:   # the log carried another MO: its count moves to the one scanned
                 MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") - sh.mo_count)
+                if p.get("coAt") == "before":   # changed over before this shift: a supervisor checks the earlier logs
+                    text = (f"{m.name}: MO changed from {sh.mo.number} to {mo.number} with nobody logged in, before {ctx.user.name}'s shift. "
+                            f"Supervisor: check the earlier logs (Supervisor › MO runs) and move the parts to the right MO.")
+                    audit(ctx, text)
+                    notify(text, "co", lines=[m.name])
             sh.mo, sh.mo_start, sh.mo_count = mo, sh.start, sh.count
             if sh.count:
                 MO.objects.filter(pk=mo.pk).update(produced=F("produced") + sh.count)

@@ -5,8 +5,10 @@
   <div class="grid2">
     <label class="f">MFG line<select name="line" hx-get="/kiosk/m/start" hx-target="#modal" hx-swap="innerHTML" hx-trigger="change">
       {% for l in lines %}<option value="{{ l.name }}" {% if l.name == line %}selected{% endif %} {% if not l.ok %}disabled{% endif %}>{{ l.name }}{{ l.why }}</option>{% endfor %}</select></label>
-    <label class="f">Scan MO<input type="text" name="mo" id="ssMO" placeholder="Scan or type MO number" autofocus value="{{ mo_pick }}"></label>
+    <label class="f">Scan MO<input type="text" name="mo" id="ssMO" placeholder="Scan or type MO number" autofocus value="{{ mo_pick }}"
+      hx-get="/kiosk/r/coPick" hx-include="[name=line]" hx-target="#coPick" hx-trigger="load, input changed delay:400ms, change" hx-swap="innerHTML"></label>
   </div>
+  <div id="coPick"></div>
   {% if queue %}<div class="note">Next on {{ line }}: {% for m in queue %}<button type="button" class="btn ghost chip" hx-get="/kiosk/m/start?line={{ line|urlencode }}&mo={{ m.number }}" hx-target="#modal" hx-swap="innerHTML">{{ m.floor_number }} · {{ m.part }}</button> {% endfor %}</div>{% endif %}
   {% if handoffs %}<div class="panel handoff" style="border-color:var(--warn)"><h3 class="h2">Read before you start: handoff from the last shift</h3>
     {% for n in handoffs %}<label class="chk" style="align-items:flex-start;margin-top:8px"><input type="checkbox" name="ack" value="{{ n.pk }}" required>
