@@ -4,12 +4,7 @@
 {% block head %}<link rel="stylesheet" href="{% static 'scheduler/scheduler.css' %}">{% endblock %}
 {% block content %}<div class="planner">
 <header class="top"><div class="wrap top-in">
-  <nav class="tabs" aria-label="Pages">
-    <a href="#schedule" data-r="schedule">Board</a>
-    <a href="#lines" data-r="lines">Lines &amp; Shifts</a>
-    <a href="#orders" data-r="orders">Orders</a>
-    <a href="#parts" data-r="parts">Parts</a>
-  </nav>
+  {% include "scheduler/_nav.html" %}
   <div class="sync"><span id="who" style="display:inline-flex;gap:8px;align-items:center"></span><span class="dot" id="syncdot"></span><span id="synctext">Connecting…</span></div>
 </div></header>
 <main class="wrap" id="main"></main>

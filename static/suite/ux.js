@@ -40,24 +40,35 @@
   });
 
   // ------------------------------------------------------------ sign in from the bar
+  // switching person: pick the name, then the PIN (both are checked on the server)
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); }
   function signIn() {
     var box = document.createElement("div");
     box.className = "suite-signin";
-    box.innerHTML = '<form><h2 style="margin:0 0 8px">Sign in</h2><input type="password" name="pin" inputmode="numeric" autocomplete="off" placeholder="PIN or badge" aria-label="PIN" autofocus>' +
+    box.innerHTML = '<form><h2 style="margin:0 0 8px">Switch person</h2><p class="note" style="margin:0 0 8px">Pick your name, then enter your PIN.</p>' +
+      '<div class="suite-people" role="radiogroup" aria-label="Who are you?"><span class="note">Loading names…</span></div>' +
+      '<input type="password" name="pin" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="PIN" disabled>' +
       '<p class="err" aria-live="polite"></p><div style="display:flex;gap:8px;margin-top:8px"><button type="submit" class="btn go">Sign in</button><button type="button" class="btn ghost" data-x>Cancel</button></div></form>';
     document.body.appendChild(box);
-    var f = box.querySelector("form"), inp = f.querySelector("input"), err = f.querySelector(".err");
+    var f = box.querySelector("form"), inp = f.querySelector("input[name=pin]"), err = f.querySelector(".err"), list = f.querySelector(".suite-people");
+    fetch("/api/hmi/people", { credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (r) {
+      list.innerHTML = (r.people || []).map(function (u) {
+        return '<label><input type="radio" name="who" value="' + u.id + '"><span>' + esc(u.name) + '<small>' + esc(u.role || "") + '</small></span></label>';
+      }).join("") || '<span class="note">No people set up yet.</span>';
+    }).catch(function () { list.innerHTML = '<span class="err">Couldn\'t load the names.</span>'; });
+    list.addEventListener("change", function () { inp.disabled = false; err.textContent = ""; inp.focus(); });
+    function who() { var c = f.querySelector("input[name=who]:checked"); return c ? c.value : ""; }
     function close() { box.remove(); }
     box.addEventListener("click", function (e) { if (e.target === box || e.target.closest("[data-x]")) close(); });
     box.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
     f.addEventListener("submit", function (e) {
       e.preventDefault();
-      post("/api/hmi/login", { pin: inp.value }).then(function (r) {
+      if (!who()) { err.textContent = "Pick your name first."; return; }
+      post("/api/hmi/login", { pin: inp.value, userId: who(), "switch": true }).then(function (r) {
         if (r && r.ok) location.reload(); else { err.textContent = (r && r.error) || "That PIN doesn't match."; inp.value = ""; inp.focus(); }
       });
     });
     keypad(inp);
-    setTimeout(function () { inp.focus(); }, 30);
   }
 
   // ------------------------------------------------------------ PIN keypad
@@ -146,6 +157,24 @@
     var b = e.target.closest && e.target.closest("[data-confirm]");
     if (b && !window.confirm(b.getAttribute("data-confirm"))) { e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
+})();
+// each section's tab has its own address: /supervisor/?tab=down shows as /supervisor/down/, Admin's open tab as /admin/backup/
+(function () {
+  function fix() {
+    var u = new URL(location.href), t = u.searchParams.get("tab");
+    var m = location.pathname.match(/^\/(supervisor|quality|maintenance|sensors|admin)\/(?:([\w-]+)\/)?$/);
+    if (!m) return;
+    if (m[1] === "admin") {
+      var el = document.querySelector("[data-admin-tab]");
+      t = el && el.getAttribute("data-admin-tab");
+    }
+    if (!t || !/^[\w-]+$/.test(t)) return;
+    u.searchParams.delete("tab");
+    var want = "/" + m[1] + "/" + t + "/" + u.search + u.hash;
+    if (location.pathname + location.search + location.hash !== want) history.replaceState(history.state, "", want);
+  }
+  fix();
+  document.addEventListener("htmx:afterSettle", fix);
 })();
 // a row a link pointed to (a notice's MO on the kiosk schedule): bring it into view once
 document.addEventListener("htmx:afterSettle", function () {

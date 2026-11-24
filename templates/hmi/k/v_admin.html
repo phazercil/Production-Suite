@@ -2,7 +2,7 @@
 {% if not canOpen %}<div class="panel row" style="border-color:var(--warn)"><span class="grow">{% if me %}{{ me.name }} doesn't have permission to open Admin.{% else %}Log in to open Admin.{% endif %}</span><button class="btn primary" hx-get="/kiosk/m/login?perm=section.admin" hx-target="#modal" hx-swap="innerHTML">Log in</button></div>
 {% else %}
 {% if not tabCan %}<div class="panel row" style="border-color:var(--warn)"><span class="grow">View only. Changing this needs permission for <b>{{ tabPermLabel }}</b>.</span><button class="btn primary" hx-get="/kiosk/m/login?perm={{ tabPerm }}" hx-target="#modal" hx-swap="innerHTML">Log in</button></div>{% endif %}
-<div class="tabs" role="tablist">{% for k, l in tabs %}<button role="tab" aria-selected="{% if tab == k %}true{% else %}false{% endif %}" class="{% if tab == k %}on{% endif %}" hx-get="/kiosk/v/admin?tab={{ k }}" hx-target="#view">{{ l }}</button>{% endfor %}</div>
+<div class="tabs" role="tablist" data-admin-tab="{{ tab }}">{% for k, l in tabs %}<button role="tab" aria-selected="{% if tab == k %}true{% else %}false{% endif %}" class="{% if tab == k %}on{% endif %}" hx-get="/kiosk/v/admin?tab={{ k }}" hx-target="#view" hx-push-url="/admin/{{ k }}/">{{ l }}</button>{% endfor %}</div>
 {% include "hmi/k/admin/_"|add:tab|add:".html" with C=A %}
 {% if audit %}<div class="panel"><h2 class="h2">Recent changes</h2><div class="auditlog">{% for a in audit %}<div><span class="num note">{{ a.t|day }} {{ a.t|clock }}</span> · {{ a.by }} · {{ a.what }}</div>{% endfor %}</div></div>{% endif %}
 {% endif %}

@@ -705,7 +705,7 @@ def simple(cmd, toast=True, close=False, then=None):
 def a_login(request, s, p):
     from plant import perms
     perm = p.get("perm") if p.get("perm") in perms.PERMS else ""
-    u, err = pin_login(request, p.get("pin"), p.get("user") or None, perm)
+    u, err = pin_login(request, p.get("pin"), p.get("user") or None, perm, require_name=bool(s.me))   # switching person: name and PIN
     if not u:
         return err_in_modal(err)
     nxt = p.get("next") or ""
@@ -1225,7 +1225,7 @@ def m_changeop(request, s):
 
 @action("changeOp")
 def a_change_op(request, s, p):
-    u, err = pin_login(request, p.get("pin"), p.get("user") or None, "")
+    u, err = pin_login(request, p.get("pin"), p.get("user") or None, "", require_name=True)
     if not u:
         return err_in_modal(err)
     r = engine.execute("changeOperator", {"line": s.station}, engine.Ctx(user=u, line=s.station))

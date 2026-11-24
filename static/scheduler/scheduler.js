@@ -117,14 +117,29 @@ function requestRender(force){
     render();
   });
 }
-function currentRoute(){const h=location.hash.replace("#","");return ["schedule","lines","orders","parts"].includes(h)?h:"schedule"}
+const ROUTES=["schedule","lines","orders","parts"];
+function currentRoute(){const m=location.pathname.match(/^\/scheduler\/([\w-]+)\/?$/),h=location.hash.replace("#","");const r=(m&&m[1])||h;return ROUTES.includes(r)?r:"schedule"}
+function routePath(r){return r==="schedule"?"/scheduler/":`/scheduler/${r}/`}
+// each page has its own address (/scheduler/orders/); old #orders links still work and are moved to it
+function fixHash(){const h=location.hash.replace("#","");if(ROUTES.includes(h))history.replaceState(history.state,"",routePath(h)+location.search)}
+fixHash();
+document.addEventListener("click",e=>{
+  const a=e.target.closest&&e.target.closest("a[href]");if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||a.target)return;
+  const u=new URL(a.href,location.href);if(u.origin!==location.origin)return;
+  const m=u.pathname.match(/^\/scheduler\/(?:([\w-]+)\/)?$/),h=u.hash.replace("#","");
+  let r=null;if(m&&(!m[1]||ROUTES.includes(m[1])))r=m[1]||(ROUTES.includes(h)&&u.pathname===location.pathname?h:"schedule");
+  else if(u.pathname===location.pathname&&ROUTES.includes(h))r=h;
+  if(!r)return;
+  e.preventDefault();if(r!==currentRoute()||location.hash){history.pushState(null,"",routePath(r));closeDialog();render()}
+});
+window.addEventListener("popstate",()=>{closeDialog();render()});
 function render(){
   const r=currentRoute();
   $$("nav.tabs a").forEach(a=>a.setAttribute("aria-current",a.dataset.r===r?"page":"false"));
   if(!S.loaded){$("#main").innerHTML=`<div class="empty"><b>Loading the plan…</b></div>`;return}
   ({schedule:renderSchedule,lines:renderLines,orders:renderOrders,parts:renderParts})[r]();
 }
-window.addEventListener("hashchange",()=>{closeDialog();render()});
+window.addEventListener("hashchange",()=>{fixHash();closeDialog();render()});
 let resizeT;window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if($(".gwrap")&&!$("#layer").firstChild)render()},250)});
 document.addEventListener("dragend",()=>{DRAG=null;$$(".ghost-line").forEach(g=>g.remove());$$(".drop-ok,.drop-no").forEach(t=>t.classList.remove("drop-ok","drop-no"))});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("#layer").firstChild)closeDialog()});
@@ -616,6 +631,7 @@ function openSplitDialog(moId,op){
 /* ---------- Labor Budget plan ---------- */
 function ordinal(n){return n+(n===1?"st":n===2?"nd":n===3?"rd":"th")}
 function fmtMoney(v,d=2){return "$"+Number(v||0).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d})}
+const SHOW_LABOR=false;   // the Labor Budget plan panel is hidden on Lines & Shifts for now (crews and costs still apply)
 function laborSection(c){
   const L=S.labor||{lines:{}},lead=!!(S.me&&S.me.lead);
   const head=`<label class="check"><input type="checkbox" id="uselabor" ${c.useLabor!==false?"checked":""}> Use the Labor Budget plan for crews and crew cost. Working days, holidays and changed shift times come from the plant calendar (Schedule); each line runs the shifts ticked for it above</label>`;
@@ -672,7 +688,7 @@ function renderLines(){
   <p class="small muted" style="margin:8px 0 22px">Sheet-based lines fall back to the speed shown when a part has no rate on the cost sheet. Scrap adds extra pieces to every run; downtime slows the effective speed.</p>
   <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label><label class="check" title="For each line and part-to-part change with 3 or more finished changeovers in the last 180 days, plan the median of how long they really took (Supervisor › Changeovers › Report)"><input type="checkbox" id="cohist" ${c.coHistory?"checked":""}> Use how long changeovers really took (each line's part-to-part history, when there is enough)</label>
     <div class="row small" style="gap:8px;align-items:center;flex-wrap:wrap"><span>Inkjet-only changeover between filters with the same base part, for part numbers starting</span><input type="text" id="inkbases" value="${esc((c.inkjetBases||[]).join(", "))}" style="width:120px" aria-label="Base part prefixes" placeholder="AQ"><span>(e.g. AQ1278 → AQ1278C):</span><input type="number" id="inkmin" min="0" max="240" value="${c.inkjetMin||0}" style="width:70px" aria-label="Inkjet changeover minutes"><span>min</span></div></div>
-  ${laborSection(c)}
+  ${SHOW_LABOR?laborSection(c):""}
   <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after, except lunch on a shift a line runs <b>through lunch</b>.</p></div><button class="btn" id="adds">+ Add shift</button></div>
   <div class="shift-grid">${shifts}</div>`;
   if(S.labor&&S.labor.on)$("#main").querySelector(".page-head").insertAdjacentHTML("afterend",`<div class="card" style="border-left:4px solid var(--accent);margin-bottom:14px"><b>These are the lines the suite runs.</b> A line added in the <a href="/labor/">Labor Budget</a> starts here with the budget's shifts and lunch; after that this page is its own, and <span class="budget-diff" style="display:inline">⚠</span> marks where the budget plans a line differently.</div>`);
@@ -688,7 +704,7 @@ function renderLines(){
     if(!b.dataset.sure){b.dataset.sure="1";b.textContent=n?`Remove + unschedule ${n}?`:"Click again to remove";return}
     if(typeof m.id==="number")REMOVED.machines.add(m.id);c.machines.splice(i,1);saveCfg();renderLines()};
   $("#addm").onclick=()=>{const c=S.cfg;c.machines.push({id:uid("new-"),name:`New line ${c.machines.length+1}`,stage:"s1",mode:"fixed",ppm:180,rate:0,scrap:5,downtime:10,changeover:30,shifts:c.shifts.map(s=>s.id).slice(0,1)});saveCfg();renderLines()};
-  $("#uselabor").onchange=e=>{S.cfg.useLabor=e.target.checked;saveCfg()};
+  if($("#uselabor"))$("#uselabor").onchange=e=>{S.cfg.useLabor=e.target.checked;saveCfg()};
   $("#cosame").onchange=e=>{S.cfg.coSamePart=e.target.checked;saveCfg()};
   $("#cohist").onchange=e=>{S.cfg.coHistory=e.target.checked;saveCfg()};
   $("#inkbases").onchange=e=>{S.cfg.inkjetBases=e.target.value.split(/[,\s]+/).filter(Boolean);saveCfg()};$("#inkmin").onchange=e=>{S.cfg.inkjetMin=Math.max(0,Number(e.target.value)||0);saveCfg()};$("#cofirst").onchange=e=>{S.cfg.coFirst=e.target.checked;saveCfg()};

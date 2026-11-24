@@ -40,7 +40,6 @@
     {% if f.tab == "qc" %}<label>Result<select name="result"><option value="">All</option>
       {% for v, t in "pass:Passed,fail:Failed,pending:Waiting for review,approved:Approved,disapproved:Disapproved,late:Done late"|pairs %}<option value="{{ v }}" {% if f.result == v %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label>
     {% elif f.tab == "down" %}<label>Reason<select name="result"><option value="">All</option><option value="none" {% if f.result == "none" %}selected{% endif %}>Not entered</option><option value="changeover" {% if f.result == "changeover" %}selected{% endif %}>Changeover</option></select></label>
-    {% elif f.tab == "s2k" %}<label>Show<select name="result"><option value="">Every MO</option><option value="open" {% if f.result == "open" %}selected{% endif %}>Only with rows to post</option></select></label>
     {% elif f.tab == "events" %}<label>What<select name="kind">{% for k, l in kinds %}<option value="{{ k }}" {% if f.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
       <label>Search<input type="search" name="q" value="{{ f.q }}" placeholder="Words in what happened"></label>
     {% elif f.tab == "logs" %}<label class="chk"><input type="checkbox" name="empty" value="1" {% if f.empty %}checked{% endif %}> Include logs with nobody logged in and nothing made</label>{% endif %}
@@ -92,15 +91,6 @@
       <td>{% if d.shift %}{% if d.shift.user_name %}{{ d.shift.user_name }}{% else %}<span class="muted">{{ nobody }}</span>{% endif %}<div class="note">{{ d.shift.shift_name }}</div>{% endif %}</td>
       <td>{% if d.shift_id %}<a href="/supervisor/log/{{ d.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/downtime/{{ d.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="10" class="empty">No downtime for these filters.</td></tr>{% endfor %}</tbody></table>
-  {% elif f.tab == "s2k" %}
-    <p class="note" style="margin:0 0 8px">S2K is read-only to the suite: nothing is sent to it. Download the rows not posted yet, key them in or import them in S2K, then mark them as posted so they don't go in twice.</p>
-    {% if canPost %}<form method="post" action="/supervisor/s2k-mark" class="row" style="margin-bottom:8px">{% csrf_token %}<input type="hidden" name="line" value="{{ f.line }}"><input type="hidden" name="from" value="{{ f.from|date:'Y-m-d' }}"><input type="hidden" name="to" value="{{ f.to|date:'Y-m-d' }}">
-      <button class="btn" type="submit">Mark these as posted</button><span class="note">after they're in S2K</span></form>{% endif %}
-    <table class="st"><thead><tr><th>MO</th><th>Part</th><th class="n">S2K qty</th><th class="n">S2K still to make</th><th class="n">Floor good</th><th class="n">Good in dates</th><th class="n">Packed in dates</th><th class="n">To post</th><th>Doesn't agree</th></tr></thead><tbody>
-    {% for x in S2K %}<tr><td class="nw"><b>{{ x.mo }}</b>{% if x.m %} <span class="note">{{ x.m.status }}</span>{% endif %}</td><td>{{ x.part }}</td><td class="n">{% if x.m %}{{ x.m.qty|num }}{% else %}—{% endif %}</td><td class="n">{% if x.m.remaining is not None %}{{ x.m.remaining|num }}{% else %}—{% endif %}</td>
-      <td class="n">{% if x.m %}{{ x.m.produced|num }}{% if x.m.scrap %} <span class="note">− {{ x.m.scrap|num }} scrap</span>{% endif %}{% endif %}</td><td class="n">{{ x.good|num }}</td><td class="n">{{ x.packed|num }}</td><td class="n">{% if x.unposted %}<b>{{ x.unposted }}</b>{% else %}<span class="pill ok">POSTED</span>{% endif %}</td>
-      <td>{% for fl in x.flags %}<div class="note bad">{{ fl }}</div>{% empty %}<span class="muted">—</span>{% endfor %}</td></tr>
-    {% empty %}<tr><td colspan="9" class="empty">No MO runs finished and no pallets packed in these dates.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "events" %}
     <table class="st"><thead><tr><th>When</th><th>What</th><th>Line</th><th>Who / what</th><th>What happened</th><th>Before → after</th><th>Why / note</th></tr></thead><tbody>
     {% for e in rows %}<tr><td class="nw">{{ e.t|day }} {{ e.t|clock }}</td><td><span class="pill k-{{ e.kind }}">{{ e.label }}</span></td><td>{{ e.line }}</td><td>{{ e.who }}</td>

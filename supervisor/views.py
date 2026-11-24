@@ -23,7 +23,7 @@ PERM = "section.supervisor"
 EDIT_PERM = "history.edit"   # Correct history: change, split or delete past records (supervisor/edit.py)
 PER_PAGE = 100
 TABS = [("status", "Line status"), ("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs"),
-        ("events", "Timeline"), ("s2k", "S2K posting")]
+        ("events", "Timeline")]
 NOBODY = "Nobody logged in"
 
 
@@ -295,28 +295,16 @@ def page(request):
     me, denied = _gate(request)
     if denied:
         return denied
+    if request.GET.get("tab") == "s2k":   # S2K posting moved to the Scheduler
+        q = request.GET.copy()
+        q.pop("tab")
+        return HttpResponseRedirect("/scheduler/s2k/" + (f"?{q.urlencode()}" if q else ""))
     f = filters(request.GET)
     if f["tab"] == "status":
         cards, totals = line_status()
         return render(request, "supervisor/page.html", {
             "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "cards": cards, "totals": totals, "now": timezone.now(), "openCo": open_changeovers(),
             "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS}, "nobody": NOBODY, "msg": request.GET.get("msg", "")[:200]})
-    if f["tab"] == "s2k":
-        from . import s2k
-        R = s2k.rows(f["A"], f["B"], f["line"], only_open=f["result"] == "open")
-        if request.GET.get("csv") == "1":
-            resp = HttpResponse(content_type="text/csv; charset=utf-8")
-            resp["Content-Disposition"] = f'attachment; filename="s2k-to-post-{f["from"]}-to-{f["to"]}.csv"'
-            w = csv.writer(resp)
-            for row in s2k.csv_rows(R):
-                w.writerow(row)
-            return resp
-        lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
-        return render(request, "supervisor/page.html", {
-            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "S2K": R, "n": len(R), "first": 1, "last": len(R), "lines": lines, "openCo": open_changeovers(),
-            "totals": {"MOs": len(R), "To post": sum(x["unposted"] for x in R), "Don't agree": sum(1 for x in R if x["flags"])},
-            "csv": _query(f, csv="1"), "here": _query(f), "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS},
-            "nobody": NOBODY, "canEdit": perms.can(me, EDIT_PERM), "canPost": perms.can(me, EDIT_PERM), "msg": request.GET.get("msg", "")[:200]})
     if f["tab"] == "events":
         from . import timeline
         evs = timeline.events(f, f["kind"], f["q"])
@@ -678,23 +666,6 @@ def build_add(request):
     ctx = _builder_ctx(me, rows, "", err)
     ctx.update({"form": form, "machines": list(Machine.objects.order_by("sort", "id").values_list("name", flat=True))})
     return render(request, "supervisor/build_add.html", ctx)
-
-
-@require_http_methods(["POST"])
-def s2k_mark(request):
-    """Supervisor › S2K posting › Mark these as posted (the rows the CSV holds for these filters)."""
-    me, denied = _gate(request)
-    if denied:
-        return denied
-    if not perms.can(me, EDIT_PERM):
-        return HttpResponseRedirect("/supervisor/?" + urlencode({"tab": "s2k", "msg": "Marking as posted needs permission to correct history."}))
-    from hmi.engine import Ctx, audit
-
-    from . import s2k
-    f = filters(request.POST)
-    n = s2k.mark(s2k.rows(f["A"], f["B"], f["line"]), me.name, timezone.now())
-    audit(Ctx(user=me), f"S2K posting: marked {n} rows as posted ({f['from']} – {f['to']}{', ' + f['line'] if f['line'] else ''})")
-    return HttpResponseRedirect("/supervisor/?" + _query({**f, "tab": "s2k"}, msg=f"{n} rows marked as posted in S2K."))
 
 
 def _reasons():

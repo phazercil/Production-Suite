@@ -9,8 +9,9 @@
   {% elif perm %}<p class="sub">This needs someone allowed to: <b>{{ perm_label }}</b>.</p>{% endif %}
   <input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="next_q" value="{{ next_q }}">
   {% if perm %}<input type="hidden" name="perm" value="{{ perm }}">{% endif %}
+  {% if not sup and changeop or not sup and S.me %}<p class="note">Pick your name, then enter your PIN.</p>{% endif %}
   <div class="users" role="radiogroup" aria-label="Who are you?">
-    {% for u in people %}<label class="userpick"><input type="radio" name="user" value="{{ u.id }}"><span class="btn">{{ u.name }}<br><span class="note">{% if u.role == "admin" %}Admin{% elif u.role == "lead" %}shift lead{% else %}{{ u.role }}{% endif %}</span></span></label>{% endfor %}
+    {% for u in people %}<label class="userpick"><input type="radio" name="user" value="{{ u.id }}" {% if not sup and changeop or not sup and S.me %}required{% endif %}><span class="btn">{{ u.name }}<br><span class="note">{% if u.role == "admin" %}Admin{% elif u.role == "lead" %}shift lead{% else %}{{ u.role }}{% endif %}</span></span></label>{% endfor %}
   </div>
   <label class="f">PIN<input type="password" name="pin" inputmode="numeric" autocomplete="off" placeholder="Scan badge or type PIN" autofocus></label>
   {% if S.st.demo %}<p class="note">Example PINs: J. Ortiz 1111 · M. Lee 2222 · K. Patel 3333 · S. Lead 4444 · Plant Admin 9999</p>{% endif %}

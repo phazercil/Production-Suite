@@ -10,6 +10,7 @@ from scheduler import stations
 from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
+from scheduler import s2kview
 from scheduler import views as sch
 from quality import viewer as fviewer
 from quality import views as quality
@@ -18,6 +19,22 @@ from packkiosk import views as packkiosk
 from cameras import views as cameras
 from sensors import views as sensors
 from suite import sections, thin
+
+def tabbed(view, tabs, root):
+    """/<section>/<tab>/: the section's page opened on that tab (the same as /<section>/?tab=<tab>, which still works;
+    a ?tab= in the query wins, so a page's own "?tab=…" links keep working from a tab's address)."""
+    from django.http import HttpResponseRedirect
+
+    def page(request, tab):
+        if tab not in {k for k, _ in tabs}:
+            return HttpResponseRedirect(root)
+        if "tab" not in request.GET:
+            q = request.GET.copy()
+            q["tab"] = tab
+            request.GET = q
+        return view(request)
+    return page
+
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/operator/", permanent=False)),
@@ -37,6 +54,7 @@ urlpatterns = [
     path("kiosk/", RedirectView.as_view(url="/operator/", permanent=False, query_string=True)),
     path("api/hmi/state", hmi.state),
     path("api/hmi/login", hmi.login),
+    path("api/hmi/people", hmi.people),
     path("api/hmi/logout", hmi.logout),
     path("api/hmi/ping", hmi.ping),
     path("api/hmi/cmd", hmi.command),
@@ -49,6 +67,9 @@ urlpatterns = [
     path("api/hmi/roll-photo/<int:pk>", hmi.roll_photo),
     # Scheduler
     path("scheduler/", sch.board, name="scheduler"),
+    path("scheduler/s2k/", s2kview.page, name="s2k-posting"),
+    path("scheduler/s2k/mark", s2kview.mark),
+    path("scheduler/<slug:route>/", sch.board_route),
     path("api/scheduler/state", sch.state),
     path("api/scheduler/job", sch.put_job),
     path("api/scheduler/job/delete", sch.del_job),
@@ -82,7 +103,6 @@ urlpatterns = [
     path("labor/", labor.page, name="labor"),
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
-    path("supervisor/s2k-mark", supervisor.s2k_mark),
     path("supervisor/down-batch", supervisor.down_batch),
     path("quality/", quality.page, name="quality"),
     path("quality/viewer/app/", fviewer.app, name="filter-viewer"),
@@ -123,4 +143,19 @@ urlpatterns = [
     path("api/labor/save", labor.save),
     path("api/labor/history", labor.history),
     path("api/labor/restore", labor.restore),
+]
+
+# every section's tabs at their own address: /admin/backup/, /supervisor/down/, /quality/trace/ …
+from hmi.kadmin import TABS as _admin_tabs  # noqa: E402
+from maintenance.views import TABS as _mt_tabs  # noqa: E402
+from quality.views import TABS as _q_tabs  # noqa: E402
+from sensors.views import TABS as _sn_tabs  # noqa: E402
+from supervisor.views import TABS as _sv_tabs  # noqa: E402
+
+urlpatterns += [
+    path("admin/<slug:tab>/", tabbed(kv.admin_page, _admin_tabs, "/admin/")),
+    path("supervisor/<slug:tab>/", tabbed(supervisor.page, _sv_tabs, "/supervisor/")),
+    path("quality/<slug:tab>/", tabbed(quality.page, _q_tabs, "/quality/")),
+    path("maintenance/<slug:tab>/", tabbed(maintenance.page, _mt_tabs, "/maintenance/")),
+    path("sensors/<slug:tab>/", tabbed(sensors.page, _sn_tabs, "/sensors/")),
 ]
