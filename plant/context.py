@@ -1,5 +1,5 @@
 # The sections of the suite, in the top bar (key, address, name)
-MODES = [("operator", "/operator/", "Operator Kiosk"), ("packaging", "/packaging/", "Packaging Kiosk"), ("stations", "/stations/", "Stations"), ("scheduler", "/scheduler/", "Scheduler"), ("data", "/data/", "Data Kiosk"),
+MODES = [("operator", "/operator/", "Operator Kiosk"), ("packaging", "/packaging/", "Packaging Kiosk"), ("stations", "/stations/", "Stations"), ("schedule", "/schedule/", "Schedule"), ("scheduler", "/scheduler/", "Scheduler"), ("data", "/data/", "Data Kiosk"),
          ("reports", "/reports/", "Reports"), ("labor", "/labor/", "Labor Budget"), ("supervisor", "/supervisor/", "Supervisor"),
          ("quality", "/quality/", "Quality"),
          ("maintenance", "/maintenance/", "Maintenance"), ("admin", "/admin/", "Admin")]
@@ -8,7 +8,7 @@ MODES = [("operator", "/operator/", "Operator Kiosk"), ("packaging", "/packaging
 # who may open each mode (Admin › Permissions); modes without one are open to everyone on the plant network
 MODE_PERM = {"packaging": "section.packaging", "stations": "section.stations", "supervisor": "section.supervisor", "quality": "section.quality",
              "maintenance": "section.maintenance", "admin": "section.admin", "labor": "section.labor"}
-MORE = {"reports", "labor", "admin"}   # back-office modes: under More, so the bar stays one row on floor screens
+MORE = {"schedule", "reports", "labor", "admin"}   # back-office modes: under More, so the bar stays one row on floor screens
 
 
 def _me(request):

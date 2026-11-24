@@ -1,3 +1,28 @@
+## What's new in 1.9.11
+
+- **A changeover ends when the machine runs.**
+  - Once the line has stopped for the changeover and then runs for 3 minutes in a row, the changeover's time ends at the minute it started running. This is set in Admin › Rules › "A changeover is done once the machine runs for". Running out the old MO's last parts before that first stop doesn't end it.
+  - Stops after that are ordinary downtime needing a reason; they're no longer tagged Changeover.
+  - Shorter test runs don't end it.
+  - The operator still finishes the changeover (steps, next MO) on the kiosk. Finishing later keeps the time as it was, and the filters made since it started running go to the new MO.
+- **Roll pictures at the start and end of each shift.**
+  - Start of shift asks for a picture of the roll on the machine and one of its tag; End shift asks for the same of the roll left for the next shift.
+  - Start of shift also shows the pictures the last shift left, to compare.
+  - The pictures are kept with the shift: End of Shift report and Supervisor › Shift logs.
+  - Admin › Rules › Roll pictures: 2 requires them (the default), 1 asks but allows skipping, 0 turns it off.
+- **Schedule** (More › Schedule): the plant's shifts and calendar on one page.
+  - Shifts: times, the weekdays each one works, breaks and lunch.
+  - Calendar: each day as it will be worked. Any day can be closed (holiday), off, no production, an extra working day, or have one shift off, added or at other times that day.
+  - The kiosks' shift windows and planned time, the Scheduler and Reports all follow it. A change for today is picked up at once.
+  - The Labor Budget's holidays can be copied in with one button. The Scheduler no longer takes its working days from the Labor Budget, only crews and costs.
+- **Nights and weekends:**
+  - A changeover left open between shifts with nobody on it no longer counts that time as changeover or downtime (the 420-minute midnight-to-7 am entries).
+  - Supervisor › Shift logs always lists every scheduled shift's log, with or without an operator.
+- **Deleting a changeover** (Supervisor › Changeovers) clears the Changeover reason from the stops in its time, so the right reason can be given. The stops themselves stay, since the line really was stopped.
+- **Supervisor › Downtime: change many reasons at once.**
+  - Tick the stops (or tick the box in the header for every stop on the page; Shift-click ticks a range), pick the reason, say why, and press Change them. Delete them removes stops that shouldn't be there (with why).
+  - Each stop keeps its change in its history, the same as editing it alone.- End of Shift › Downtime by reason no longer runs past its box.
+
 ## What's new in 1.9.10
 
 - **Reliability:**

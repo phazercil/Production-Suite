@@ -306,6 +306,10 @@ class RollTagPhoto(models.Model):
     """The picture of a roll tag an operator took to fill in Roll tags, with what the screen read from it.
     Kept with the roll it was saved with (traceability); pictures never saved with a roll are removed after a day."""
     roll = models.ForeignKey(RollTag, null=True, blank=True, related_name="photos", on_delete=models.CASCADE)
+    shift = models.ForeignKey(ShiftRun, null=True, blank=True, related_name="roll_photos", on_delete=models.SET_NULL,
+                              help_text="Taken at the start or end of this shift (the roll on the machine)")
+    kind = models.CharField(max_length=10, blank=True, default="", choices=[("", "Roll tag read"), ("start", "Start of shift"), ("end", "End of shift")])
+    what = models.CharField(max_length=10, blank=True, default="", choices=[("", ""), ("tag", "Tag"), ("roll", "Roll")])
     t = models.DateTimeField()
     by = models.CharField(max_length=120)
     line = models.CharField(max_length=60, blank=True)

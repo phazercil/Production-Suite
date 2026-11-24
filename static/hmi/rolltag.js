@@ -80,6 +80,18 @@
     return out;
   }
 
+  // Start of shift / End shift: the picture of the roll and of its tag, shown where it was taken
+  document.addEventListener("change", e => {
+    const input = e.target;
+    const box = input.closest && input.closest("[data-rollpic]");
+    if (!box || !input.files || !input.files.length) return;
+    const img = box.querySelector("img");
+    if (img.src) URL.revokeObjectURL(img.src);
+    img.src = URL.createObjectURL(input.files[0]);
+    img.hidden = false;
+    box.classList.add("taken");
+  });
+
   document.addEventListener("change", async e => {
     const input = e.target;
     if (!input.matches || !input.matches("[data-rolltag-file]") || !input.files || !input.files.length) return;

@@ -41,8 +41,12 @@ def apply_variant(data, d):
 
 class Book:
     def __init__(self):
-        from .models import Shift, ShiftVersion
+        from .models import PlantDay, Shift, ShiftVersion
         self.shifts = {s.id: s for s in Shift.all_objects.prefetch_related("breaks", "variants")}
+        try:
+            self.days = {d.day: {"kind": d.kind, "shifts": d.shifts or {}, "note": d.note} for d in PlantDay.objects.all()}
+        except Exception:  # noqa: BLE001 - before its migration
+            self.days = {}
         self.now = {i: current_data(s) for i, s in self.shifts.items()}
         self.versions = {}
         for v in ShiftVersion.objects.order_by("until"):
@@ -53,10 +57,35 @@ class Book:
         s = self.shifts.get(sid)
         if not s or (s.retired_on and d >= s.retired_on) or (s.created_on and d < s.created_on):
             return None
+        x = None
         for v in self.versions.get(sid, []):
             if d < v.until:
-                return apply_variant({**v.data, "id": sid}, d)
-        return apply_variant(self.now[sid], d)
+                x = apply_variant({**v.data, "id": sid}, d)
+                break
+        if x is None:
+            x = apply_variant(self.now[sid], d)
+        return self.calendar(x, sid, d)
+
+    def calendar(self, x, sid, d):
+        """The shift on day d with the plant calendar applied (Schedule › Calendar): None when it isn't worked that day."""
+        c = self.days.get(d)
+        if not c:
+            return x
+        if c["kind"] in ("off", "closed", "noprod"):
+            return None
+        dow = (d.weekday() + 1) % 7
+        o = c["shifts"].get(str(sid)) or {}
+        if o.get("off"):
+            return None
+        if o.get("on") or (c["kind"] == "work" and x.get("days")):
+            x = {**x, "days": sorted(set(x.get("days") or []) | {dow})}
+        if o.get("start") and o.get("end"):
+            x = {**x, "start": o["start"], "end": o["end"], "changed": True}
+        return {**x, "calNote": c.get("note") or ""}
+
+    def day_info(self, d):
+        """{"kind", "note", "shifts"} for a day with a calendar entry, else None."""
+        return self.days.get(d)
 
     def all_on(self, d, ids=None):
         """Every shift worked on day d (in schedule order), optionally only these ids."""
@@ -77,6 +106,15 @@ def book():
     if _BOOK["book"] is None or time.monotonic() - _BOOK["t"] > ttl:
         _BOOK.update(book=Book(), t=time.monotonic())
     return _BOOK["book"]
+
+
+def special_days(a, b):
+    """Calendar days between two dates for the Scheduler's board: {iso: "WORK" | "OFF" | "HOLIDAY" | "NOPROD"}."""
+    out = {}
+    for d, c in book().days.items():
+        if a <= d <= b and c["kind"]:
+            out[d.isoformat()] = {"work": "WORK", "off": "OFF", "closed": "HOLIDAY", "noprod": "NOPROD"}[c["kind"]]
+    return out
 
 
 def forget():
@@ -124,7 +162,9 @@ def _changed(sender, **kw):
 def connect():
     from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 
-    from .models import Shift, ShiftBreak, ShiftVariant
+    from .models import PlantDay, Shift, ShiftBreak, ShiftVariant
+    post_save.connect(_changed, sender=PlantDay, dispatch_uid="sched-plantday")
+    post_delete.connect(_changed, sender=PlantDay, dispatch_uid="sched-plantday-del")
     pre_save.connect(_shift_pre_save, sender=Shift, dispatch_uid="sched-shift")
     for m in (ShiftBreak, ShiftVariant):
         pre_save.connect(_child_change, sender=m, dispatch_uid=f"sched-{m.__name__}-save")

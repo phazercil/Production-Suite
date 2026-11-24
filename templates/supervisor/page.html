@@ -79,13 +79,19 @@
       <td class="nw">{% if not q.passed %}<a class="btn go po" href="/supervisor/processout/{{ q.pk }}/?back={{ backq }}">{% if q.issue %}Change process out{% else %}Process out{% endif %}</a> {% endif %}{% if q.shift_id %}<a href="/supervisor/log/{{ q.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/qc/{{ q.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="9" class="empty">No QC checks for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "down" %}
-    <table class="st"><thead><tr><th>Line</th><th>Start</th><th>End</th><th class="n">Min</th><th>Reason</th><th>Notes</th><th>MO</th><th>Operator</th><th></th></tr></thead><tbody>
+    {% if canEdit and rows %}<form method="post" action="/supervisor/down-batch" id="dbatch" class="sv-batch">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
+      <b><span id="dbn">0</span> ticked</b>
+      <label>Set their reason to<select name="reason"><option value="">Pick…</option>{% for r in reasons %}<option>{{ r }}</option>{% endfor %}</select></label>
+      <label class="grow">Why (kept in each stop's history)<input type="text" name="why" maxlength="300" placeholder="e.g. tagged as changeover, but the line had been running"></label>
+      <button class="btn go" type="submit" id="dbgo" disabled>Change them</button>
+      <button class="btn bad" type="submit" name="action" value="delete" id="dbdel" disabled data-confirm="Delete the ticked stops? They stay in the history with why.">Delete them</button></form>{% endif %}
+    <table class="st"><thead><tr>{% if canEdit %}<th><input type="checkbox" id="dball" aria-label="Tick every stop on this page" form="dbatch"></th>{% endif %}<th>Line</th><th>Start</th><th>End</th><th class="n">Min</th><th>Reason</th><th>Notes</th><th>MO</th><th>Operator</th><th></th></tr></thead><tbody>
     {% for d in rows %}<tr>
-      <td>{{ d.line }}</td><td class="nw">{{ d.start_time|day }} {{ d.start_time|clock }}</td><td class="nw">{{ d.end_time|clock }}</td><td class="n">{{ d.minutes }}</td>
+      {% if canEdit %}<td><input type="checkbox" name="ids" value="{{ d.pk }}" form="dbatch" aria-label="Tick this stop"></td>{% endif %}<td>{{ d.line }}</td><td class="nw">{{ d.start_time|day }} {{ d.start_time|clock }}</td><td class="nw">{{ d.end_time|clock }}</td><td class="n">{{ d.minutes }}</td>
       <td>{% if d.reason %}{{ d.reason }}{% else %}<span class="warn">Not entered</span>{% endif %}</td><td>{{ d.notes }}</td><td>{{ d.mo }}</td>
       <td>{% if d.shift %}{% if d.shift.user_name %}{{ d.shift.user_name }}{% else %}<span class="muted">{{ nobody }}</span>{% endif %}<div class="note">{{ d.shift.shift_name }}</div>{% endif %}</td>
       <td>{% if d.shift_id %}<a href="/supervisor/log/{{ d.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/downtime/{{ d.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
-    {% empty %}<tr><td colspan="9" class="empty">No downtime for these filters.</td></tr>{% endfor %}</tbody></table>
+    {% empty %}<tr><td colspan="10" class="empty">No downtime for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "s2k" %}
     <p class="note" style="margin:0 0 8px">S2K is read-only to the suite: nothing is sent to it. Download the rows not posted yet, key them in or import them in S2K, then mark them as posted so they don't go in twice.</p>
     {% if canPost %}<form method="post" action="/supervisor/s2k-mark" class="row" style="margin-bottom:8px">{% csrf_token %}<input type="hidden" name="line" value="{{ f.line }}"><input type="hidden" name="from" value="{{ f.from|date:'Y-m-d' }}"><input type="hidden" name="to" value="{{ f.to|date:'Y-m-d' }}">

@@ -1,0 +1,11 @@
+{# The roll on the machine at the start or end of a shift: a picture of the roll and one of its tag. when = start|end #}
+{% if rollPics %}<div class="panel rollpics"><h3 class="h2">{% if when == "start" %}The roll you're starting with{% else %}The roll you're leaving for the next shift{% endif %}{% if rollPics >= 2 %} <span class="note">(required)</span>{% endif %}</h3>
+  <p class="note">{% if when == "start" %}Take a picture of the roll on the machine and one of its tag.{% else %}Take a picture of the roll on the machine now and one of its tag, as you leave it.{% endif %}</p>
+  <div class="rollpics-row">
+    {% for f, what in pics %}<label class="rollpic" data-rollpic>
+      <img alt="" hidden><span class="rollpic-ph">{% icon "camera" %}<b>{{ what }}</b><span class="note">Tap to take it</span></span>
+      <input type="file" name="{{ f }}" accept="image/*" capture="environment" hidden {% if rollPics >= 2 %}data-required{% endif %}></label>{% endfor %}
+  </div>
+  {% if left %}<p class="note" style="margin-top:8px">Left by the last shift ({{ left.0.by }} · {{ left.0.t|day }} {{ left.0.t|clock }}):</p>
+    <div class="thumbs sm">{% for x in left %}<a class="thumb" href="/api/hmi/roll-photo/{{ x.id }}" target="_blank" rel="noopener" title="{{ x.get_what_display }}"><img src="/api/hmi/roll-photo/{{ x.id }}?size=thumb" alt="{{ x.get_what_display }}"></a>{% endfor %}</div>{% endif %}
+</div>{% endif %}

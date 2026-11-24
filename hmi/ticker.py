@@ -270,7 +270,7 @@ def timed_pulls(state, t):
     if due("rollphotos", 24 * 60):
         def purge_roll_photos():
             from .models import RollTagPhoto
-            RollTagPhoto.objects.filter(roll__isnull=True, t__lt=t - timedelta(days=1)).delete()
+            RollTagPhoto.objects.filter(roll__isnull=True, kind="", t__lt=t - timedelta(days=1)).delete()
         run("rollphotos", purge_roll_photos)
     # Scheduled database backups and their off-server copy (Admin › Backup), looked at every 10 minutes
     if due("dbbackup", 10):

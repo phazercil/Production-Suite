@@ -211,11 +211,11 @@ class Calendar:
         if key in self.cache:
             return self.cache[key]
         dow = (local(from_ms(day)).weekday() + 1) % 7
-        status, by_date = self.labor.day_status_ms(day) if self.labor else ("WORK", False)
+        # the plant calendar (Schedule › Calendar) is in book(): closed days, extra days and changed times
         out = []
-        for sid in ((m.get("shifts") or []) if status == "WORK" else []):
+        for sid in (m.get("shifts") or []):
             sh = book().on(sid, local(from_ms(day)).date())   # as worked that day: its seasonal variant, or how it was then
-            if not sh or not (by_date or dow in (sh.get("days") or [])):
+            if not sh or dow not in (sh.get("days") or []):
                 continue
             s0 = hm(sh["start"])
             L = (hm(sh["end"]) - s0 + 1440) % 1440 or 1440

@@ -141,6 +141,11 @@
     var s = document.querySelector("[data-search]:not([disabled]), .mode input[type=search]:not([disabled])");
     if (s && s.offsetParent !== null) { e.preventDefault(); s.focus(); if (s.select) s.select(); }
   });
+  // a button or link that asks first (data-confirm="…"); the page's own scripts can't be inline (Content-Security-Policy)
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-confirm]");
+    if (b && !window.confirm(b.getAttribute("data-confirm"))) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
 })();
 // a row a link pointed to (a notice's MO on the kiosk schedule): bring it into view once
 document.addEventListener("htmx:afterSettle", function () {

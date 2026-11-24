@@ -58,3 +58,30 @@
     if (!document.querySelector('.sv-rows tr[hidden]')) b.disabled = true;
   });
 })();
+
+// Supervisor › Downtime: tick stops (the header box ticks every one, Shift-click a range), then change or delete them together
+(function () {
+  var f = document.getElementById("dbatch");
+  if (!f) return;
+  var all = document.getElementById("dball"), n = document.getElementById("dbn"), go = document.getElementById("dbgo"), del = document.getElementById("dbdel");
+  function boxes() { return [].slice.call(document.querySelectorAll('input[name="ids"][form="dbatch"]')); }
+  function upd() {
+    var list = boxes(), k = list.filter(function (b) { return b.checked; }).length;
+    n.textContent = k; go.disabled = !k; del.disabled = !k;
+    if (all) { all.checked = !!k && k === list.length; all.indeterminate = !!k && k < list.length; }
+  }
+  if (all) all.addEventListener("change", function () { boxes().forEach(function (b) { b.checked = all.checked; }); upd(); });
+  document.addEventListener("change", function (e) { if (e.target.matches('input[name="ids"]')) upd(); });
+  var last = null;
+  document.addEventListener("click", function (e) {
+    var b = e.target;
+    if (!b.matches || !b.matches('input[name="ids"]')) return;
+    if (e.shiftKey && last) {
+      var list = boxes(), a = list.indexOf(last), c = list.indexOf(b);
+      list.slice(Math.min(a, c), Math.max(a, c) + 1).forEach(function (x) { x.checked = b.checked; });
+      upd();
+    }
+    last = b;
+  });
+  upd();
+})();

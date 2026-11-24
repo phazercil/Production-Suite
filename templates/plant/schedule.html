@@ -1,0 +1,51 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Schedule{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv sch-page">
+  <div class="sv-head"><h1>Schedule</h1><span class="muted">The plant's shifts and calendar. The kiosks, the Scheduler and Reports all follow it, so a change here (even for today) is picked up at once.</span></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  {% if not can %}<p class="note">Looking needs no sign-in. Changing it needs "Change the schedule" (Admin › Permissions).</p>{% endif %}
+  <div class="sch-grid">
+    <section>
+      <div class="row"><h2 class="grow">Shifts</h2>{% if can %}<form method="post" action="/schedule/do/shiftAdd">{% csrf_token %}<input type="hidden" name="month" value="{{ month|date:'Y-m' }}"><button class="btn">＋ Add shift</button></form>{% endif %}</div>
+      {% for s in shifts %}<form method="post" action="/schedule/do/shift" class="card sch-shift">{% csrf_token %}<input type="hidden" name="id" value="{{ s.id }}"><input type="hidden" name="month" value="{{ month|date:'Y-m' }}">
+        <div class="row"><input name="name" value="{{ s.name }}" class="sch-name" aria-label="Shift name" {% if not can %}disabled{% endif %}><span class="note">{{ s.hours }} h worked a day</span></div>
+        <div class="row sch-times"><label>Starts<input type="time" name="start" value="{{ s.start }}" required {% if not can %}disabled{% endif %}></label><label>Ends<input type="time" name="end" value="{{ s.end }}" required {% if not can %}disabled{% endif %}></label></div>
+        <div class="sch-days" role="group" aria-label="Days worked">{% for i, d in dows %}<label class="dchip"><input type="checkbox" name="days" value="{{ i }}" {% if i in s.days %}checked{% endif %} {% if not can %}disabled{% endif %}><span>{{ d }}</span></label>{% endfor %}</div>
+        <div class="sch-breaks"><div class="note">Breaks and lunch (not downtime)</div>
+          {% for b in s.breaks.all %}<div class="row"><input name="bLabel" value="{{ b.label }}" aria-label="Break name" {% if not can %}disabled{% endif %}><input type="time" name="bStart" value="{{ b.start }}" aria-label="Break start" {% if not can %}disabled{% endif %}><input type="time" name="bEnd" value="{{ b.end }}" aria-label="Break end" {% if not can %}disabled{% endif %}></div>{% endfor %}
+          {% if can %}<div class="row"><input name="bLabel" placeholder="Add a break" aria-label="New break name"><input type="time" name="bStart" aria-label="New break start"><input type="time" name="bEnd" aria-label="New break end"></div><p class="note">Clear a break's times to remove it.</p>{% endif %}</div>
+        {% if can %}<div class="row" style="gap:8px;margin-top:8px"><button class="btn go">Save {{ s.name }}</button><span class="grow"></span>
+          <button class="btn ghost sm" formaction="/schedule/do/shiftRetire" data-confirm="Remove {{ s.name }} from today on? The days before keep it.">Remove</button></div>{% endif %}
+      </form>{% endfor %}
+      <p class="note">Which lines run each shift is set in Scheduler › Lines &amp; Shifts. A change to a shift applies from today; the days before keep the times they were worked at.</p>
+    </section>
+    <section>
+      <div class="row sch-monthbar"><a class="btn ghost" href="?month={{ prev }}" aria-label="Previous month">‹</a><h2>{{ month|date:"F Y" }}</h2><a class="btn ghost" href="?month={{ next }}" aria-label="Next month">›</a><a class="btn ghost sm" href="?month={{ thisMonth }}">Today</a><span class="grow"></span>
+        {% if can %}<form method="post" action="/schedule/do/copyLabor">{% csrf_token %}<input type="hidden" name="month" value="{{ month|date:'Y-m' }}"><button class="btn ghost sm" title="Copy the Labor Budget calendar's holidays, days off and extra days (from today on); days already set here are kept">Copy holidays from the Labor Budget</button></form>{% endif %}</div>
+      <div class="sch-legend"><span class="k work">Working</span><span class="k idle">Not scheduled</span><span class="k off">Off</span><span class="k closed">Plant closed</span><span class="k noprod">No production</span><span class="k chg">Times changed</span></div>
+      <div class="sch-cal" role="grid" aria-label="{{ month|date:'F Y' }}">
+        {% for i, d in dows %}<div class="sch-dow" role="columnheader">{{ d }}</div>{% endfor %}
+        {% for wk in weeks %}{% for c in wk %}<a role="gridcell" href="?month={{ month|date:'Y-m' }}&amp;day={{ c.d|date:'Y-m-d' }}#day" class="sch-day {{ c.state }} {% if not c.in %}out{% endif %} {% if c.today %}today{% endif %} {% if day and day.d == c.d %}sel{% endif %} {% if c.changed %}chg{% endif %}">
+          <b>{{ c.d.day }}</b>{% if c.label %}<span class="tag">{{ c.label }}</span>{% endif %}
+          {% for x in c.shifts %}<span class="sh {% if x.changed %}chg{% endif %}">{{ x.name }} {{ x.start }}–{{ x.end }}</span>{% endfor %}
+          {% if c.note %}<span class="nt">{{ c.note }}</span>{% endif %}</a>{% endfor %}{% endfor %}
+      </div>
+      {% if day %}<form method="post" action="/schedule/do/day" class="card sch-dayform" id="day">{% csrf_token %}<input type="hidden" name="day" value="{{ day.d|date:'Y-m-d' }}"><input type="hidden" name="month" value="{{ month|date:'Y-m' }}">
+        <h2>{{ day.d|date:"l, F j, Y" }}</h2>
+        <fieldset class="sch-kinds" {% if not can %}disabled{% endif %}><legend>The day</legend>
+          <label class="chk"><input type="radio" name="kind" value="" {% if not day.kind %}checked{% endif %}> As the shifts' weekdays say</label>
+          {% for k, l in kinds %}<label class="chk"><input type="radio" name="kind" value="{{ k }}" {% if day.kind == k %}checked{% endif %}> {{ l }}</label>{% endfor %}</fieldset>
+        <label class="fld">Note (shows on the calendar)<input name="note" maxlength="120" value="{{ day.pd.note }}" placeholder="e.g. Thanksgiving · weather · inventory" {% if not can %}disabled{% endif %}></label>
+        <table class="st sch-dayshifts"><thead><tr><th>Shift</th><th>That day</th><th>Other times</th></tr></thead><tbody>
+        {% for r in day.rows %}<tr><td><b>{{ r.s.name }}</b><div class="note">{% if r.normal %}works {{ day.d|date:"l" }}s{% else %}doesn't work {{ day.d|date:"l" }}s{% endif %} · now {% if r.worked %}<b>worked</b>{% else %}not worked{% endif %}</div></td>
+          <td><select name="s{{ r.s.id }}" {% if not can %}disabled{% endif %}><option value="">As usual</option><option value="off" {% if r.state == "off" %}selected{% endif %}>Off that day</option><option value="on" {% if r.state == "on" %}selected{% endif %}>Works that day</option></select></td>
+          <td class="nw"><label class="chk"><input type="checkbox" name="t{{ r.s.id }}" value="1" {% if r.times %}checked{% endif %} {% if not can %}disabled{% endif %}> from</label> <input type="time" name="a{{ r.s.id }}" value="{{ r.start }}" {% if not can %}disabled{% endif %}> to <input type="time" name="b{{ r.s.id }}" value="{{ r.end }}" {% if not can %}disabled{% endif %}></td></tr>{% endfor %}</tbody></table>
+        {% if can %}<div class="row" style="gap:8px"><button class="btn go">Save {{ day.d|date:"M j" }}</button><a class="btn ghost" href="?month={{ month|date:'Y-m' }}">Close</a></div>
+        <p class="note">Changing today is fine: the open shift ends at its new time, stops outside the new hours aren't downtime, and the Scheduler re-plans.</p>{% endif %}
+      </form>{% endif %}
+      {% if upcoming %}<div class="card"><h2>Coming up</h2><table class="st"><tbody>{% for d in upcoming %}<tr><td class="nw"><a href="?month={{ d.day|date:'Y-m' }}&amp;day={{ d.day|date:'Y-m-d' }}#day">{{ d.day|date:"D M j" }}</a></td><td>{{ d.get_kind_display|default:"Shift changes" }}</td><td class="note">{{ d.note }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    </section>
+  </div>
+</div>{% endblock %}

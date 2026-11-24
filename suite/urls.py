@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
 from datakiosk import views as dk
 from labor import views as labor
 from maintenance import views as maintenance
+from plant import calview
 from scheduler import stations
 from reports import views as reports
 from hmi import kviews as kv
@@ -82,6 +83,7 @@ urlpatterns = [
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
     path("supervisor/s2k-mark", supervisor.s2k_mark),
+    path("supervisor/down-batch", supervisor.down_batch),
     path("quality/", quality.page, name="quality"),
     path("quality/viewer/app/", fviewer.app, name="filter-viewer"),
     path("api/quality/fv/parts", fviewer.parts),
@@ -110,6 +112,8 @@ urlpatterns = [
     # Packaging Kiosk: pallet tags
     path("packaging/", packkiosk.page, name="packaging-section"),
     path("stations/", stations.page, name="stations"),
+    path("schedule/", calview.page, name="schedule"),
+    path("schedule/do/<str:name>", calview.do),
     path("maintenance/reorder.csv", maintenance.reorder_csv),
     path("stations/do/<str:name>", stations.do),
     path("packaging/suggest", packkiosk.suggest),
