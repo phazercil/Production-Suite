@@ -177,6 +177,8 @@ USE_I18N = False
 USE_TZ = True
 
 STATIC_URL = "static/"
+# a request body can be this large: a full year's Labor Budget plan (roster, calendar, crews) runs to several MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = Path(env("STATIC_ROOT", str(BASE_DIR / "staticfiles")))  # Linux: /var/www/production-suite/static, served by Apache
 # every {% static %} address carries the build revision, so screens pick up new styles and scripts after an update

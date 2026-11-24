@@ -38,6 +38,7 @@ def tabbed(view, tabs, root):
 
 urlpatterns = [
     path("", RedirectView.as_view(url="/operator/", permanent=False)),
+    path("favicon.ico", RedirectView.as_view(url="/static/suite/icon.svg", permanent=False)),   # pages without their own icon link
     path("admin/", kv.admin_page, name="admin"),                 # Admin: the suite's settings, its own section
     path("db-admin/", admin.site.urls),                          # Django's raw table editor (superusers only)
     # Operator Kiosk

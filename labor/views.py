@@ -18,7 +18,7 @@ from plant.models import PlantSettings
 from .models import BUDGETS, LaborPlan, LaborPlanVersion
 
 PAGE = Path(__file__).resolve().parent / "page" / "labor.html"
-MAX_BYTES = 4 * 1024 * 1024
+MAX_BYTES = 12 * 1024 * 1024   # (settings.DATA_UPLOAD_MAX_MEMORY_SIZE is 16 MB)
 KEEP_VERSIONS = 200
 _page_cache = {}
 
@@ -93,7 +93,7 @@ def page(request, only=False):
     boot = {"budgets": budgets, "starter": starter, "syncNotes": notes, "user": me.name,
             "timeoutMin": PlantSettings.load().config["rules"].get("adminTimeout", 10)}
     out = (html.replace("__LABOR_CSS__", static("labor/labor.css"))
-               .replace("__SUITEBAR_CSS__", static("labor/suitebar.css"))
+               .replace("__SUITEBAR_CSS__", static("labor/suitebar.css") + '">\n  <link rel="icon" type="image/svg+xml" href="' + static("suite/icon.svg"))
                .replace("__LABOR_SYNC_JS__", static("labor/sync.js"))
                .replace("__SUITEBAR__", _suitebar(me, only))
                .replace("__LABOR_BOOT__", _json_for_html(boot)))
@@ -138,7 +138,7 @@ def validate_plan(data):
         if not isinstance(data.get(key), list):
             raise BadRequest(f"The plan is missing its {key} list.")
     if len(json.dumps(data)) > MAX_BYTES:
-        raise BadRequest("The plan is too large to save (over 4 MB).")
+        raise BadRequest("The plan is too large to save (over 12 MB).")
     return data
 
 

@@ -156,6 +156,15 @@
       which = which === 'B' ? 'B' : (which === 'A' ? 'A' : active());
       S.B[which].pending = copy(state); S.B[which].data = copy(state);
       clearTimeout(S.timer);
+      if (S.importing) {   // an imported file: save it now and say whether the server has it
+        S.importing = false;
+        status('saving', 'Saving…');
+        flushAll().then(function (ok) {
+          if (ok) toast('Imported plan saved on the server (budget ' + which + ').', 'success');
+          else toast('The imported plan is on this screen but NOT saved on the server yet. See the message at the top before leaving this page.', 'error');
+        });
+        return;
+      }
       status('pending', 'Saving…');
       S.timer = setTimeout(flushAll, 1200);
     },
@@ -207,6 +216,12 @@
     if (S.B.A.pending || S.B.B.pending || S.B.A.inflight || S.B.B.inflight) { flushAll(); e.preventDefault(); e.returnValue = ''; return ''; }
   });
   document.addEventListener('DOMContentLoaded', function () {
+    // Import JSON: the next save is the imported plan, sent at once (not after the usual pause)
+    var imp = window.importJSONState;
+    if (typeof imp === 'function') window.importJSONState = function (e) {
+      S.importing = true; setTimeout(function () { S.importing = false; }, 15000);
+      return imp.apply(this, arguments);
+    };
     var out = document.getElementById('labor-logout');
     if (out) out.addEventListener('click', function () {
       flushAll().then(function () { return post('/api/hmi/logout', {}); }).then(function () { window.onbeforeunload = null; location.href = location.pathname; });

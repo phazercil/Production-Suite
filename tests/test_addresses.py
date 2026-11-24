@@ -57,3 +57,25 @@ class Addresses(TestCase):
         self.assertEqual(k.session.get("pid"), Person.objects.get(pin="2222").pk)
         r = k.post("/kiosk/do/changeOp", {"pin": "1111"})
         self.assertContains(r, "Pick your name", status_code=r.status_code)
+
+
+class LargePlanAndIcon(TestCase):
+    def setUp(self):
+        seed_demo(reset=True)
+
+    def test_a_big_labor_plan_saves(self):
+        c = Client()
+        c.get("/supervisor/")
+        c.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+        plan = {"lines": [], "schedules": [], "calendar": {"year": 2027}, "projectName": "Big", "notes": "x" * (3 * 1024 * 1024)}
+        r = c.post("/api/labor/save", json.dumps({"budget": "B", "version": 0, "data": plan}), content_type="application/json").json()
+        self.assertTrue(r["ok"], r)
+        r = c.post("/api/labor/save", json.dumps({"budget": "B", "version": r["version"], "data": {**plan, "notes": "x" * (17 * 1024 * 1024)}}),
+                   content_type="application/json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("too large", r.json()["error"])
+
+    def test_tab_icon(self):
+        c = Client()
+        self.assertContains(c.get("/supervisor/"), "suite/icon.svg")
+        self.assertEqual(c.get("/favicon.ico")["Location"], "/static/suite/icon.svg")
