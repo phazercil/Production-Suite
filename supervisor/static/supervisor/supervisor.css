@@ -166,3 +166,4 @@ svg.spc circle.pt.bad{fill:#e5534b;stroke:#e5534b}
 .sv-pics{display:flex;flex-wrap:wrap;gap:8px}
 .sv-pics a{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:inherit}
 .sv-pics img{width:120px;height:90px;object-fit:cover;border-radius:6px;border:1px solid var(--rule,#333)}
+.s2k-page .sv-kpis{margin:10px 0}

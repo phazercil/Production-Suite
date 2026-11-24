@@ -1,3 +1,14 @@
+## What's new in 1.9.12
+
+- **Every page and tab has its own address**, so it can be bookmarked or sent: /admin/backup/, /supervisor/down/, /quality/trace/, /maintenance/inventory/, /scheduler/orders/ and so on. Older links still work and switch to the new address.
+- **S2K posting moved to the Scheduler** (Scheduler › S2K posting). Old Supervisor links forward there. Planners (Change the schedule) and supervisors can open it.
+- **Switching person needs your name and your PIN.** This covers the top bar's Switch person, logging in on a kiosk while someone else is on it, and Change operator. Logging in on an empty kiosk still takes just a PIN or badge.
+- **Labor Budget:**
+  - Plans over 2.5 MB failed to save (a server error), so a large imported plan was lost on leaving the page. Plans up to 12 MB now save.
+  - Import JSON saves right away and says whether the server has it.
+- **Scheduler › Lines & Shifts** no longer shows the Labor Budget plan panel. Crews and costs still apply.
+- **The suite's icon** shows on the browser tab of every page.
+
 ## What's new in 1.9.11
 
 - **A changeover ends when the machine runs.**

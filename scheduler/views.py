@@ -24,9 +24,20 @@ from .models import Job, job_key
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
 
 
+ROUTES = ("lines", "orders", "parts")
+
+
 @ensure_csrf_cookie
 def board(request):
     return render(request, "scheduler/board.html", {"mode": "scheduler"})
+
+
+def board_route(request, route):
+    """/scheduler/lines/, /scheduler/orders/, /scheduler/parts/: the Scheduler opened on that page."""
+    if route not in ROUTES:
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect("/scheduler/")
+    return board(request)
 
 
 def body(request):

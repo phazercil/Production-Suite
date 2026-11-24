@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" href="{% static 'suite/icon.svg' %}" type="image/svg+xml">
 <title>{% block title %}Production Suite{% endblock %}</title>
 <link rel="stylesheet" href="{% static 'suite/fonts/plex.css' %}">
 <link rel="stylesheet" href="{% static 'suite/shell.css' %}">
@@ -28,7 +29,7 @@
     <div class="suitemenu right">
       {% if suite_me %}<p class="note">Signed in on this screen as <b>{{ suite_me.name }}</b> ({{ suite_role }}). On the Operator Kiosk the <i>line operator</i> is whoever started the shift; this is who is using the screen.</p>
         <button type="button" data-suite-logout>Sign out</button><button type="button" data-suite-signin>Switch person</button>
-      {% else %}<p class="note">Sign in with your PIN or badge to change things. Looking needs no sign-in.</p><button type="button" data-suite-signin>Sign in</button>{% endif %}
+      {% else %}<p class="note">Sign in (your name, then your PIN) to change things. Looking needs no sign-in.</p><button type="button" data-suite-signin>Sign in</button>{% endif %}
       <p class="note ver">{{ suite_rev }}</p></div></details>
   <button type="button" class="suite-fs" data-fullscreen title="Full screen (Esc leaves it)" aria-label="Full screen">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg><span>Full screen</span></button>

@@ -104,3 +104,10 @@ html.fs-on [data-fullscreen] .fs-out{display:inline}
 .suite-signin form{background:var(--s-surface);border:1px solid var(--s-rule);border-radius:12px;padding:16px;min-width:320px}
 .suite-signin input{width:100%;font:600 24px var(--s-body);padding:10px;border-radius:8px;border:1px solid var(--s-rule);background:var(--s-ground);color:var(--s-ink);letter-spacing:.2em}
 .suite-signin .err{color:#ff8b8b;min-height:1.2em;margin:6px 0 0}
+.suite-people{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;max-height:44vh;overflow:auto;margin-bottom:10px;max-width:640px}
+.suite-people label{cursor:pointer}
+.suite-people input{position:absolute;opacity:0;width:1px;height:1px}
+.suite-people span{display:flex;flex-direction:column;gap:2px;padding:10px;border:1px solid var(--s-rule);border-radius:8px;background:var(--s-ground);font-weight:600}
+.suite-people small{font-weight:400;opacity:.7;font-size:12px}
+.suite-people input:checked+span{border-color:var(--s-accent,#5aa0e6);box-shadow:0 0 0 2px var(--s-accent,#5aa0e6) inset}
+.suite-people input:focus-visible+span{outline:2px solid var(--s-accent,#5aa0e6)}

@@ -75,8 +75,14 @@ def state(request):
     return state_response(request)
 
 
-def pin_login(request, pin, user_id=None, perm=""):
-    """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not)."""
+PICK_NAME = "Pick your name, then enter your PIN."
+
+
+def pin_login(request, pin, user_id=None, perm="", require_name=False):
+    """Check a PIN and log the person in on this screen. Returns (person, None) or (None, why not).
+    require_name: switching people (someone else is signed in, or taking over a line) needs the name picked as well."""
+    if require_name and not user_id:
+        return None, PICK_NAME
     u, err = check_pin(request, pin, user_id, perm)
     if not u:
         return None, err
@@ -138,13 +144,22 @@ def check_pin(request, pin, user_id=None, perm=""):
     return u, None
 
 
+@require_GET
+def people(request):
+    """The names to pick from when switching person from the top bar (then the PIN is checked)."""
+    from plant import perms
+    roles = dict(perms.ROLES)
+    return JsonResponse({"ok": True, "people": [{"id": u.pk, "name": u.name, "role": roles.get(u.role, u.role)}
+                                                for u in Person.objects.filter(active=True).exclude(pin="").order_by("name")]})
+
+
 @json_api
 @require_POST
 def login(request):
     p = body(request)
     from plant import perms
     perm = p.get("perm") if p.get("perm") in perms.PERMS else bool(p.get("adminOnly"))
-    u, err = pin_login(request, p.get("pin"), p.get("userId"), perm)
+    u, err = pin_login(request, p.get("pin"), p.get("userId"), perm, require_name=bool(p.get("switch")))
     if not u:
         return JsonResponse({"ok": False, "error": err})
     return state_response(request)

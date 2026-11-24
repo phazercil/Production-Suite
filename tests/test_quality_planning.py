@@ -183,9 +183,11 @@ class SequenceStationsS2K(TestCase):
         MoRun.objects.create(line="Barbara", mo=mo.number, item=mo.part, qty=100, scrap=0, start_time=now - timedelta(hours=1), end_time=now - timedelta(minutes=5))
         c = Client()
         self.assertTrue(sup_login(c, "4444")["ok"])
-        r = c.get("/supervisor/?tab=s2k").content.decode()
+        self.assertEqual(c.get("/supervisor/?tab=s2k&line=Barbara")["Location"], "/scheduler/s2k/?line=Barbara")   # moved to the Scheduler
+        r = c.get("/scheduler/s2k/").content.decode()
         self.assertIn(mo.number, r)
         self.assertIn("to post", r)
-        self.assertIn("MO run", c.get("/supervisor/?tab=s2k&csv=1").content.decode())
-        c.post("/supervisor/s2k-mark", {})
-        self.assertNotIn("MO run", c.get("/supervisor/?tab=s2k&csv=1").content.decode())
+        self.assertIn("MO run", c.get("/scheduler/s2k/?csv=1").content.decode())
+        c.post("/scheduler/s2k/mark", {})
+        self.assertNotIn("MO run", c.get("/scheduler/s2k/?csv=1").content.decode())
+        self.assertNotContains(Client().get("/scheduler/s2k/"), mo.number)   # signed in only
