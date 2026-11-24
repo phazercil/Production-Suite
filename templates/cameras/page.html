@@ -8,10 +8,12 @@
 
   {% if anyLive %}<div class="card"><h2>Live video</h2>
     {% if not live.supported %}<p class="warn">Live video runs on the Linux server only; the screens show pictures here.</p>
-    {% elif live.running and live.fresh and live.apache %}<p><span class="pill ok">ON</span> Live video is running for {{ live.streams }} camera{{ live.streams|pluralize }} and Apache passes it to the screens.</p>
-    {% elif live.running and live.fresh %}<p><span class="pill warn">ALMOST</span> Live video is running, but Apache isn't passing it on yet{% if live.apacheMsg %}: {{ live.apacheMsg }}{% else %} (the suite asks the server for it within a minute; screens show pictures until then){% endif %}.</p>
+    {% elif live.t and not live.fresh %}<p><span class="pill bad">NOT CHECKED</span> The ticker last looked after live video {{ live.ago }} min ago. Check the ticker service (<code>systemctl status production-suite-ticker</code>).</p>
     {% elif live.err %}<p><span class="pill bad">OFF</span> {{ live.err }}</p>
-    {% else %}<p><span class="pill idle">STARTING</span> The ticker starts live video within a few seconds{% if not live.fresh %} (if this stays, check the ticker service is running){% endif %}.</p>{% endif %}
+    {% elif live.running and live.apache %}<p><span class="pill ok">ON</span> Live video is running for {{ live.streams }} camera{{ live.streams|pluralize }} and Apache passes it to the screens. Each tile says <b>LIVE</b> when it plays live video, or <b>PICTURES</b> and why not.</p>
+    {% elif live.running and live.apache is False %}<p><span class="pill bad">NOT PASSED ON</span> Live video is running, but Apache refused its rules, so the screens show pictures: {{ live.apacheMsg }}</p>
+    {% elif live.running %}<p><span class="pill warn">ALMOST</span> Live video is running, but the server hasn't added Apache's rules for it yet (up to 10 minutes after an update), so the screens show pictures until then.</p>
+    {% else %}<p><span class="pill idle">STARTING</span> The ticker starts live video within a few seconds.</p>{% endif %}
   </div>{% endif %}
 
   {% if edit %}<div class="card"><h2>{% if cur %}Change {{ cur.name }}{% else %}Add a camera{% endif %}</h2>
@@ -36,7 +38,7 @@
   {% else %}<div class="row" style="margin:6px 0 12px"><a class="btn go" href="?edit=new">Add a camera</a><span class="note">Most IP cameras have a picture (JPEG) address: e.g. Hikvision <code>/ISAPI/Streaming/channels/101/picture</code>, Axis <code>/axis-cgi/jpg/image.cgi</code>, Dahua <code>/cgi-bin/snapshot.cgi</code>.</span></div>{% endif %}
 
   <div class="camgrid">{% for c in cams %}<div class="card" style="padding:10px">
-    <div class="camtile" data-cam-tile>{% if c.enabled and c.kind == "rtsp" and c.live %}<video data-live="{{ c.pk }}" muted playsinline hidden></video>{% endif %}{% if c.enabled %}<img data-cam="{{ c.pk }}" data-every="1000" alt="Camera {{ c.name }}">{% endif %}<span class="camname">{{ c.name }}{% if not c.enabled %} · off{% endif %}</span><span class="cammsg" data-cam-msg {% if c.enabled %}hidden{% endif %}>{% if not c.enabled %}Turned off{% endif %}</span></div>
+    <div class="camtile" data-cam-tile>{% if c.enabled and c.kind == "rtsp" and c.live %}<video data-live="{{ c.pk }}" muted playsinline hidden></video>{% endif %}{% if c.enabled %}<img data-cam="{{ c.pk }}" data-every="1000" alt="Camera {{ c.name }}">{% endif %}<span class="camname">{{ c.name }}{% if not c.enabled %} · off{% endif %}</span><span class="cammode" data-cam-mode hidden></span><span class="cammsg" data-cam-msg {% if c.enabled %}hidden{% endif %}>{% if not c.enabled %}Turned off{% endif %}</span></div>
     <p class="note" style="margin:8px 0 4px">{{ c.get_kind_display }}{% if c.kind == "rtsp" and c.live %} · live video{% endif %} · {{ c.fps|floatformat:"-1" }}/s{% if c.has_login %} · login saved{% endif %}</p>
     <div style="margin-bottom:8px">{% for m in c.machines.all %}<span class="chip">{{ m.name }}</span>{% empty %}<span class="warn">On no machine yet</span>{% endfor %}</div>
     <div class="row" style="gap:8px;align-items:center">

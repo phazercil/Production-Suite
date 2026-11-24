@@ -368,12 +368,13 @@ class Run:
                 raise Failed(why)
             self.back_out(b, before, old_r, stage, why, m["hasPackages"])
             raise Failed(why)
+        # the root-owned updater and network helper come out of the update file: before it is deleted
+        self.refresh_root_copy(zip_path)
         try:
             zip_path.unlink()
         except OSError:
             pass
         self.ensure_shortcuts()
-        self.refresh_root_copy(zip_path)
         self.fix_owner()
         self.prune_backups()
         self.state(status="done", message=f"Updated to v{new_v} rev {new_r}.", finished=datetime.now().astimezone().isoformat(timespec="seconds"))

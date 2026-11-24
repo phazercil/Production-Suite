@@ -1,3 +1,16 @@
+## What's new in 1.9.9
+
+- **Linux updates now refresh the server's root helpers:**
+  - Since the Linux install was added, every update tried to refresh the root-owned updater and network helper (/usr/libexec/production-suite) only after it had deleted the update file they come from, so they stayed at their first version. That's why live camera video wasn't passed on: the old network helper never wrote Apache's live-video rules.
+  - Updates now refresh them before deleting the file.
+  - **A server updated before 1.9.9 needs this once, as root**, because its old updater can't refresh itself:
+    `install -m 644 /opt/production-suite/tools/updater.py /opt/production-suite/tools/linux_apply.py /opt/production-suite/plant/updatefile.py /opt/production-suite/plant/ed25519.py /usr/libexec/production-suite/`
+    then `/usr/bin/python3 /usr/libexec/production-suite/linux_apply.py --dir /opt/production-suite network`.
+- **Cameras:**
+  - Each tile says **LIVE** when it plays live video, or **PICTURES** and why it isn't live: the server isn't passing live video on yet, the screen can't play the camera's video, or no video came from the stream.
+  - The **Live video** box on Admin › Cameras stays current while live video runs (it used to fall back to "STARTING" after a minute).
+  - It now tells apart "Apache's rules aren't in place yet", "Apache refused them" and "the ticker hasn't checked in".
+
 ## What's new in 1.9.8
 
 - **Maintenance requests are only completed on the Maintenance page:**
