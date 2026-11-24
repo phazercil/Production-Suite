@@ -90,8 +90,14 @@ def _num(v):
 
 def _time(v, now):
     """A time from the data: ISO text, or seconds / milliseconds since 1970. Missing or odd -> now."""
+    return time_why(v, now)[0]
+
+
+def time_why(v, now):
+    """(time, why it was replaced by the time received: "" when the record's own time was used, else
+    "missing", "unreadable", "ahead" (more than 10 minutes in the future) or "old" (over a year ago))."""
     if v in (None, ""):
-        return now
+        return now, "missing"
     n = _num(v)
     try:
         if n is not None:
@@ -101,11 +107,13 @@ def _time(v, now):
             if timezone.is_naive(t):
                 t = timezone.make_aware(t)
     except (ValueError, OverflowError, OSError):
-        return now
+        return now, "unreadable"
     # never trust a clock far in the future, or records older than a year
-    if t > now + timedelta(minutes=10) or t < now - timedelta(days=366):
-        return now
-    return t
+    if t > now + timedelta(minutes=10):
+        return now, "ahead"
+    if t < now - timedelta(days=366):
+        return now, "old"
+    return t, ""
 
 
 def _line(src, item, lines):
@@ -120,7 +128,12 @@ def map_item(src, item, now, lines, specs):
     if not isinstance(item, dict):
         raise InboundError("not a JSON object")
     m = src.mapping or {}
-    t = _time(get_path(item, m.get("time")), now)
+    sent = get_path(item, m.get("time")) if m.get("time") else None
+    t, why = time_why(sent, now)
+    if not m.get("time"):
+        why = ""      # no time field mapped: the time received is the record's time
+    rid = get_path(item, m.get("id")) if m.get("id") else None
+    stamp = {"sent_t": "" if sent is None else str(sent)[:40], "t_fixed": why, "ext_id": "" if rid in (None, "") else str(rid)[:80]}
     line = _line(src, item, lines)
     if not line:
         raise InboundError("no line: set a fixed line for this source, or map the field that names the line")
@@ -136,7 +149,7 @@ def map_item(src, item, now, lines, specs):
             vals = {k: _num(v) for k, v in list(item.items())[:50] if _num(v) is not None}
         if not vals:
             raise InboundError("no number fields to keep")
-        return {"kind": "readings", "t": t, "line": line, "data": vals}
+        return {**stamp, "kind": "readings", "t": t, "line": line, "data": vals}
     scale = 1 / 25.4 if str(m.get("units") or "in").lower() == "mm" else 1.0
     vals = {}
     for k in MEASURES:
@@ -151,7 +164,7 @@ def map_item(src, item, now, lines, specs):
     if raw is not None:
         w = str(raw).strip().lower()
         passed = True if w in PASS_WORDS else False if w in FAIL_WORDS else None
-    return {"kind": "qc", "t": t, "line": line, "part": part, "mo": mo, "vals": vals, "passed": passed, "raw": item}
+    return {**stamp, "kind": "qc", "t": t, "line": line, "part": part, "mo": mo, "vals": vals, "passed": passed, "raw": item}
 
 
 def _spec(item, specs):
@@ -171,9 +184,19 @@ def ingest(src, payload):
     lines = {m.name.lower(): m.name for m in Machine.objects.all()}
     specs = {s.key: s for s in PartSpec.objects.all()}
     tols = None   # Quality › Tolerances, read when a record needs judging
-    stored, errors = 0, []
+    stored, errors, fixed = 0, [], 0
     with transaction.atomic():
         active = {sh.line: sh for sh in ShiftRun.objects.filter(active=True).select_related("mo")}
+        # replays: a record whose own id (the mapped id field) this source already sent is skipped
+        idf = (src.mapping or {}).get("id")
+        ids = [str(get_path(x, idf))[:80] for x in items if idf and isinstance(x, dict) and get_path(x, idf) not in (None, "")]
+        seen = set()
+        if ids:
+            for model in (InboundRecord, AutoQC):
+                for k in range(0, len(ids), 500):
+                    seen |= set(model.objects.filter(source=src, ext_id__in=ids[k:k + 500]).values_list("ext_id", flat=True))
+        repeats = 0
+        measured = {}
         for i, item in enumerate(items):
             try:
                 r = map_item(src, item, now, lines, specs)
@@ -181,8 +204,14 @@ def ingest(src, payload):
                 if len(errors) < 5:
                     errors.append(f"record {i + 1}: {e}")
                 continue
+            if r["ext_id"]:
+                if r["ext_id"] in seen:
+                    repeats += 1
+                    continue
+                seen.add(r["ext_id"])
             if r["kind"] == "readings":
-                InboundRecord.objects.create(source=src, source_name=src.name, t=r["t"], line=r["line"], data=r["data"])
+                InboundRecord.objects.create(source=src, source_name=src.name, t=r["t"], line=r["line"], data=r["data"],
+                                             sent_t=r["sent_t"], t_fixed=r["t_fixed"], ext_id=r["ext_id"])
             else:
                 sh = active.get(r["line"])
                 part = r["part"] or (sh.mo.part if sh and sh.mo else "")
@@ -200,23 +229,33 @@ def ingest(src, payload):
                     passed = all(qc.in_tol(v, target[k], spec[k], {"tol": sp.tol}, tols) for k, v in r["vals"].items()
                                  if v is not None and target.get(k) is not None)   # a dimension the specs don't have isn't judged
                 extra = {k: v for k, v in r["raw"].items() if isinstance(v, (int, float, str, bool)) and len(str(v)) < 200} if isinstance(r["raw"], dict) else {}
+                measured.setdefault((r["line"], part), set()).update(k for k, v in r["vals"].items() if v is not None)
                 AutoQC.objects.create(source=src, source_name=src.name, shift=sh, t=r["t"], line=r["line"], mo=mo, item=part,
+                                      sent_t=r["sent_t"], t_fixed=r["t_fixed"], ext_id=r["ext_id"],
                                       passed=bool(passed), data=dict(list(extra.items())[:40]), **r["vals"])
             stored += 1
+            if r["t_fixed"]:
+                fixed += 1
         src.received += stored
         src.last_at = now
-        src.last_ok = stored > 0 or not items
-        src.last_msg = (f"{stored} stored" + (f", {len(items) - stored} skipped ({'; '.join(errors[:2])})" if stored < len(items) else ""))[:300]
+        src.last_ok = stored > 0 or not items or repeats == len(items)
+        src.last_msg = (f"{stored} stored" + (f", {len(items) - stored} skipped ({'; '.join(errors[:2])})" if stored < len(items) else "")
+                        + (f"; {repeats} already received (same id) skipped" if repeats else "")
+                        + (f"; {fixed} with a missing or wrong time kept at the time received (its own time is kept as sent)" if fixed else ""))[:300]
         if items and isinstance(items[-1], dict):
             src.sample = {k: v for k, v in list(items[-1].items())[:60]}
         src.save(update_fields=["received", "last_at", "last_ok", "last_msg", "sample"])
+    if measured:
+        from quality import spc
+        for (line, part), keys in measured.items():
+            spc.check_new(line, part, sorted(keys))
     try:   # sensors that read a field of this source (Admin › Sensors & alarms)
         from sensors.engine import from_source
         from_source(src, items)
     except Exception:  # noqa: BLE001 - never lose the stored records over a sensor
         import logging
         logging.getLogger("plant").exception("sensors from %s", src.name)
-    return {"stored": stored, "skipped": len(items) - stored, "errors": errors}
+    return {"stored": stored, "skipped": len(items) - stored, "errors": errors, "timeFixed": fixed, "repeats": repeats}
 
 
 def _later(a, b):

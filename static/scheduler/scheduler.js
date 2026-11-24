@@ -85,7 +85,7 @@ async function delMO(id){await guard(api("/api/scheduler/mo/delete",{id}));await
 /* ---------- shift lead login (changes to the plan need a shift lead PIN) ---------- */
 function renderWho(){
   const box=$("#who");if(!box)return;
-  box.innerHTML=S.me&&S.me.lead?`<span class="muted small">Editing as <b style="color:var(--fg)">${esc(S.me.name)}</b></span><button class="btn sm ghost" id="logoutBtn">Log out</button>`
+  box.innerHTML=S.me&&S.me.lead?($(".suiteuser")?`<span class="muted small">Editing</span>`:`<span class="muted small">Editing as <b style="color:var(--fg)">${esc(S.me.name)}</b></span><button class="btn sm ghost" id="logoutBtn">Log out</button>`)
     :S.editLocked?`<span class="muted small">View only</span><button class="btn sm primary" id="loginBtn">Log in to edit</button>`:"";
   const li=$("#loginBtn"),lo=$("#logoutBtn");
   if(li)li.onclick=()=>openLogin();
@@ -236,6 +236,10 @@ function renderSchedule(){
   for(const mo of mos){const s1Done=mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));const rs=ops.map(o=>S.res[jobKey(mo.id,o)]).filter(Boolean);
     if(rs.length===ops.length&&ops.length)scheduled++;if(rs.some(r=>r.late))late.add(mo.id);if(rs.some(r=>r.waiting))waiting.add(mo.id)}
   const unsched=mos.length-scheduled;
+  /* a KPI chip clicked: which orders it means (the rail shows only them, the board dims the rest) */
+  const pick=FILTER==="unsched"?(mo=>{const s1Done=mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;const ops=STAGE_ORDER.filter(o=>mo.ops&&mo.ops[o]&&!(o==="s1"&&s1Done));return ops.some(o=>!S.res[jobKey(mo.id,o)])})
+    :FILTER==="late"?(mo=>late.has(mo.id)):FILTER==="waiting"?(mo=>waiting.has(mo.id))
+    :FILTER==="behind"?(mo=>Object.values(S.res).some(r=>r.moId===mo.id&&r.pace&&r.pace.savedMin<0)):null;
   let axis="";const now=Date.now();
   if(S.view.scale==="day"){for(const D of TMAP.days){if(D.closed)continue;dayHours(D).forEach(([t,e],i)=>{const h=new Date(t).getHours(),d=new Date(t),td=sod(now)===D.d;
     axis+=`<div class="tick ${i===0?"major dstart":h%6===0?"major":""} ${td&&i===0?"today":""}" style="left:${X(t,a,px)}px;width:${X(e,a,px)-X(t,a,px)}px">${i===0?`<span class="dlab">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>`:""}<span class="big">${String(h).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}</span></div>`})}}
@@ -272,7 +276,8 @@ function renderSchedule(){
         const spTxt=sp?(sp.mode==="qty"?`Part 1 stops after ${fmtN(sp.qty)}`:sp.mode==="time"?`Part 1 stops at ${fmtDT(sp.at)}`:"Part 1 runs until the operator ends the MO"):"";
         const tip=`${mo.mo}${pl} · ${mo.part} · ${r.rest?"the rest once the operator ends part 1":fmtN(r.qty)+" pcs"}${r.running?" · RUNNING at the kiosk now":""}${paceLines(r.pace)}${spTxt?"\n"+spTxt:""}\n${fmtDT(r.start)} → ${fmtDT(r.end)}${r.coMin?`\n${r.inkjet?"Inkjet-only changeover":"Changeover"} ${fmtDur(r.coMin)}: ${fmtDT(r.start)} → ${fmtDT(r.runStart)}`:r.inkjet?"\nInkjet-only changeover (same base part): no changeover time":""}\nRunning ${fmtDT(r.runStart)} → ${fmtDT(r.end)}\n${r.basis}${r.laborCost!=null?`\nCrew wages ${fmtMoney(r.laborCost)}${r.qty?` (${fmtMoney(r.laborCost/r.qty,3)} / pc)`:""}`:""}${r.warn.length?"\n⚠ "+r.warn.join("\n⚠ "):""}${r.late?"\n⚠ Finishes after due date":""}`;
         const canSplit=!S.editLocked&&!r.unplanned&&(r.parts<2||r.part===1);
-        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""}" draggable="true" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${r.pace&&w>=170?paceBadge(r.pace.savedMin):""}${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
+        const dim=pick&&!pick(mo);
+        return `<div class="bar ${r.op} ${r.late?"late":""} ${r.waiting?"waiting":""} ${r.running?"running":""} ${r.rest?"rest":""} ${r.parts>1?"split":""} ${dim?"dim":""} ${w<44?"narrow":""} ${HL&&String(mo.mo)===HL?"hl":""}" draggable="${S.editLocked?"false":"true"}" data-job="${esc(r.id)}" style="left:${l}px;width:${w}px" data-tip="${esc(tip)}">${cw>0?`<div class="co" style="width:${cw}px">${cw>=34?`<span><i>CO ${Math.round(r.coMin)}m</i></span>`:""}</div>`:""}<div class="run"><b>${esc(mo.mo)}${pl}</b><span>${r.rest?"rest · when part 1 ends":`${esc(mo.part)} · ${fmtK(r.qty)}`}</span></div>${r.pace&&w>=170?paceBadge(r.pace.savedMin):""}${(r.late||r.waiting||r.unplanned||r.warn.length)?`<span class="flag">!</span>`:""}${canSplit&&w>=40?`<button type="button" class="splitbtn" data-split="${esc(jobKey(r.moId,r.op))}" title="${r.parts>1?"Change or undo the split":"Split this run: stop at a time, when the operator ends it, or after a quantity"}" aria-label="Split ${esc(mo.mo)}">${r.parts>1?"⇄":"✂"}</button>`:""}</div>`}).join("");
       /* what already ran on this line (from the kiosks), behind the plan */
       const hbars=(S.hist||[]).filter(h=>h.machineId===m.id&&h.end>a&&h.start<b).map(h=>{
         const l=X(Math.max(h.start,a),a,px),w=Math.max(3,X(Math.min(h.end,b),a,px)-l);
@@ -286,13 +291,13 @@ function renderSchedule(){
       const lab=(S.labor.lines||{})[m.id];
       const crewTxt=lab?Object.values(lab.shifts).sort((x,y)=>x.n-y.n).map(c=>c.staffed?`${ordinal(c.n)} ${c.crew}`:`${ordinal(c.n)} no crew`).join(" · "):"";
       const labTip=`${m.name}\n${sp} · ${m.scrap}% scrap · ${m.downtime}% down${lab?"\nCrew: "+crewTxt:""}\n${fmtN(Math.round(tot))} pcs in view`;
-      rows+=`<div class="g-row ${rs.some(r=>r.end>a&&r.start<b)?"":"idle"}"><div class="g-lab" title="${esc(labTip)}"><span class="nm">${esc(m.name)}</span><span class="ds"><span class="ltot" data-mid="${esc(m.id)}">${tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}</span>${esc(sp)}</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${hbars}${bars}${cells}</div></div>`;
+      rows+=`<div class="g-row ${rs.some(r=>r.end>a&&r.start<b)?"":"idle"}"><div class="g-lab" title="${esc(labTip)}"><span class="nm">${esc(m.name)}${m.stage==="s1"&&!S.editLocked&&rs.length>2?`<button type="button" class="sugg" data-sugg="${esc(m.id)}" title="Suggest a run order that saves changeovers (nothing changes until you apply it)">⇅</button>`:""}</span><span class="ds"><span class="ltot" data-mid="${esc(m.id)}">${tot?`<b>${fmtK(Math.round(tot))}</b> pcs · `:""}</span>${esc(sp)}</span></div><div class="g-track" data-m="${esc(m.id)}" style="width:${W}px">${bands}${off}${grid}${hbars}${bars}${cells}</div></div>`;
     }
   }
   /* Orders by stage: an MO with several stages is listed once in each stage it still needs, so each section is the
      work waiting for that kind of line. A card drags (or opens) its own stage. */
   const q=S.view.q.trim().toLowerCase();
-  const moList=mos.filter(mo=>!q||`${mo.mo} ${mo.part}`.toLowerCase().includes(q))
+  const moList=mos.filter(mo=>(!q||`${mo.mo} ${mo.part}`.toLowerCase().includes(q))&&(!pick||pick(mo)))
     .sort((x,y)=>(x.due||9e15)-(y.due||9e15)||String(x.mo).localeCompare(String(y.mo)));
   const card=(mo,o)=>{
     const item=mo.item,k=jobKey(mo.id,o),r=S.res[k],j=S.jobs[k];
@@ -308,7 +313,8 @@ function renderSchedule(){
       <div class="mo-meta"><span>${esc(mo.part)}${item?` · ${esc(item.cat)} · ${item.pleats} pl`:mo.pleats?` · ${mo.pleats} pl`:` · <span class="late">not in cost sheet</span>`}</span>${mo.due?`<span class="${late.has(mo.id)?"late":""}">Due ${fmtD(mo.due)}</span>`:""}</div>
       ${mo.produced||mo.scrapped?`<div class="mo-nums" title="Counted at the pleater: gross is every filter made, scrap what was scrapped, net the good ones"><span>Gross <b>${fmtN(mo.produced||0)}</b></span><span>Net <b>${fmtN(mo.net||0)}</b></span><span class="${mo.scrapped?"sc":""}">Scrap <b>${fmtN(mo.scrapped||0)}</b></span></div>`:""}
       ${r&&r.pace?`<div class="mo-pace ${r.pace.savedMin>=0?"ahead":"behind"}">${r.pace.eff>=r.pace.planEff?"Faster":"Slower"} than planned · ${paceTxt(r.pace.savedMin)} · finish moved ${r.pace.finishMin>=0?fmtDur(r.pace.finishMin)+" earlier":fmtDur(-r.pace.finishMin)+" later"}</div>`:""}
-      <div class="mo-where">${where}${others?`<span class="others">${others}</span>`:""}</div></div>`};
+      <div class="mo-where">${where}${others?`<span class="others">${others}</span>`:""}</div>
+      ${!blocked&&!j&&!S.editLocked?`<button type="button" class="btn sm plus" data-plus="${esc(mo.id)}" data-op="${o}" title="Put it on a line without dragging">＋ Schedule</button>`:""}</div>`};
   const sections=STAGE_ORDER.map(o=>{
     const list=moList.filter(mo=>{if(!(mo.ops&&mo.ops[o]))return false;const s1Done=noS1(mo)||mo.status!=="OPEN"||(mo.net??mo.produced??0)>=mo.qty;
       if(o==="s1"&&s1Done)return false;
@@ -329,11 +335,12 @@ function renderSchedule(){
   </div>
   <div class="kpis">
     <span class="kpi"><b>${mos.length}</b> orders</span><span class="kpi"><b>${scheduled}</b> fully scheduled</span>
-    <span class="kpi ${unsched?"warn":""}"><b>${unsched}</b> need scheduling</span>
-    <span class="kpi ${late.size?"bad":""}"><b>${late.size}</b> finish after due date</span>
-    ${waiting.size?`<span class="kpi bad"><b>${waiting.size}</b> waiting on Stage 1</span>`:""}
+    <button type="button" class="kpi ${unsched?"warn":""}" data-filter="unsched" aria-pressed="${FILTER==="unsched"}" title="Show only the orders not fully on the board"><b>${unsched}</b> need scheduling</button>
+    <button type="button" class="kpi ${late.size?"bad":""}" data-filter="late" aria-pressed="${FILTER==="late"}" title="Show only the orders that finish after their due date"><b>${late.size}</b> finish after due date</button>
+    ${waiting.size?`<button type="button" class="kpi bad" data-filter="waiting" aria-pressed="${FILTER==="waiting"}"><b>${waiting.size}</b> waiting on Stage 1</button>`:""}
     ${(()=>{const ps=Object.values(S.res).filter(r=>r.pace);if(!ps.length)return "";const t=ps.reduce((s,r)=>s+r.pace.savedMin,0);
-      return `<span class="kpi ${t>=0?"ok":"bad"}" title="The MOs running now against their planned speed; their runs are re-planned at the real speed"><b>${t>=0?"+":"−"}${fmtDur(Math.abs(t))}</b> ${t>=0?"ahead":"behind"} on running MOs</span>`})()}
+      return `<button type="button" class="kpi ${t>=0?"ok":"bad"}" data-filter="behind" aria-pressed="${FILTER==="behind"}" title="The MOs running now against their planned speed; their runs are re-planned at the real speed. Click to show only the ones behind."><b>${t>=0?"+":"−"}${fmtDur(Math.abs(t))}</b> ${t>=0?"ahead":"behind"} on running MOs</button>`})()}
+    ${FILTER?`<button type="button" class="kpi" data-filter="" title="Show everything again">✕ Clear filter</button>`:""}
   </div>
   <div class="board">
     <aside class="rail" aria-label="Manufacturing orders">
@@ -359,6 +366,7 @@ function renderSchedule(){
   onBoardScroll(true);
   gw.addEventListener("scroll",()=>{if(scrollRaf)return;scrollRaf=requestAnimationFrame(()=>{scrollRaf=0;onBoardScroll(false)})},{passive:true});
   wireSchedule(a,px);
+  focusHL();
 }
 let scrollRaf=0,totT=null,rewin=false;
 const labW=()=>parseFloat(getComputedStyle($(".planner")||document.body).getPropertyValue("--labw"))||200;
@@ -385,7 +393,62 @@ function updateTotals(t0,t1){
 function shiftView(dir){   // ‹ › scroll a screenful
   const gw=$(".gwrap");if(!gw)return;gw.scrollBy({left:dir*Math.max(200,gw.clientWidth-labW())*0.9,behavior:"smooth"});
 }
-let DRAG=null;
+let DRAG=null,FILTER="",HL=new URLSearchParams(location.search).get("mo")||"";
+/* the MO a link pointed to (/scheduler/?mo=306856): find it on the board once */
+function focusHL(){if(!HL)return;const el=$(".bar.hl");if(el){el.scrollIntoView({block:"center",inline:"center"});el.classList.add("flash")}else{S.view.q=HL;HL="";render()}}
+/* Hover (or tap) a run: everything about it, with what you can do */
+let POP=null;
+function hidePop(){if(POP){POP.remove();POP=null}}
+function showPop(bEl){
+  hidePop();const j=S.jobs[bEl.dataset.job],r=S.res[bEl.dataset.job];if(!j||!r)return;
+  POP=document.createElement("div");POP.className="pop";POP.setAttribute("role","tooltip");
+  POP.innerHTML=`<pre></pre><div class="row" style="gap:6px;margin-top:6px"><button class="btn sm" data-pa="open">Inspect</button>${!S.editLocked&&(r.parts<2||r.part===1)&&!r.unplanned?'<button class="btn sm" data-pa="split">Split</button>':""}<button class="btn sm" data-pa="zoom">Zoom to day</button></div>`;
+  POP.querySelector("pre").textContent=bEl.dataset.tip||"";
+  document.body.appendChild(POP);
+  const rc=bEl.getBoundingClientRect(),pw=POP.offsetWidth,ph=POP.offsetHeight;
+  POP.style.left=Math.max(8,Math.min(innerWidth-pw-8,rc.left))+"px";POP.style.top=(rc.bottom+ph+8<innerHeight?rc.bottom+6:Math.max(8,rc.top-ph-6))+"px";
+  POP.onclick=e=>{const a=e.target.closest("[data-pa]");if(!a)return;hidePop();
+    if(a.dataset.pa==="open")openJobDialog(j.moId,j.op);else if(a.dataset.pa==="split")openSplitDialog(j.moId,j.op);
+    else{S.view.scale="day";S.view.anchor=r.start;S.focus={t:r.start,f:.2};saveView();load(true)}};
+  POP.onmouseleave=()=>{POPT=setTimeout(hidePop,250)};POP.onmouseenter=()=>clearTimeout(POPT);
+}
+let POPT=null;
+function wirePop(){
+  $$(".bar[data-tip]").forEach(bEl=>{
+    bEl.addEventListener("mouseenter",()=>{clearTimeout(POPT);POPT=setTimeout(()=>showPop(bEl),350)});
+    bEl.addEventListener("mouseleave",()=>{clearTimeout(POPT);POPT=setTimeout(hidePop,300)});
+    bEl.addEventListener("pointerup",e=>{if(e.pointerType==="touch"&&(!POP||POP.dataset.for!==bEl.dataset.job)){e.preventDefault();e.stopPropagation();showPop(bEl);if(POP)POP.dataset.for=bEl.dataset.job;bEl.dataset.tapped="1"}},true);
+  });
+  document.addEventListener("pointerdown",e=>{if(POP&&!POP.contains(e.target)&&!e.target.closest(".bar"))hidePop()},{once:true});
+}
+/* ＋ Schedule: a card onto a line without dragging, at the line's next open slot or after a run already there */
+function openPlus(moId,op){
+  const mo=S.mos[moId],lines=S.cfg.machines.filter(m=>m.stage===op&&m.active!==false);if(!mo||!lines.length){toast("No line for this stage yet.");return}
+  const runsOn=mid=>resultsFor(mid).slice().sort((x,y)=>x.start-y.start);
+  const opts=mid=>runsOn(mid).map(r=>`<option value="${r.end}">After MO ${esc(S.mos[r.moId]?.mo||"")} (ends ${fmtDT(r.end)})</option>`).join("");
+  $("#layer").innerHTML=`<div class="scrim" id="scrim"><form class="dlg" role="dialog" aria-modal="true" aria-labelledby="plt" id="plform" style="width:min(460px,100%)">
+    <div class="hd"><div><h2 id="plt">Schedule MO ${esc(mo.mo)}</h2><div class="muted small">${esc(mo.part)} · ${esc(STAGES[op].name)}</div></div><button type="button" class="btn ghost" id="plx" aria-label="Close">✕</button></div>
+    <label class="f">Line<select id="plline">${lines.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select></label>
+    <label class="f">When<select id="plwhen"></select></label>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" class="btn ghost" id="plc">Cancel</button><button class="btn primary">Put it on the board</button></div></form></div>`;
+  const fill=()=>{const mid=+$("#plline").value,rs=runsOn(mid),last=rs.length?Math.max(...rs.map(r=>r.end)):Date.now();
+    $("#plwhen").innerHTML=`<option value="${Math.max(last,Date.now())}">Next open slot (${fmtDT(Math.max(last,Date.now()))})</option>${opts(mid)}`};
+  fill();$("#plline").onchange=fill;
+  const close=()=>{$("#layer").innerHTML=""};$("#plx").onclick=close;$("#plc").onclick=close;
+  $("#plform").onsubmit=async e=>{e.preventDefault();const r=await putJob({moId,op,part:1,machineId:+$("#plline").value,reqStart:+$("#plwhen").value});if(r.ok){close();toast(`MO ${mo.mo} is on the board.`)}};
+}
+/* Suggest order for one Stage 1 line (scheduler/sequence.py): what it would change, applied only when asked */
+async function openSuggest(mid){
+  const m=machineById(mid);const r=await api("/api/scheduler/suggest",{machineId:mid});if(!r.ok)return;const s=r.s;
+  const li=x=>`<li class="${x.late?"late":""}">MO ${esc(x.mo)} · ${esc(x.part)}${x.coMin?` · CO ${Math.round(x.coMin)}m`:""}${x.running?" · running":""}</li>`;
+  $("#layer").innerHTML=`<div class="scrim" id="scrim"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="sgt" style="width:min(720px,100%)">
+    <div class="hd"><div><h2 id="sgt">Suggested run order · ${esc(m.name)}</h2><div class="muted small">Same parts together, then the same base part; due dates decide which group goes first. Nothing changes until you apply it.</div></div><button type="button" class="btn ghost" id="sgx" aria-label="Close">✕</button></div>
+    ${s.ok?`<p><b>${s.saved} min</b> less changeover (${s.coBefore} → ${s.coAfter} min) · late runs ${s.lateBefore} → ${s.lateAfter} · the last run ends ${fmtDT(s.endAfter)} instead of ${fmtDT(s.endBefore)}</p>`:`<p class="muted">${esc(s.why||"Nothing to suggest.")}</p>`}
+    ${s.now?`<div class="grid2" style="gap:16px"><div><h3>Now</h3><ol class="sugg-list">${s.now.map(li).join("")}</ol></div><div><h3>Suggested</h3><ol class="sugg-list">${s.new.map(li).join("")}</ol></div></div>`:""}
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" class="btn ghost" id="sgc">Close</button>${s.ok?'<button type="button" class="btn primary" id="sga">Apply this order</button>':""}</div></div></div>`;
+  const close=()=>{$("#layer").innerHTML=""};$("#sgx").onclick=close;$("#sgc").onclick=close;
+  if(s.ok)$("#sga").onclick=async()=>{const x=await guard(api("/api/scheduler/suggest/apply",{machineId:mid,keys:s.keys}));if(x.ok){close();toast(x.msg||"Applied.");await load(true)}};
+}
 function wireSchedule(a,px){
   $$("[data-scale]").forEach(b=>b.onclick=()=>{   // a new scale, keeping the middle of the screen in the middle
     const gw=$(".gwrap");let mid=S.view.anchor;if(gw&&TMAP){const vw=Math.max(200,gw.clientWidth-labW());mid=TMAP.t(gw.scrollLeft+vw/2)}
@@ -399,10 +462,15 @@ function wireSchedule(a,px){
   $("#jump").onchange=e=>{if(e.target.value){const [y,m,d]=e.target.value.split("-").map(Number);goTo(new Date(y,m-1,d).getTime(),0)}};
   $("#q").oninput=e=>{S.view.q=e.target.value;const pos=e.target.selectionStart;render();const q=$("#q");q.focus();q.setSelectionRange(pos,pos)};
   $("#showdone").onchange=e=>{S.view.showDone=e.target.checked;saveView();render()};
+  $$("[data-filter]").forEach(b=>b.onclick=()=>{FILTER=FILTER===b.dataset.filter?"":b.dataset.filter;render()});
+  $$("[data-plus]").forEach(b=>b.onclick=e=>{e.stopPropagation();openPlus(+b.dataset.plus,b.dataset.op)});
+  $$("[data-sugg]").forEach(b=>b.onclick=e=>{e.stopPropagation();openSuggest(+b.dataset.sugg)});
+  wirePop();
   $$(".rail-sec-h").forEach(h=>h.onclick=()=>{S.view.closed=Object.assign({},S.view.closed,{[h.dataset.sec]:h.getAttribute("aria-expanded")==="true"});render()});
   $$(".rail .mo[data-op]").forEach(c=>{
     const blocked=c.classList.contains("blocked");
-    c.addEventListener("dragstart",e=>{if(blocked){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
+    c.addEventListener("dragstart",e=>{if(S.editLocked){e.preventDefault();openLogin("Log in to change the schedule.");return}
+      if(blocked){e.preventDefault();toast("Schedule Stage 1 for this order first.");return}
       DRAG={moId:+c.dataset.mo,op:c.dataset.op,grabPx:0};e.dataTransfer.setData("text/plain",jobKey(c.dataset.mo,c.dataset.op));e.dataTransfer.effectAllowed="move";c.classList.add("dragging");
       sizeDrag(DRAG)});
     c.addEventListener("dragend",()=>c.classList.remove("dragging"));
@@ -410,11 +478,13 @@ function wireSchedule(a,px){
     c.addEventListener("click",open);c.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open()}});
   });
   $$(".bar").forEach(bEl=>{
-    bEl.addEventListener("dragstart",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;const rect=bEl.getBoundingClientRect();
+    bEl.addEventListener("dragstart",e=>{hidePop();if(S.editLocked){e.preventDefault();openLogin("Log in to change the schedule.");return}
+      const j=S.jobs[bEl.dataset.job];if(!j)return;const rect=bEl.getBoundingClientRect();
       DRAG={moId:j.moId,op:j.op,part:j.part||1,grabPx:e.clientX-rect.left,w:rect.width,from:j.id};e.dataTransfer.setData("text/plain",j.id);e.dataTransfer.effectAllowed="move";
       bEl.classList.add("dragging");sizeDrag(DRAG)});
     bEl.addEventListener("dragend",()=>bEl.classList.remove("dragging"));
-    bEl.addEventListener("click",e=>{const j=S.jobs[bEl.dataset.job];if(!j)return;
+    bEl.addEventListener("click",e=>{if(bEl.dataset.tapped){delete bEl.dataset.tapped;return}   // a first tap shows the details
+      const j=S.jobs[bEl.dataset.job];if(!j)return;
       if(e.target.closest(".splitbtn")||(j.part||1)>1){openSplitDialog(j.moId,j.op);return}
       openJobDialog(j.moId,j.op)});
   });
@@ -437,10 +507,11 @@ function wireSchedule(a,px){
       if(ghost){ghost.classList.add("placed");if(!ghost.classList.contains("box"))ghost.remove()}   // stays, at its size, until the board redraws
       if(d.op!=="s1"&&!S.jobs[jobKey(d.moId,"s1")]){toast("Schedule Stage 1 for this order first.");return}
       const k=d.from||jobKey(d.moId,d.op),want=tAt(tr,e,d);
-      const was=S.res[k];
+      const was=S.res[k],old=S.jobs[k]?{machineId:S.jobs[k].machineId,reqStart:S.jobs[k].reqStart}:null;
       if(was&&was.running&&was.machineId===m.id){toast(`${S.mos[d.moId]?.mo||"This MO"} is running on ${m.name} now, so it stays at now until the operator ends it at the kiosk.`);return}
       const r=await putJob({moId:d.moId,op:d.op,part:d.part||1,machineId:m.id,reqStart:want});
       const x=S.res[k];
+      if(r.ok&&old&&window.suiteUndo)suiteUndo(`Moved ${S.mos[d.moId]?.mo||"the MO"} to ${m.name}`,()=>putJob({moId:d.moId,op:d.op,part:d.part||1,...old}));
       if(r.ok&&x){
         if(x.paced)toast(`Held back to ${fmtDT(x.start)} so it doesn't run out of Stage 1 parts.`);
         else if(x.start-want>SCALES[S.view.scale].snap)toast(`Starts ${fmtDT(x.start)}: the first time ${m.name} is crewed and free from ${fmtDT(want)}.`)}
@@ -599,7 +670,7 @@ function renderLines(){
   <button class="btn primary" id="addm">+ Add line</button></div>
   <div class="tablewrap"><table><thead><tr><th>Line</th><th>Stage</th><th>Speed basis</th><th class="n">Speed / fallback</th><th class="n">Scrap %</th><th class="n">Downtime %</th><th class="n">Changeover min</th><th title="Tick the shifts a line runs; on each, tick through lunch if relief cover keeps it running during that shift's lunch">Shifts · through lunch</th><th class="n">Hours / week</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   <p class="small muted" style="margin:8px 0 22px">Sheet-based lines fall back to the speed shown when a part has no rate on the cost sheet. Scrap adds extra pieces to every run; downtime slows the effective speed.</p>
-  <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label>
+  <div class="stack" style="gap:6px;margin-bottom:22px"><label class="check"><input type="checkbox" id="cofirst" ${c.coFirst!==false?"checked":""}> Include a changeover before the first run on each line</label><label class="check"><input type="checkbox" id="cosame" ${c.coSamePart?"checked":""}> Apply changeover time even when the next run is the same part</label><label class="check" title="For each line and part-to-part change with 3 or more finished changeovers in the last 180 days, plan the median of how long they really took (Supervisor › Changeovers › Report)"><input type="checkbox" id="cohist" ${c.coHistory?"checked":""}> Use how long changeovers really took (each line's part-to-part history, when there is enough)</label>
     <div class="row small" style="gap:8px;align-items:center;flex-wrap:wrap"><span>Inkjet-only changeover between filters with the same base part, for part numbers starting</span><input type="text" id="inkbases" value="${esc((c.inkjetBases||[]).join(", "))}" style="width:120px" aria-label="Base part prefixes" placeholder="AQ"><span>(e.g. AQ1278 → AQ1278C):</span><input type="number" id="inkmin" min="0" max="240" value="${c.inkjetMin||0}" style="width:70px" aria-label="Inkjet changeover minutes"><span>min</span></div></div>
   ${laborSection(c)}
   <div class="page-head"><div><h3>Shift schedule</h3><p class="sub">These shifts are shared with the Operator Kiosk. End Band, Arts &amp; Crafts and Glue Bead runs start as soon as Stage 1 is producing and their changeover is done. When a later stage runs faster than Stage 1, its start is held back just enough that it never runs out of parts. Breaks and lunches are removed from available run time; a run pauses through them and resumes after, except lunch on a shift a line runs <b>through lunch</b>.</p></div><button class="btn" id="adds">+ Add shift</button></div>
@@ -619,6 +690,7 @@ function renderLines(){
   $("#addm").onclick=()=>{const c=S.cfg;c.machines.push({id:uid("new-"),name:`New line ${c.machines.length+1}`,stage:"s1",mode:"fixed",ppm:180,rate:0,scrap:5,downtime:10,changeover:30,shifts:c.shifts.map(s=>s.id).slice(0,1)});saveCfg();renderLines()};
   $("#uselabor").onchange=e=>{S.cfg.useLabor=e.target.checked;saveCfg()};
   $("#cosame").onchange=e=>{S.cfg.coSamePart=e.target.checked;saveCfg()};
+  $("#cohist").onchange=e=>{S.cfg.coHistory=e.target.checked;saveCfg()};
   $("#inkbases").onchange=e=>{S.cfg.inkjetBases=e.target.value.split(/[,\s]+/).filter(Boolean);saveCfg()};$("#inkmin").onchange=e=>{S.cfg.inkjetMin=Math.max(0,Number(e.target.value)||0);saveCfg()};$("#cofirst").onchange=e=>{S.cfg.coFirst=e.target.checked;saveCfg()};
   $("#adds").onclick=()=>{const c=S.cfg;c.shifts.push({id:uid("new-"),name:`Shift ${c.shifts.length+1}`,start:"23:00",end:"06:00",days:[1,2,3,4,5],breaks:[{label:"Lunch",start:"03:00",end:"03:30"}]});saveCfg();renderLines()};
   $$(".shift").forEach(card=>{const SH=()=>S.cfg.shifts[+card.dataset.si];

@@ -5,6 +5,7 @@ from django.views.generic import RedirectView
 from datakiosk import views as dk
 from labor import views as labor
 from maintenance import views as maintenance
+from scheduler import stations
 from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
@@ -53,6 +54,8 @@ urlpatterns = [
     path("api/scheduler/job/split", sch.split_job),
     path("api/scheduler/job/merge", sch.merge_job),
     path("api/scheduler/preview", sch.preview),
+    path("api/scheduler/suggest", sch.suggest),
+    path("api/scheduler/suggest/apply", sch.suggest_apply),
     path("api/scheduler/mo", sch.put_mo),
     path("api/scheduler/mo/delete", sch.del_mo),
     path("api/scheduler/config", sch.save_config),
@@ -68,6 +71,7 @@ urlpatterns = [
     path("data/r/<str:name>", dk.region),
     path("data/<str:line>/", dk.board, name="data-line"),
     path("thin/watch", thin.watch),
+    path("thin/events", thin.events),
     # Reports
     path("reports/", reports.board, name="reports"),
     path("api/report", reports.report),
@@ -77,6 +81,7 @@ urlpatterns = [
     path("labor/", labor.page, name="labor"),
     path("budget/", labor.budget_only, name="budget"),
     path("supervisor/", supervisor.page, name="supervisor"),
+    path("supervisor/s2k-mark", supervisor.s2k_mark),
     path("quality/", quality.page, name="quality"),
     path("quality/viewer/app/", fviewer.app, name="filter-viewer"),
     path("api/quality/fv/parts", fviewer.parts),
@@ -104,6 +109,9 @@ urlpatterns = [
     path("api/sensors", sensors.api_push),
     # Packaging Kiosk: pallet tags
     path("packaging/", packkiosk.page, name="packaging-section"),
+    path("stations/", stations.page, name="stations"),
+    path("maintenance/reorder.csv", maintenance.reorder_csv),
+    path("stations/do/<str:name>", stations.do),
     path("packaging/suggest", packkiosk.suggest),
     path("packaging/do/<str:name>", packkiosk.do, name="packaging-do"),
     path("packaging/tag/<int:pk>/", packkiosk.print_tag, name="packaging-tag"),

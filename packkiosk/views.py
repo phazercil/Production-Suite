@@ -54,7 +54,13 @@ def page(request):
     else:
         start = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
         qs = qs.filter(t__gte=start if rng == "today" else now - timedelta(days=7 if rng == "week" else 30))
+    if q.get("need") == "verify":       # quick filter: what still needs a second person
+        qs = qs.filter(verified_by="", voided=False)
+    if q.get("line"):
+        qs = qs.filter(line=q.get("line"))
     rows = list(qs[:300])
+    day0 = timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
+    last = PalletTag.objects.filter(packed_by_id=me.pk, voided=False, t__gte=day0).order_by("-t", "-id").first()   # Same as last (+1)
     live = [r for r in rows if not r.voided]
     form = {k: q.get(k, "") for k in ("part", "mo", "line", "pallet_no", "qty", "description")} if q.get("err") else {}
     ctx = {"mode": "packaging", "me": me, "now": now, "msg": q.get("msg", ""), "err": q.get("err", ""), "rows": rows, "range": rng,
@@ -62,7 +68,8 @@ def page(request):
            "parts": sorted(set(PalletTag.objects.values_list("part", flat=True)[:500])),
            "printId": q.get("print", ""),
            "kpi": {"pallets": len(live), "pcs": sum(r.qty for r in live), "unverified": sum(1 for r in live if not r.verified_by)},
-           "canSupervise": perms.can(me, tags.SUPERVISE)}
+           "canSupervise": perms.can(me, tags.SUPERVISE), "last": last, "lastNext": tags.next_pallet(last.mo, last.part) if last else None,
+           "need": q.get("need", ""), "fline": q.get("line", "")}
     return render(request, "packkiosk/page.html", ctx)
 
 
@@ -89,7 +96,7 @@ def do(request, name):
         r = tags.create(p, me)
         form = {k: p.get(k, "") for k in ("part", "mo", "line", "pallet_no", "qty", "description")}
         return _back(r, {"print": r["id"]} if r.get("ok") and p.get("andPrint") == "1" else None, form)
-    tag = PalletTag.objects.filter(pk=tags.to_int(p.get("id"))).first()
+    tag = PalletTag.objects.filter(pk=tags.to_int(p.get("id") or request.GET.get("id"))).first()
     if not tag:
         return _back({"ok": False, "error": "That tag isn't on file."})
     if name == "sign":
@@ -98,6 +105,11 @@ def do(request, name):
         r = tags.sign(tag, signer, kind) if signer else {"ok": False, "error": err}
     elif name == "void":
         r = tags.void(tag, me, p.get("reason"))
+        if r.get("ok"):   # an Undo for 8 seconds, in case it was the wrong row
+            return HttpResponseRedirect("/packaging/?" + urlencode({"msg": r["msg"], "undo": f"/packaging/do/unvoid?id={tag.pk}",
+                                                                   "undoText": f"{tag.tag_no} voided"}))
+    elif name == "unvoid":
+        r = tags.unvoid(tag, me)
     else:
         raise Http404
     return _back(r)

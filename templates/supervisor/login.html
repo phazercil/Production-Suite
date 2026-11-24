@@ -7,7 +7,7 @@
     <p>{{ blurb|default:"The history of every shift log, QC check, downtime entry and changeover. Shift leads and supervisors only." }}</p>
     {% if note %}<p class="lnote">{{ note }}</p>{% endif %}
     <label for="lpin">PIN</label>
-    <input id="lpin" type="password" inputmode="numeric" autofocus>
+    <input id="lpin" name="pin" type="password" inputmode="numeric" autofocus>
     <p class="lerr" id="lerr" aria-live="polite"></p>
     <button type="submit">Open {{ title|default:"Supervisor" }}</button>
   </form>

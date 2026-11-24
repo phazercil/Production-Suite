@@ -180,5 +180,24 @@ def void(tag, me, reason):
     return {"ok": True, "msg": f"{tag.tag_no} voided. Pallet {tag.pallet_no} can be tagged again."}
 
 
+UNVOID_MIN = 10
+
+
+def unvoid(tag, me):
+    """Undo a void straight after it (the voider, within 10 minutes), if nobody reused the pallet number meanwhile."""
+    if not tag.voided:
+        return {"ok": False, "error": "That tag isn't voided."}
+    if tag.voided_by != me.name or not tag.updated or (timezone.now() - tag.updated).total_seconds() > UNVOID_MIN * 60:
+        return {"ok": False, "error": "Only the person who voided it can undo that, and only within 10 minutes."}
+    dup = _live(PalletTag.objects.filter(pallet_no=tag.pallet_no)).exclude(pk=tag.pk)
+    dup = dup.filter(mo=tag.mo) if tag.mo else dup.filter(part=tag.part, t__gte=tag.t.replace(hour=0, minute=0, second=0))
+    if dup.exists():
+        return {"ok": False, "error": f"Pallet {tag.pallet_no} was tagged again meanwhile, so the void stays."}
+    tag.voided, tag.voided_by, tag.void_reason = False, "", ""
+    tag.updated, tag.updated_by = timezone.now(), me.name
+    tag.save()
+    return {"ok": True, "msg": f"{tag.tag_no} is back (void undone)."}
+
+
 def person(pk):
     return Person.objects.filter(pk=pk, active=True).first()

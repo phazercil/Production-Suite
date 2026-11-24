@@ -56,6 +56,15 @@ OPENH264 = ("The server's ffmpeg can't decode this camera's H.264 video: Fedora'
             "or use the camera's picture (JPEG) address.")
 
 
+def scrub(text, pw=""):
+    """An error message with any login taken out: user:password@ in an address, and the password itself."""
+    import re
+    text = re.sub(r"(//)[^/@\s]+@", r"\1•••@", str(text or ""))
+    for v in {pw, quote(pw or "", safe="")} - {""}:
+        text = text.replace(v, "•••")
+    return text
+
+
 def ffmpeg():
     return shutil.which("ffmpeg")
 
@@ -147,8 +156,7 @@ def _rtsp(url, user, pw):
     if r.returncode != 0 or not r.stdout.startswith(SOI):
         err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
         msg = err[-1][:200] if err else "no picture"
-        if user or pw:
-            msg = msg.replace(quote(pw, safe=""), "•••") if pw else msg
+        msg = scrub(msg, pw)
         if "401" in msg or "Unauthorized" in msg:
             raise CamError("The camera refused the user name or password.")
         if "openh264" in msg.lower() or "openh264" in (r.stderr or b"").decode("utf-8", "replace").lower():
@@ -288,8 +296,7 @@ class Reader(threading.Thread):
                 raise CamError(OPENH264)
             lines = [x for x in err.strip().splitlines() if x.strip()]
             msg = lines[-1][:200] if lines else ""
-            if pw:
-                msg = msg.replace(quote(pw, safe=""), "•••")
+            msg = scrub(msg, pw)
             if "401" in msg or "Unauthorized" in msg:
                 raise CamError("The camera refused the user name or password.")
             if msg:

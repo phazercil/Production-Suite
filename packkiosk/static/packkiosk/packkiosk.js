@@ -28,3 +28,10 @@
     history.replaceState(null, '', location.pathname + location.search.replace(/([?&])print=\d+&?/, '$1').replace(/[?&]$/, ''));
   }
 })();
+
+(function () {   // Find: filters as you type (no Show button to press)
+  var inp = document.querySelector('#pk-find input[data-live]'), t;
+  if (!inp) return;
+  inp.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { inp.form.submit(); }, 450); });
+  if (inp.value) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+})();

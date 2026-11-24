@@ -149,7 +149,7 @@ def page(request, page="controls", lock=None):
         q = request.GET.urlencode()
         return redirect("/admin/" + (f"?{q}" if q else ""))
     page = page if page in PAGES else "controls"
-    for k in ("tab", "view", "status", "sort", "inactive", "part"):   # a link straight to a page's option (/operator/schedule/?view=calendar)
+    for k in ("tab", "view", "status", "sort", "inactive", "part", "hl"):   # a link straight to a page's option (/operator/schedule/?view=calendar)
         if request.GET.get(k) is not None:
             request.session[f"k.{k}"] = request.GET[k][:40]
     s = screen(request)
@@ -194,9 +194,10 @@ def view_data(s, page, request):
         return {"R": s.run_screen()}
     if page == "schedule":
         sort = page_option(request, "sort", None, "")
-        return {"P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "week"}, "timeline"),
-                                           page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "OPEN"), sort,
-                                           int(page_option(request, "week", {"0", "1"}, "0")))}
+        hl = request.session.pop("k.hl", "")   # an MO a notice pointed to: shown once, marked in the list
+        return {"hl": hl, "P": kscreen.schedule_page(s, page_option(request, "view", {"timeline", "week"}, "timeline"),
+                                                     page_option(request, "status", {"OPEN", "CLOSE", "ALL"}, "ALL" if hl else "OPEN"), sort,
+                                                     int(page_option(request, "week", {"0", "1"}, "0")))}
     if page == "model":   # the 3D viewer, view only, following the filter this line runs
         sh = s.shift
         mo = sh.mo if sh else None
@@ -303,7 +304,8 @@ def m_start(request, s):
     q = list(MO.objects.filter(line__name=want, status="OPEN").order_by("seq")[:3]) if want else []
     pick = request.GET.get("mo") or (str(q[0].number) if q else "")
     return modal_response(request, "hmi/k/m_start.html", **ctx_for(s, lines=lines, line=want, queue=q, trained=bool(trained), mo_pick=pick,
-                                                                   safety=s.cfg.get("safety", []), pm=s.cfg.get("pm", [])))
+                                                                   safety=s.cfg.get("safety", []), pm=s.cfg.get("pm", []),
+                                                                   handoffs=engine.handoffs(want, s.t) if want else []))
 
 
 @modal("changeover", login=True)
@@ -752,7 +754,8 @@ def a_start(request, s, p):
     n_safety, n_pm = len(s.cfg.get("safety", [])), len(s.cfg.get("pm", []))
     on = set(request.POST.getlist("check"))
     p = {"line": p.get("line", ""), "mo": (p.get("mo") or "").strip(), "issues": p.get("issues", ""),
-         "safety": [f"s{i}" in on for i in range(n_safety)], "pm": [f"p{i}" in on for i in range(n_pm)]}
+         "safety": [f"s{i}" in on for i in range(n_safety)], "pm": [f"p{i}" in on for i in range(n_pm)],
+         "acks": request.POST.getlist("ack")}
     r = run(request, s, "startShift", p)
     if not r["ok"]:
         return err_in_modal(r["error"])
@@ -1105,17 +1108,24 @@ def a_downtime(request, s, p):
         q["reason"] = (p.get("reason") or "").strip()[:120] or None
     if "notes" in p:
         q["notes"] = p["notes"]
+    from .models import Downtime
+    before = Downtime.objects.filter(pk=p.get("id") or 0).values("reason", "notes").first()
     r = run(request, s, "downtimeSet", q)
     if not r["ok"]:
         if r.get("login"):
             return login_needed(request, s, r, next_modal="downPrompt")
         return thin.refused(r["error"])
+    undo = None
+    if before and "reason" in q and q["reason"] != before["reason"]:   # Undo puts the stop's reason back as it was
+        undo = {"text": f"Reason set: {q['reason'] or 'cleared'}", "post": "/kiosk/do/downtimeSet",
+                "vals": {"id": str(p.get("id")), "reason": before["reason"] or ""}}
+    extra = {"suite:undo": undo} if undo else {}
     if p.get("back") == "downPrompt":
         s2 = screen(request)
         if not s2.need_reason():
-            return thin.done(toast="Thanks — every stop has a reason.", close=True)
-        return thin.trigger(m_down_prompt(request, s2), changed=True)
-    return thin.done(changed=True)
+            return thin.trigger(thin.done(toast="Thanks — every stop has a reason.", close=True), **extra)
+        return thin.trigger(m_down_prompt(request, s2), changed=True, **extra)
+    return thin.trigger(thin.done(changed=True), **extra)
 
 
 @require_GET

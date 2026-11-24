@@ -39,6 +39,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+if not (HERE / "updatefile.py").exists() and (HERE.parent / "plant" / "updatefile.py").exists():
+    sys.path.append(str(HERE.parent / "plant"))   # run from the source tree (tools/): its copy lives in plant/
 import updatefile  # noqa: E402
 
 LINUX_ROOT_DIR = Path("/usr/libexec/production-suite")

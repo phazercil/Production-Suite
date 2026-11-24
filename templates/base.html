@@ -6,9 +6,10 @@
 <title>{% block title %}Production Suite{% endblock %}</title>
 <link rel="stylesheet" href="{% static 'suite/fonts/plex.css' %}">
 <link rel="stylesheet" href="{% static 'suite/shell.css' %}">
+{% if suite_pin_lens %}<meta name="pin-lens" content="{{ suite_pin_lens }}">{% endif %}
 {% block head %}{% endblock %}
 </head>
-<body class="suite {% block body_class %}{% endblock %}" {% block body_attrs %}{% endblock %}>
+<body class="suite {% block body_class %}{% endblock %}" {% if suite_sse %}data-sse="1"{% endif %} {% block body_attrs %}{% endblock %}>
 {% if not kiosk_lock %}
 <header class="suitebar">
   <a class="suitebrand" href="/" aria-label="Production Suite home">
@@ -16,9 +17,19 @@
     <span>Production Suite</span>
   </a>
   <nav class="suitetabs" aria-label="Modes">
-    {% for k, href, label in suite_modes %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% for k, href, label in suite_main %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %} title="{{ label }}"><span class="full">{{ label }}</span><span class="short">{{ label|cut:" Kiosk" }}</span></a>
     {% endfor %}
+    {% if suite_more %}<details class="suitemore"><summary {% for k, h, l in suite_more %}{% if mode == k %}aria-current="page"{% endif %}{% endfor %}>{% for k, h, l in suite_more %}{% if mode == k %}{{ l }}{% endif %}{% endfor %}{% if not mode in "reports labor admin" or not mode %}More{% endif %} ▾</summary>
+      <div class="suitemenu">{% for k, href, label in suite_more %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div></details>{% endif %}
   </nav>
+  <span class="suitegrow"></span>
+  <details class="suiteuser" title="{{ suite_rev }}">
+    <summary>{% if suite_me %}<span class="dot"></span><b>{{ suite_me.name }}</b><small>{{ suite_role }}</small>{% else %}<span class="dot off"></span><b>Sign in</b>{% endif %}</summary>
+    <div class="suitemenu right">
+      {% if suite_me %}<p class="note">Signed in on this screen as <b>{{ suite_me.name }}</b> ({{ suite_role }}). On the Operator Kiosk the <i>line operator</i> is whoever started the shift; this is who is using the screen.</p>
+        <button type="button" data-suite-logout>Sign out</button><button type="button" data-suite-signin>Switch person</button>
+      {% else %}<p class="note">Sign in with your PIN or badge to change things. Looking needs no sign-in.</p><button type="button" data-suite-signin>Sign in</button>{% endif %}
+      <p class="note ver">{{ suite_rev }}</p></div></details>
   <button type="button" class="suite-fs" data-fullscreen title="Full screen (Esc leaves it)" aria-label="Full screen">
     <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg><span>Full screen</span></button>
 </header>
@@ -26,9 +37,10 @@
   <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg></button>{% endblock %}
 {% endif %}
 <div class="mode">{% block content %}{% endblock %}</div>
-<div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>
+{% if kiosk_lock %}<div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>{% endif %}
 <script src="{% static 'suite/rev.js' %}" data-rev="{{ suite_revision }}" defer></script>
 <script src="{% static 'suite/fullscreen.js' %}" defer></script>
+<script src="{% static 'suite/ux.js' %}" defer></script>
 {% if thin %}<div id="modal" class="modal" hidden role="dialog" aria-modal="true"></div>
 <script src="{% static 'vendor/htmx/htmx.min.js' %}"></script>
 <script src="{% static 'suite/thin.js' %}"></script>{% endif %}

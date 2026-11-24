@@ -1,10 +1,12 @@
+import hmac
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 
 
 class StationKeyMiddleware:
     """When STATION_KEY is set, a screen must present it once (…/?key=KEY); it is then remembered in a cookie.
-    Machine feed pushes use X-Feed-Key instead and the Django admin uses its own login."""
+    Machine feed pushes use X-Feed-Key instead and Django's table editor (/db-admin/) uses its own login. The suite's
+    own Admin page (/admin/) needs the key like every other screen."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -12,10 +14,13 @@ class StationKeyMiddleware:
     def __call__(self, request):
         key = settings.SUITE["STATION_KEY"]
         path = request.path
-        if not key or path.startswith(("/admin", "/static", "/api/feed/", "/api/ingest/", "/api/version")):
+        if not key or path.startswith(("/db-admin/", "/static/", "/api/feed/", "/api/ingest/", "/api/version")):
             return self.get_response(request)
         given = request.GET.get("key") or request.COOKIES.get("station_key") or request.headers.get("X-Station-Key")
-        if given != key:
+        if not hmac.compare_digest(str(given or "").encode(), str(key).encode()):
+            if given:
+                from plant import health
+                health.count("stationkey")
             if path.startswith("/api/"):
                 return JsonResponse({"ok": False, "keyRequired": True, "error": "This screen needs the station key."}, status=401)
             return HttpResponse(

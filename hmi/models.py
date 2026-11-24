@@ -1,11 +1,33 @@
 """Records the Operator Kiosk keeps. Table names match the ones Grafana dashboards query
 (hmi_ppm, hmi_downtime, hmi_qc, hmi_shifts, hmi_mo_runs, hmi_tickets)."""
+import uuid
+
 from django.db import models
 
 from plant.models import MO, Machine, Person
 
 
+class _ActiveKeyQS(models.QuerySet):
+    """update(active=…) keeps the one-active-log key in step, like save() does."""
+
+    def update(self, **kw):
+        if "active" in kw and "active_machine" not in kw:
+            kw["active_machine"] = models.F("machine") if kw["active"] else None
+        return super().update(**kw)
+
+
+CARRY_GAP = 5   # minutes: a log that starts within this of the last one ending carries on its counter
+
+
+class _OpenPmQS(models.QuerySet):
+    def update(self, **kw):
+        if "status" in kw and "open_pm" not in kw:
+            kw["open_pm"] = None if kw["status"] == "Closed" else models.F("pm")
+        return super().update(**kw)
+
+
 class ShiftRun(models.Model):
+    objects = _ActiveKeyQS.as_manager()
     # SET_NULL: removing a machine keeps its shift history (the `line` name stays on every record)
     machine = models.ForeignKey(Machine, null=True, blank=True, on_delete=models.SET_NULL, related_name="runs")
     line = models.CharField(max_length=60, db_index=True)
@@ -37,6 +59,31 @@ class ShiftRun(models.Model):
     qc_due_at = models.DateTimeField(null=True, blank=True)   # when that check became due
     uptime = models.IntegerField(null=True, blank=True)
     down_mins = models.IntegerField(null=True, blank=True)
+
+    # the machine while this log is active, else empty: unique, so the database itself never holds two active logs
+    # for one machine (MariaDB has no partial unique index; NULLs don't clash)
+    active_machine = models.PositiveIntegerField(null=True, blank=True, unique=True, editable=False)
+
+    def carry_counter(self):
+        """A new log on a machine starts from where the last one stopped counting (shift change, operator change,
+        pass-over): its counter baseline and the part-pleat remainder. Without it the first minute of each log
+        counted nothing and every log boundary lost parts. Only when the last log ended moments ago: after a gap,
+        the counter may have moved while no log was open, and that is not this log's."""
+        from datetime import timedelta
+        prev = (ShiftRun.objects.filter(machine_id=self.machine_id, end__isnull=False, end__gte=self.start - timedelta(minutes=CARRY_GAP),
+                                        end__lte=self.start + timedelta(minutes=1))
+                .order_by("-end", "-id").values("last_count", "acc").first())
+        if prev:
+            self.last_count, self.acc = prev["last_count"], prev["acc"] or 0.0
+
+    def save(self, *a, **kw):
+        if self.pk is None and self.active and self.machine_id and self.last_count is None:
+            self.carry_counter()
+        self.active_machine = self.machine_id if self.active and self.machine_id else None
+        uf = kw.get("update_fields")
+        if uf is not None and ("active" in uf or "machine" in uf):
+            kw["update_fields"] = list(uf) + ["active_machine"]
+        super().save(*a, **kw)
 
     class Meta:
         db_table = "hmi_shifts"
@@ -160,6 +207,7 @@ class RollTag(models.Model):
 
 
 class Ticket(models.Model):
+    objects = _OpenPmQS.as_manager()
     # stored value, shown as; "Closed" is shown as Completed (older screens and reports read "Closed")
     STATUSES = [("Open", "Open"), ("Reviewed", "Reviewed"), ("In progress", "In progress"), ("Waiting on parts", "Waiting on parts"), ("Closed", "Completed")]
     shift = models.ForeignKey(ShiftRun, null=True, blank=True, on_delete=models.SET_NULL)
@@ -175,6 +223,22 @@ class Ticket(models.Model):
     updated_by = models.CharField(max_length=120, blank=True)
     pm = models.ForeignKey("PMTask", null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets",
                            help_text="The planned maintenance task this request is for (opened by the PM schedule)")
+    # lockout: Maintenance took the machine out of service from this request (Maintenance › request › Lock out), and
+    # put it back with a note on what was checked (Return to service)
+    lockout_t = models.DateTimeField(null=True, blank=True)
+    lockout_by = models.CharField(max_length=120, blank=True)
+    returned_t = models.DateTimeField(null=True, blank=True)
+    returned_by = models.CharField(max_length=120, blank=True)
+    return_note = models.TextField(blank=True)
+    # the PM task while this request is not completed, else empty: unique, so a PM task never has two open requests
+    open_pm = models.PositiveIntegerField(null=True, blank=True, unique=True, editable=False)
+
+    def save(self, *a, **kw):
+        self.open_pm = self.pm_id if self.pm_id and self.status != "Closed" else None
+        uf = kw.get("update_fields")
+        if uf is not None and ("status" in uf or "pm" in uf):
+            kw["update_fields"] = list(uf) + ["open_pm"]
+        super().save(*a, **kw)
 
     class Meta:
         db_table = "hmi_tickets"
@@ -280,6 +344,10 @@ class ShiftNote(models.Model):
     line = models.CharField(max_length=60, blank=True)
     by = models.CharField(max_length=120)
     text = models.TextField()
+    # a must-read handoff: the next operator to start a shift on the line has to tick that they've read it
+    pinned = models.BooleanField(default=False)
+    acked_by = models.CharField(max_length=120, blank=True)
+    acked_t = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "hmi_notes"
@@ -343,6 +411,11 @@ class Event(models.Model):
     kind = models.CharField(max_length=30)
     data = models.JSONField(default=dict)
     sent = models.BooleanField(default=False, db_index=True)
+    # a stable id sent with the event every time it is tried: a receiver that already has it skips the repeat
+    uid = models.UUIDField(default=uuid.uuid4, editable=False, null=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_try = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=300, blank=True)
 
     class Meta:
         db_table = "hmi_events"
@@ -445,6 +518,9 @@ class AutoQC(models.Model):
     sbr = models.FloatField(null=True, blank=True)
     passed = models.BooleanField()
     data = models.JSONField(default=dict, blank=True)
+    sent_t = models.CharField(max_length=40, blank=True, help_text="The time the source sent, as sent")
+    t_fixed = models.CharField(max_length=12, blank=True, help_text="Why t is the time received instead: missing, unreadable, ahead, old")
+    ext_id = models.CharField(max_length=80, blank=True, db_index=True, help_text="The record's own id (the mapped id field): a repeat is skipped")
 
     class Meta:
         db_table = "hmi_qc_auto"
@@ -458,6 +534,9 @@ class InboundRecord(models.Model):
     t = models.DateTimeField(db_index=True)
     line = models.CharField(max_length=60, blank=True, db_index=True)
     data = models.JSONField(default=dict)
+    sent_t = models.CharField(max_length=40, blank=True, help_text="The time the source sent, as sent")
+    t_fixed = models.CharField(max_length=12, blank=True, help_text="Why t is the time received instead: missing, unreadable, ahead, old")
+    ext_id = models.CharField(max_length=80, blank=True, db_index=True, help_text="The record's own id (the mapped id field): a repeat is skipped")
 
     class Meta:
         db_table = "hmi_inbound"
@@ -475,6 +554,8 @@ class AlertContact(models.Model):
     qc_late = models.IntegerField(default=0, help_text="Minutes a QC check may be overdue before this person is told (0 = not told)")
     qc_fail = models.BooleanField(default=False, help_text="Told when a QC check fails and waits for a supervisor")
     pm_due = models.BooleanField(default=False, help_text="Told when planned maintenance falls due")
+    digest = models.BooleanField(default=False, help_text="Emailed the daily plant digest (Admin › Alerts › Daily digest)")
+    low_stock = models.BooleanField(default=False, help_text="Told when a maintenance part reaches its reorder point")
     active = models.BooleanField(default=True)
 
     class Meta:
@@ -529,6 +610,7 @@ class ChangeoverPiece(models.Model):
     steps = models.JSONField(default=list, blank=True, help_text="The steps checked off in this piece (their text)")
     steps_total = models.IntegerField(default=0)
     ended = models.CharField(max_length=40, blank=True, help_text="finished / passed over / shift change / operator change / picked up")
+    step_t = models.JSONField(default=list, blank=True, help_text="[[step text, epoch ms]]: when each step was checked off in this piece")
     note = models.TextField(blank=True)
 
     class Meta:

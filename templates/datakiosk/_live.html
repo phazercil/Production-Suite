@@ -11,6 +11,7 @@
     <div><span>Shift count</span><b>{% if c.on %}{{ c.count|num }}{% else %}—{% endif %}</b></div>
     <div class="{% if c.uptimeBad %}bad{% endif %}"><span>Uptime</span><b>{% if c.on %}{{ c.uptime }}%{% else %}—{% endif %}</b></div>
     <div class="{% if c.downBad %}bad{% endif %}"><span>Down</span><b>{% if c.on %}{{ c.down }} min{% else %}—{% endif %}</b></div>
+    <div class="{% if c.oeeBad %}bad{% endif %}" title="Uptime × speed against rated ({% if c.perf is not None %}{{ c.perf }}%{% else %}—{% endif %}) × good filters of the running MO"><span>OEE</span><b>{% if c.oee is not None %}{{ c.oee }}%{% else %}—{% endif %}</b></div>
   </div>
-  <div class="who">{% if c.on %}{{ c.who }} · since {{ c.since|clock }}{% if c.noData %} · <span style="color:var(--bad)">No machine data</span>{% endif %}{% else %}No shift running{% endif %}</div>
+  <div class="who">{% if c.lockout %}<span style="color:var(--bad)">{{ c.lockout }}</span>{% elif c.on %}{{ c.who }} · since {{ c.since|clock }}{% if c.noData %} · <span style="color:var(--bad)">No machine data</span>{% endif %}{% else %}No shift running{% endif %}</div>
 </div>

@@ -112,6 +112,7 @@ class TodaysMosTests(TestCase):
         from plant.util import ms
         now = timezone.now()
         bar = Machine.objects.get(name="Barbara")
+        ShiftRun.objects.filter(machine=bar, active=True).update(active=False)   # (one active log per machine)
         ShiftRun.objects.create(machine=bar, line="Barbara", user_name="J. Ortiz", shift_name="1st shift", start=now, state="running", mo=self.running)
         MoRun.objects.create(line="Barbara", mo="1ORD-RAN", start_time=now - timedelta(minutes=50), end_time=now - timedelta(minutes=5), qty=10)
         res = {"a": {"moId": self.planned.id, "segs": [1], "start": ms(now), "end": ms(now + timedelta(hours=1))},

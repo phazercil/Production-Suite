@@ -43,7 +43,7 @@ class DataKioskTests(TestCase):
         self.assertNotContains(r, "datakiosk.js")
         self.assertContains(r, 'id="live-barbara"')
         self.assertContains(r, "class=\"chartbox\"")
-        self.assertContains(r, "Grafana is not connected")
+        self.assertNotContains(r, "Grafana isn't connected")   # the setup note is only for people who can set it up
 
     def test_parts_follow_the_plant(self):
         bar = Machine.objects.get(name="Barbara")

@@ -273,6 +273,16 @@ class ReadOnlyDatabaseTests(TestCase):
         for q in bad:
             with self.assertRaises(integrations.ConnError, msg=q):
                 integrations.check_select(q)
+        # dialects: on PostgreSQL and SQL Server a backslash is no escape and # is no comment, so neither hides a 2nd statement
+        for kind, q in (("postgres", "SELECT 1 # 2; DELETE FROM t"), ("postgres", "SELECT 'x\\'; DELETE FROM t; SELECT ''"),
+                        ("mssql", "SELECT * INTO copy_t FROM t"), ("mssql", "SELECT 1 WAITFOR DELAY '0:0:5'"),
+                        ("mssql", "SELECT * FROM OPENROWSET('SQLNCLI', 'x', 'y')"), ("postgres", "SELECT pg_sleep(10)"),
+                        ("postgres", "SELECT lo_import('/etc/passwd')"), ("postgres", "SELECT setval('s', 1)"),
+                        ("postgres", "SELECT 1 /* a /* b */ ; DROP TABLE t */"), ("mysql", "SELECT 'a")):
+            with self.assertRaises(integrations.ConnError, msg=(kind, q)):
+                integrations.check_select(q, kind=kind)
+        integrations.check_select("SELECT [delete], 'it''s' FROM t -- ; drop", kind="mssql")
+        integrations.check_select("SELECT \"Order\" FROM t", kind="postgres")
 
     def test_s2k_pull_from_database(self):
         cache.clear()

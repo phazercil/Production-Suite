@@ -68,14 +68,23 @@ def load_world(jobs_override=None):
     else:
         jobs = {j.key: {"id": j.key, "moId": j.mo_id, "op": j.op, "machineId": j.machine_id, "reqStart": ms(j.req_start),
                         "part": j.part, "split": {"mode": j.split_mode, "at": ms(j.split_at) if j.split_at else None, "qty": j.split_qty}
-                        if j.split_mode else None}
+                        if j.split_mode else None,
+                        "wip": {"started": ms(j.wip_started) if j.wip_started else None, "qty": j.wip_qty,
+                                "done": ms(j.wip_done) if j.wip_done else None, "by": j.wip_by} if j.wip_started else None}
                 for j in Job.objects.all()}
     from hmi.models import ShiftRun  # local import: hmi depends on scheduler
     live = list(ShiftRun.objects.filter(active=True, mo__isnull=False, machine__isnull=False).select_related("machine", "mo"))
     running = {r.mo_id: r.machine_id for r in live}
     cfg = {"shifts": shifts, "machines": machines, "coSamePart": st.planner.get("coSamePart", False),
            "coFirst": st.planner.get("coFirst", True), "useLabor": st.planner.get("useLabor", True) is not False,
-           "inkjetBases": list(st.planner.get("inkjetBases") or []), "inkjetMin": float(st.planner.get("inkjetMin") or 0)}
+           "inkjetBases": list(st.planner.get("inkjetBases") or []), "inkjetMin": float(st.planner.get("inkjetMin") or 0),
+           "coHistory": bool(st.planner.get("coHistory"))}
+    if cfg["coHistory"]:   # how long each line's part-to-part changeovers really took (scheduler/cohist.py)
+        from . import cohist
+        try:
+            cfg["coHist"] = {ln: {f"{a}>{b}": v for (a, b), v in d.items()} for ln, d in cohist.estimates().items()}
+        except Exception:  # noqa: BLE001 - never stops the schedule
+            cfg["coHist"] = {}
     # The Labor Budget plan: work calendar (holidays, days off, extra work days) and crew cost (labor/plan.py).
     # Which shifts a line runs is set in Lines & Shifts only; a shift with no crew in the plan is pointed out, not skipped.
     from labor.plan import LaborPlanView, machine_labor
@@ -133,7 +142,8 @@ def config_sig(cfg):
     screen loaded, so a screen that was left open can't undo changes made meanwhile on another screen."""
     import hashlib
     keep = {"machines": cfg["machines"], "shifts": cfg["shifts"], "coSamePart": cfg["coSamePart"], "coFirst": cfg["coFirst"],
-            "useLabor": cfg.get("useLabor", True), "inkjetBases": cfg.get("inkjetBases"), "inkjetMin": cfg.get("inkjetMin")}
+            "useLabor": cfg.get("useLabor", True), "inkjetBases": cfg.get("inkjetBases"), "inkjetMin": cfg.get("inkjetMin"),
+            "coHistory": cfg.get("coHistory", False)}
     return hashlib.sha1(json.dumps(keep, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -402,10 +412,17 @@ def _compute(world, jobs, cuts):
                 rate, basis = rate_for(m, item, mo)
                 warn = []
                 qty, rest = _part_qty(j, mo, st, parts, cuts)
+                wip = j.get("wip") if st in ("eb", "ac", "gb") else None   # checked in at the stage's station (/stations/)
+                if wip and wip.get("done"):
+                    continue   # the station completed this stage: off the board (packaging follows Stage 1 from here)
+                if wip and wip.get("started"):
+                    qty = max(0.0, qty - float(wip.get("qty") or 0))
                 ps = parts.get((mo["id"], st)) or [j]
                 # the part on the machine running the MO now is the one running (the first with something to make)
                 is_running = st == "s1" and running.get(mo["id"]) == m["id"] and qty > 0 and \
                     next((x for x in ps if _part_qty(x, mo, st, parts, cuts)[0] > 0), None) is j
+                if wip and wip.get("started"):
+                    is_running = True   # under way at its station: what's left, from now
                 earliest = max(t_now, prev_end) if is_running else max(j["reqStart"], prev_end)
                 waiting, up = False, None
                 if st == "s1":
@@ -426,6 +443,10 @@ def _compute(world, jobs, cuts):
                 inkjet = False
                 if co_min and prev_no and inkjet_only(prev_no, mo["part"], cfg.get("inkjetBases")):
                     co_min, inkjet = float(cfg.get("inkjetMin") or 0), True   # same base part: only the inkjet branding changes
+                if co_min and not inkjet and prev_no and cfg.get("coHist"):
+                    hist = (cfg["coHist"].get(m["name"]) or {}).get(f"{str(prev_no).upper()}>{str(mo['part']).upper()}")
+                    if hist is not None:
+                        co_min = hist   # this change on this line, as it really went (median of recent changeovers)
                 if is_running:
                     co_min = 0  # already set up and running
                 if rest:
@@ -437,7 +458,7 @@ def _compute(world, jobs, cuts):
                 if not rate and not rest:
                     warn.append("No run speed for this part on this line")
                 run_min = gross / eff * 60 if eff > 0 else 0
-                pace = actual_pace(cal, m, (world.get("actual") or {}).get(mo["id"]), eff) if is_running else None
+                pace = actual_pace(cal, m, (world.get("actual") or {}).get(mo["id"]), eff) if is_running and st == "s1" else None
                 if pace:   # running faster or slower than planned: what's left is planned at the real pace
                     plan_min = run_min
                     run_min = gross / pace["eff"] * 60

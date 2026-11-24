@@ -290,3 +290,20 @@ td input[type=text]{width:140px}
 .ghost-line.placed span{display:none}
 @keyframes ghostPulse{from{opacity:.55}to{opacity:.9}}
 @media (prefers-reduced-motion:reduce){.ghost-line.box.placed{animation:none}}
+/* KPI chips are filters */
+.kpis button.kpi{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--line-2,#3a4552);background:none}
+.kpis button.kpi[aria-pressed="true"]{background:var(--accent,#5B9BD5);color:#0b0f14;border-color:transparent}
+.bar.dim{opacity:.22}
+.bar.narrow .run,.bar.narrow .co span,.bar.narrow .flag{display:none}
+.bar.hl{outline:3px solid var(--warn,#d29922);outline-offset:1px}
+.bar.flash{animation:hlflash 1.2s ease 3}
+@keyframes hlflash{50%{outline-color:transparent}}
+.tick > span{display:block;overflow:hidden;text-overflow:ellipsis;padding-right:4px}
+/* hover / tap details */
+.pop{position:fixed;z-index:60;max-width:380px;background:var(--panel,#1c2229);border:1px solid var(--line,#465263);border-radius:10px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.pop pre{margin:0;white-space:pre-wrap;font:13px/1.4 var(--f-body,system-ui)}
+.mo .plus{margin-top:6px}
+.g-lab .sugg{margin-left:6px;border:1px solid var(--line-2,#3a4552);background:none;color:var(--muted);border-radius:6px;padding:0 6px;cursor:pointer;font-size:13px}
+.g-lab .sugg:hover{color:var(--fg);border-color:var(--accent)}
+.sugg-list{margin:0;padding-left:20px;font-size:14px;line-height:1.6}
+.sugg-list .late{color:var(--bad,#f85149)}

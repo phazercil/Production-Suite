@@ -65,7 +65,8 @@ def streams():
 def config_text(st):
     q = json.dumps   # a JSON string is a YAML string
     lines = ["# Written by Production Suite (cameras/live.py) from Admin › Cameras. Changes here are replaced.",
-             "api:", f"  listen: {q(f'127.0.0.1:{PORT}')}", '  origin: "*"',
+             "api:", f"  listen: {q(f'127.0.0.1:{PORT}')}",   # no "origin": go2rtc then only takes a page from the same
+             # host Apache forwards (ProxyPreserveHost), so another site open on a plant PC can't pull camera video
              "rtsp:", '  listen: ""', "webrtc:", '  listen: ""', "srtp:", '  listen: ""',
              "log:", "  level: warn", "streams:"]
     lines += [f"  {k}: {q(v)}" for k, v in sorted(st.items())] or []

@@ -17,6 +17,13 @@ from plant.util import ms, now
 from . import screen
 
 
+def _can_setup(request):
+    from hmi.views import current_person
+    from plant import perms
+    me, _ = current_person(request)
+    return perms.can(me, "connections.edit")
+
+
 def _bands(L):
     for b in L["bands"]:
         b["card"] = screen.line_card(b["name"])
@@ -48,7 +55,7 @@ def board(request, line=None):
     view = _view_only(request)
     path = f"/data/{quote(focus.name)}/" if focus else "/data/"
     ctx = {"mode": "data", "thin": True, "now_ms": ms(now()), "L": _bands(screen.layout(focus)), "view": view, "q": _q(focus, view),
-           "share": request.build_absolute_uri(path + "?view=1")}
+           "share": request.build_absolute_uri(path + "?view=1"), "canSetup": _can_setup(request)}
     if view:
         ctx["kiosk_lock"] = True   # no menu bar
     return render(request, "datakiosk/board.html", ctx)
@@ -62,7 +69,8 @@ def region(request, name):
     if name == "status":
         return render(request, "datakiosk/_status.html", {"L": screen.layout(focus), "view": view, "q": _q(focus, view)})
     if name == "board":
-        return render(request, "datakiosk/_board.html", {"L": _bands(screen.layout(focus)), "view": view, "q": _q(focus, view)})
+        return render(request, "datakiosk/_board.html", {"L": _bands(screen.layout(focus)), "view": view, "q": _q(focus, view),
+                                                          "canSetup": _can_setup(request)})
     if name in ("live", "chart"):
         c = screen.line_card(request.GET.get("line", ""))
         if not c:

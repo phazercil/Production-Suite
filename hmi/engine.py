@@ -11,7 +11,7 @@ import uuid
 from datetime import timedelta
 
 from django.conf import settings as dj_settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, Max
 from django.db.models.functions import Greatest
 
@@ -219,7 +219,9 @@ def co_piece(sh, end, ended, note=""):
         ChangeoverPiece.objects.create(machine=sh.machine, line=sh.line, co_id=co["id"], shift=sh, by=sh.user_name or "", shift_name=sh.shift_name,
                                        start=s0, end=end, minutes=mins, old_mo=str(old.number) if old else "", new_mo=str(new.number) if new else "",
                                        steps=[str(steps[i].get("text") or "") for i in mine if i < len(steps)], steps_total=len(steps),
-                                       ended=ended, note=note)
+                                       ended=ended, note=note,
+                                       step_t=[[str(steps[i].get("text") or ""), int(((co.get("doneBy") or {}).get(str(i)) or {}).get("t") or 0)]
+                                               for i in mine if i < len(steps)])
         co.setdefault("pieces", []).append({"by": sh.user_name or "", "shift": sh.shift_name, "start": co["start"], "end": ms(end), "mins": mins,
                                             "steps": [i + 1 for i in mine], "ended": ended, "note": note})
     co["start"] = ms(end)
@@ -611,13 +613,22 @@ def start_shift(p, ctx):
     m = line_of(p.get("line") or ctx.line)
     need(m, "Pick which machine this screen is for.")
     m = Machine.objects.select_for_update().get(pk=m.pk)  # two screens can't start a shift on one machine at once
-    need(m.active, f"{m.name} is out of service.")
+    if not m.active:
+        from .kscreen import lockout_for
+        lock = lockout_for(m.name)
+        need(False, f"{m.name} is locked out by maintenance (request #{lock.pk}: {lock.type}). It can run once it's returned to service."
+             if lock else f"{m.name} is out of service.")
     need(ctx.user.trained.filter(pk=m.pk).exists(), f"You are not trained on {m.name}. Pick another machine or ask your shift lead.")
     cur = active_run(m)
     need(not cur or unattended(cur), f"{m.name} already has a shift running since {fmt_t(cur.start) if cur else ''}. End it first.")
     safety = p.get("safety") or []
     need(isinstance(safety, list) and len(safety) == len(config()["safety"]) and all(safety),
          "Every safety item must be checked before the line runs.")
+    acks = {str(x) for x in (p.get("acks") or [])}
+    must = handoffs(m.name, ctx.now)
+    need(all(str(n.pk) in acks for n in must), "Read the handoff notes and tick each one before you start.")
+    for n in must:
+        ShiftNote.objects.filter(pk=n.pk, acked_t__isnull=True).update(acked_by=ctx.user.name, acked_t=ctx.now)
     mo = None
     if p.get("mo"):
         mo = open_mo(p["mo"])
@@ -1180,6 +1191,9 @@ def qc_save(p, ctx):
     sh.qc_last, sh.qc_after_co, sh.qc_due_at = ctx.now, False, None
     sh.save(update_fields=["qc_last", "qc_after_co", "qc_due_at"])
     event("qc", {"line": sh.line, "item": P["key"], "pass": ok, **vals})
+    from quality import spc   # drifting toward a limit: tell the line before it makes scrap
+    keys = {k for k, _, _ in spc.measures()}
+    spc.check_new(sh.line, P["key"], [k for k, v in vals.items() if k in keys and isinstance(v, (int, float))], ctx.now)
     return {"msg": ("QC re-check passed: the issue is corrected" if rechecked else "QC passed and saved") if ok
             else "QC out of spec — a supervisor needs to approve or disapprove it",
             "data": {"pass": ok, "id": q.id, "recheck": bool(rechecked)}}
@@ -1462,8 +1476,19 @@ def note_add(p, ctx):
     text = str(p.get("text") or "").strip()
     need(text, "Write the note first.")
     m = line_of(ctx.line)
-    ShiftNote.objects.create(shift=active_run(m) if m else None, t=ctx.now, line=ctx.line or "", by=ctx.by, text=text)
-    event("note", {"line": ctx.line, "text": text})
+    pinned = bool(p.get("pinned")) and bool(ctx.line)
+    ShiftNote.objects.create(shift=active_run(m) if m else None, t=ctx.now, line=ctx.line or "", by=ctx.by, text=text, pinned=pinned)
+    event("note", {"line": ctx.line, "text": text, "pinned": pinned})
+    if pinned:
+        return {"msg": "Saved. The next operator to start a shift on " + ctx.line + " has to read it first."}
+
+
+HANDOFF_DAYS = 3   # a must-read note older than this no longer holds up the next shift
+
+
+def handoffs(line, now):
+    """Must-read notes on a line that nobody starting a shift has acknowledged yet."""
+    return list(ShiftNote.objects.filter(line=line, pinned=True, acked_t__isnull=True, t__gte=now - timedelta(days=HANDOFF_DAYS)).order_by("t"))
 
 
 @cmd("downtimeSet")
@@ -2760,7 +2785,7 @@ SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2k
             "grafana.uptime": "n", "grafana.count": "n", "grafana.refresh": "s", "grafana.lineVar": "s",
             "paycom.auto": "b", "paycom.every": "n", "paycom.dept": "s", "paycom.position": "s", "paycom.positionExact": "b", "paycom.pinFrom": "s",
             "kiosk.layout": "s", "kiosk.range": "s", "kiosk.cols": "n", "kiosk.rotate": "n", "kiosk.panels": "j",
-            "grafana.report": "j"}
+            "grafana.report": "j", "liveUpdates": "b"}
 
 
 LEAD_SETTINGS = {"autoQC", "qcEvery"}   # floor settings (day-to-day lists); the rest are connection settings
@@ -3319,7 +3344,7 @@ def src_test(p, ctx):
 # ------------------------------------------------------------------ downtime alerts
 def _contact_json(c):
     return {"id": c.id, "name": c.name, "email": c.email, "phone": c.phone, "lines": c.lines or [], "downAfter": c.down_after,
-            "notifyBack": c.notify_back, "qcLate": c.qc_late, "qcFail": c.qc_fail, "pmDue": c.pm_due, "active": c.active}
+            "notifyBack": c.notify_back, "qcLate": c.qc_late, "qcFail": c.qc_fail, "pmDue": c.pm_due, "digest": c.digest, "lowStock": c.low_stock, "active": c.active}
 
 
 @cmd("alertInfo", "alerts.edit")
@@ -3329,6 +3354,7 @@ def alert_info(p, ctx):
     from .models import AlertContact, AlertLog
     info = liveconfig.info()
     return {"data": {"contacts": [_contact_json(c) for c in AlertContact.objects.all()], "smtp": info["smtp"], "sms": info["sms"],
+                     "digestAt": str(((PlantSettings.load().settings or {}).get("digest") or {}).get("at") or ""),
                      "log": [{"t": ms(x.t), "kind": x.kind, "line": x.line, "contact": x.contact, "channel": x.channel, "to": x.to, "ok": x.ok,
                               "msg": x.msg} for x in AlertLog.objects.exclude(channel="none")[:40]]}}
 
@@ -3359,12 +3385,40 @@ def alert_contact_save(p, ctx):
     after = minutes(f.get("downAfter"), 15)   # 0 = not told about stops
     c.name, c.email, c.phone, c.lines, c.down_after = name, email, phone, lines, after
     c.qc_late = minutes(f.get("qcLate"), 0)   # 0 = not told about overdue QC checks
-    c.qc_fail, c.pm_due = bool(f.get("qcFail")), bool(f.get("pmDue"))
-    need(after or c.qc_late or c.qc_fail or c.pm_due, "Pick at least one thing to tell this person about.")
+    c.qc_fail, c.pm_due, c.digest, c.low_stock = bool(f.get("qcFail")), bool(f.get("pmDue")), bool(f.get("digest")), bool(f.get("lowStock"))
+    need(not c.digest or email, "The daily digest goes by email: enter an email address.")
+    need(after or c.qc_late or c.qc_fail or c.pm_due or c.digest or c.low_stock, "Pick at least one thing to tell this person about.")
     c.notify_back, c.active = f.get("notifyBack") is not False, f.get("active") is not False
     c.save()
     audit(ctx, f"Downtime alerts: saved {name}")
     return {"msg": f"{name} saved.", "data": _contact_json(c)}
+
+
+@cmd("digestSet", "alerts.edit")
+def digest_set(p, ctx):
+    """Admin › Alerts › Daily digest: the time it goes out (blank = off)."""
+    import re
+    at = str(p.get("at") or "").strip()
+    need(not at or re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", at), "Type the time like 06:30.")
+    st = PlantSettings.load()
+    st.settings = {**st.settings, "digest": {"at": at}}
+    st.save(update_fields=["settings"])
+    audit(ctx, f"Daily digest: {('at ' + at) if at else 'off'}")
+    return {"msg": f"The daily digest goes out at {at}." if at else "The daily digest is off."}
+
+
+@cmd("digestSend", "alerts.edit")
+def digest_send(p, ctx):
+    """Send the digest now to the people who get it (to check how it looks)."""
+    from . import alerts
+    from .models import AlertContact
+    people = list(AlertContact.objects.filter(active=True, digest=True).exclude(email=""))
+    need(people, "Nobody gets the digest yet: tick it for someone with an email address.")
+    subject, body = alerts.digest(ctx.now)
+    res = [r for c in people for r in alerts.deliver(c.name, c.email, "", subject, body, "digest", stop_key=f"digest-test|{ms(ctx.now)}")]
+    bad = [r for r in res if not r["ok"]]
+    need(not bad, f"Not sent: {bad[0]['msg']}" if bad else "")
+    return {"msg": f"Digest sent to {len(res)} {'person' if len(res) == 1 else 'people'}."}
 
 
 @cmd("alertContactDelete", "alerts.edit")
@@ -3855,6 +3909,13 @@ def execute(name, p, ctx):
         return {"ok": False, "error": str(e)}
     except integrations.ConnError as e:
         return {"ok": False, "error": str(e)}
+    except IntegrityError as e:
+        if "active_machine" in str(e):   # the one-active-log key: another screen started a log on it a moment ago
+            return {"ok": False, "error": "That machine already has a log running (started a moment ago on another screen). Refresh and try again."}
+        if "open_pm" in str(e):
+            return {"ok": False, "error": "That PM task already has an open request."}
+        log.exception("command %s failed", name)
+        return {"ok": False, "error": "The server hit an error and nothing was changed. Try again; if it keeps happening, tell the shift lead."}
     except Exception:
         # Anything unexpected: the transaction above has already rolled back, so nothing half-changed is kept.
         log.exception("command %s failed", name)

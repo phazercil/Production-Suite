@@ -140,3 +140,11 @@ def jsonlist(v):
 def names(items):
     """[{"name": ...}, ...] -> the names, for a picker."""
     return [x.get("name") for x in (items or [])]
+
+
+@register.filter
+def mo_in(text):
+    """The MO number a notice is about ("MO 306856 (MG3686HP) moved from …" gives 306856), or ""."""
+    import re
+    m = re.search(r"\bMO\s+([A-Za-z0-9-]+)", str(text or ""))
+    return m.group(1) if m else ""

@@ -16,3 +16,18 @@ class HistoryEdit(models.Model):
     class Meta:
         db_table = "supervisor_history_edit"
         ordering = ["-t", "-id"]
+
+
+class S2KPost(models.Model):
+    """Supervisor › S2K posting: a finished MO run or a packed pallet that someone marked as entered into S2K. The suite
+    never writes to S2K (it is read-only); this only records what was keyed in or imported there, and by whom."""
+    kind = models.CharField(max_length=6)          # run | pallet
+    ref = models.BigIntegerField(db_index=True)    # the MO run's or pallet tag's id
+    mo = models.CharField(max_length=40, db_index=True)
+    qty = models.IntegerField(default=0)
+    t = models.DateTimeField()
+    by = models.CharField(max_length=120)
+
+    class Meta:
+        db_table = "supervisor_s2k_post"
+        unique_together = [("kind", "ref")]

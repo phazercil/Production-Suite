@@ -61,6 +61,8 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("section.quality", "Open Quality", "The Quality section: the quality report and the tolerances.", LEAD),
         ("section.maintenance", "Open Maintenance", "The Maintenance section.", SUP),
         ("section.packaging", "Open Packaging Kiosk", "The Packaging Kiosk: make and print pallet tags.", ["operator", "maintenance", "lead", "admin"]),
+        ("section.stations", "Open Stations", "End Band, Arts & Crafts and Glue Bead stations: start each MO, log how many are done, complete the stage.",
+         ["operator", "maintenance", "lead", "admin"]),
     ]),
 ) for k, l, h, r in items)
 
@@ -68,7 +70,8 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
 TAB_PERM = {"machines": "machines.edit", "connections": "connections.edit", "connector": "connections.edit", "codata": "connections.edit", "shifts": "lists.edit",
             "reasons": "lists.edit", "checklists": "lists.edit", "maintenance": "lists.edit",
             "rules": "lists.edit", "alerts": "alerts.edit", "sensors": "sensors.edit", "cameras": "cameras.edit", "network": "network.edit", "updates": "updates.install",
-            "backup": "backup.manage", "permissions": "permissions.manage"}
+            "backup": "backup.manage", "permissions": "permissions.manage",
+            "health": "connections.edit"}
 LOCKED = {("permissions.manage", "admin")}   # (permission, role) that can't be turned off
 
 

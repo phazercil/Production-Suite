@@ -34,6 +34,50 @@ def watch(request):
     return r
 
 
+SSE_SECONDS, SSE_KEEPALIVE = 50, 15
+
+
+def sse_on():
+    return bool((PlantSettings.load().settings or {}).get("liveUpdates"))
+
+
+def events(request):
+    """Live updates without polling (Admin › Network › Live updates, off by default): the same answer as watch, sent
+    as soon as it changes. Each stream lasts at most 50 seconds and the screen reconnects, so a server worker is never
+    held for long; screens fall back to asking every few seconds when this is off or the connection drops.
+    Every open screen holds one web server thread while connected (waitress WEB_THREADS, default 12; under Apache
+    the suite's own web service's threads), so switch it on only with fewer screens than that, or raise WEB_THREADS."""
+    import time
+
+    from django.db import close_old_connections
+    from django.http import HttpResponseNotFound, StreamingHttpResponse
+    if not sse_on():
+        return HttpResponseNotFound("Live updates are off.")
+
+    def stream():
+        last, t0, sent = None, time.monotonic(), 0.0
+        try:
+            while time.monotonic() - t0 < SSE_SECONDS:
+                v = PlantSettings.objects.filter(pk=1).values_list("version", flat=True).first() or 0
+                cur = (v, config_sig())
+                if cur != last:
+                    last = cur
+                    sent = time.monotonic()
+                    yield f"data: {json.dumps({'data': v, 'config': cur[1], 'now': ms(now())})}\n\n"
+                elif time.monotonic() - sent > SSE_KEEPALIVE:
+                    sent = time.monotonic()
+                    yield f"data: {json.dumps({'data': v, 'config': cur[1], 'now': ms(now())})}\n\n"   # also keeps the clock right
+                close_old_connections()
+                time.sleep(1)
+            yield "retry: 1000\n\n"
+        finally:
+            close_old_connections()
+    r = StreamingHttpResponse(stream(), content_type="text/event-stream")
+    r["Cache-Control"] = "no-store"
+    r["X-Accel-Buffering"] = "no"
+    return r
+
+
 def trigger(resp, toast=None, kind=None, changed=False, close=False, **extra):
     """Add the screen instructions to a response: show a message, refresh now, close the dialog."""
     t = {}
@@ -45,7 +89,11 @@ def trigger(resp, toast=None, kind=None, changed=False, close=False, **extra):
         t["suite:closeModal"] = True
     t.update(extra)
     if t:
-        resp["HX-Trigger"] = json.dumps(t)
+        try:   # added to what the response already asks for, never in place of it
+            had = json.loads(resp["HX-Trigger"]) if resp.has_header("HX-Trigger") else {}
+        except ValueError:
+            had = {}
+        resp["HX-Trigger"] = json.dumps({**had, **t})
     return resp
 
 

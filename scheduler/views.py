@@ -248,6 +248,33 @@ def preview(request):
     return ok(res=result_json(r, perms.can(me, "costs.view")) if r else None, s1End=s1["end"] if s1 else None)
 
 
+@json_api
+@require_POST
+def suggest(request):
+    """Scheduler › Suggest order for one Stage 1 line: nothing is changed (scheduler/sequence.py)."""
+    from .sequence import suggest as run
+    p = body(request)
+    return ok(s=run(load_world(), to_int(p.get("machineId"), "line")))
+
+
+@json_api
+@mutate
+def suggest_apply(request):
+    """Put the suggested order on the board: worked out again now, so it is only applied as it was shown."""
+    from .sequence import suggest as run
+    p = body(request)
+    mid = to_int(p.get("machineId"), "line")
+    s = run(load_world(), mid)
+    if not s.get("ok"):
+        return fail(s.get("why") or "There is nothing to apply.")
+    if list(p.get("keys") or []) != s["keys"]:
+        return fail("The board changed since the suggestion was made. Press Suggest order again.")
+    for i, key in enumerate(s["keys"]):
+        mo_id, op, part = _key({"key": key})
+        Job.objects.filter(mo_id=mo_id, op=op, part=part, machine_id=mid).update(req_start=from_ms(s["base"] + i))
+    return ok(msg=f"Run order changed: {s['saved']} min less changeover.")
+
+
 def _mo_fields(mo, p):
     try:
         if "qty" in p:
@@ -358,7 +385,7 @@ def save_config(request):
     bases = p.get("inkjetBases") if isinstance(p.get("inkjetBases"), list) else st.planner.get("inkjetBases", ["AQ"])
     bases = [b for b in dict.fromkeys(re.sub(r"[^A-Z]", "", str(x).upper())[:6] for x in bases[:20]) if b]
     st.planner = {"coSamePart": bool(p.get("coSamePart")), "coFirst": p.get("coFirst") is not False,
-                  "useLabor": p.get("useLabor") is not False, "inkjetBases": bases,
+                  "useLabor": p.get("useLabor") is not False, "inkjetBases": bases, "coHistory": bool(p.get("coHistory", st.planner.get("coHistory"))),
                   "inkjetMin": num(p.get("inkjetMin", st.planner.get("inkjetMin", 0)), "Inkjet changeover minutes", 0, 240)}
     st.save(update_fields=["planner"])
     keep_s, sid_map = [], {}
