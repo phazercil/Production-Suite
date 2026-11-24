@@ -14,7 +14,7 @@ from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils.html import escape
 
-from plant.models import MO, Machine, Person
+from plant.models import MO, Machine, Person, PlantSettings
 from suite import thin
 
 from . import engine, integrations
@@ -22,7 +22,7 @@ from . import engine, integrations
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
 TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
-        ("rules", "Rules"), ("alerts", "Alerts"), ("sensors", "Sensors & alarms"), ("cameras", "Cameras"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
+        ("rules", "Rules"), ("health", "Health"), ("alerts", "Alerts"), ("sensors", "Sensors & alarms"), ("cameras", "Cameras"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
                       "reorder or remove reasons here; the order here is the order on the screen. Maintenance and shift leads can also type a "
@@ -138,6 +138,9 @@ def tab_data(s, tab, request):
                            "state": "in effect now" if v.date_from <= today <= v.date_to else "over" if v.date_to < today else "coming up"})
             out.append({"i": i, "sh": {"name": x.name}, **c, "variants": vs})
         return {"shifts": out}
+    if tab == "health":
+        from plant import health
+        return {"H": health.build()}
     if tab == "rules":
         r = s.rules
         nums = [("stopPpm", "Line counts as stopped at or below (P/m)", "Speed readings at or below this count as downtime, unless the machine has a run signal (Admin › Connections › Machine data).", 0),
@@ -155,7 +158,8 @@ def tab_data(s, tab, request):
         exp = {"app": "pleat-line-hmi", "exported": s.t.isoformat(), "config": snap["config"], "lines": snap["lines"],
                "users": [{k: v for k, v in u.items() if k != "pin"} for u in snap["users"]]}
         from plant import dbbackup
-        return {"export": json.dumps(exp, indent=1, default=str), "DB": {"list": dbbackup.listing(), "engine": dbbackup.engine(),
+        from plant import offsite
+        return {"export": json.dumps(exp, indent=1, default=str), "DB": {"list": dbbackup.listing(), "engine": dbbackup.engine(), "off": offsite.status(),
                                                                        "keep": dbbackup.KEEP, "name": settings.DATABASES["default"].get("NAME")}}
     if tab == "network":
         from .snapshot import network_info
@@ -870,11 +874,23 @@ def a_alert_save(request, s, p):
     c = {"id": int(p["id"]) if str(p.get("id") or "").isdigit() else None, "name": p.get("name", ""), "email": p.get("email", ""),
          "phone": p.get("phone", ""), "lines": request.POST.getlist("lines"), "downAfter": p.get("downAfter") or 15,
          "notifyBack": bool(p.get("notifyBack")), "qcLate": p.get("qcLate") or 0, "qcFail": bool(p.get("qcFail")), "pmDue": bool(p.get("pmDue")),
-         "active": bool(p.get("active"))}
+         "digest": bool(p.get("digest")), "lowStock": bool(p.get("lowStock")), "active": bool(p.get("active"))}
     r = run(request, s, "alertContactSave", {"contact": c})
     if not r["ok"]:
         return alerts_panel(request, s, edit=c, err=r["error"])
     return alerts_panel(request, s)
+
+
+@action("digestSet")
+def a_digest_set(request, s, p):
+    r = run(request, s, "digestSet", {"at": p.get("at", "")})
+    return alerts_panel(request, s, msgs={"digest": {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}})
+
+
+@action("digestSend")
+def a_digest_send(request, s, p):
+    r = run(request, s, "digestSend", {})
+    return alerts_panel(request, s, msgs={"digest": {"ok": r["ok"], "text": r.get("msg") if r["ok"] else r["error"]}})
 
 
 @action("alertTest")
@@ -1335,6 +1351,52 @@ def a_db_backup(request, s, p):
     return render_panel(request, "hmi/k/admin/_dbbackup.html", S=s, msg=msg,
                         DB={"list": dbbackup.listing(), "engine": dbbackup.engine(), "keep": dbbackup.KEEP,
                             "name": settings.DATABASES["default"].get("NAME")})
+
+
+def _db_panel(request, s, msg=None):
+    from plant import dbbackup, offsite
+    return render_panel(request, "hmi/k/admin/_dbbackup.html", S=s, msg=msg,
+                        DB={"list": dbbackup.listing(), "engine": dbbackup.engine(), "keep": dbbackup.KEEP,
+                            "name": settings.DATABASES["default"].get("NAME"), "off": offsite.status()})
+
+
+@action("dbBackupPlan")
+def a_db_backup_plan(request, s, p):
+    """Admin › Backup: back up every N hours, and copy each backup to a share on another machine."""
+    from plant import offsite
+    deny = _need(request, s, "backup.manage")
+    if deny:
+        return deny
+    try:
+        every = float(p.get("every") or 0)
+        keep = int(p.get("keep") or 30)
+    except ValueError:
+        return _db_panel(request, s, {"ok": False, "text": "Type the hours and the number of copies as numbers."})
+    if not (every == 0 or 1 <= every <= 168) or not 0 <= keep <= 1000:
+        return _db_panel(request, s, {"ok": False, "text": "Back up every 1 to 168 hours (0 = only by hand); keep 0 to 1000 copies."})
+    dest = str(p.get("copyTo") or "").strip()
+    if dest:
+        try:
+            dest = offsite.check_dest(dest)
+        except offsite.OffsiteError as e:
+            return _db_panel(request, s, {"ok": False, "text": str(e)})
+    st = PlantSettings.load()
+    st.settings = {**st.settings, "dbBackup": {"every": every, "copyTo": dest, "keep": keep}}
+    st.save(update_fields=["settings"])
+    engine.audit(engine.Ctx(user=s.actor), f"Scheduled backups: every {every:g} h" + (f", copied to {dest}" if dest else ", no off-server copy"))
+    return _db_panel(request, s, {"ok": True, "text": "Saved." + (" Use Copy now to check the folder works." if dest else "")})
+
+
+@action("dbBackupCopy")
+def a_db_backup_copy(request, s, p):
+    from plant import offsite
+    deny = _need(request, s, "backup.manage")
+    if deny:
+        return deny
+    try:
+        return _db_panel(request, s, {"ok": True, "text": offsite.copy()})
+    except offsite.OffsiteError as e:
+        return _db_panel(request, s, {"ok": False, "text": str(e)})
 
 
 @action("connectorTest")

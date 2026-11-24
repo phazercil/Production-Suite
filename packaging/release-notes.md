@@ -1,3 +1,64 @@
+## What's new in 1.9.10
+
+- **Reliability:**
+  - Fixed: parts were lost at every log boundary (shift change, operator change, pass-over): a new log now carries on the machine counter from the log that just ended.
+  - The database itself now allows only one active log per machine and one open request per PM task. The update settles any duplicates already there: older logs are ended where the next one started, and extra PM requests are completed with a note.
+  - The minute ticker is fenced: a ticker that stalls past its lease and is replaced can't write a minute.
+  - Webhook events carry a stable id (the same on every retry), and each event's retries and last error are kept.
+  - Maintenance › Inventory: a setting to stop uses from taking an item below zero. "Take back" now keeps the use in the stock history instead of deleting it.
+  - Incoming data keeps the time the source sent, and why it was replaced when it couldn't be used. A record whose id was already received is skipped.
+  - Machine feeds and data sources: size limits, rate limits and constant-time key checks.
+  - The PIN limiter keeps working when the shared cache is down.
+  - Database queries are checked the way each database reads them (quotes, comments, `#`), and more side-effect functions are refused.
+  - Live video only plays on the suite's own pages: go2rtc no longer accepts any website's request.
+  - Camera logins never show in error messages.
+  - The station key now guards the suite's Admin page; Django's table editor (/db-admin/) keeps its own login.
+  - The kiosk's Today board always shows now, overnight included.
+- **Visibility:**
+  - **Admin › Health:** ticker, each machine (stopped vs. *not reporting*), connections, data sources, webhook queue, cameras, sensors, backups, disk space, sign-in failures and recent server warnings.
+  - **Supervisor › Timeline:** one searchable history of logs, downtime, errors, QC fails, changeovers, alarms, maintenance, parts, corrections (before → after, why) and settings changes. It can be downloaded as CSV.
+  - **OEE and speed loss** in Reports, the CSV and the Data Kiosk.
+  - **Downtime Pareto, repeat stops** and the filters and crew wages stops cost.
+  - **Daily digest email** (Admin › Alerts).
+  - **Must-read handoff notes:** the next operator ticks each one before starting.
+  - **Scheduled database backups with a copy on another machine**, each copy checked and test-restored (Admin › Backup).
+  - **Live updates** (Admin › Network, off by default): screens hear about changes as they happen instead of asking every few seconds.
+  - Supervisor line cards show target so far, with buttons for the kiosk, downtime, maintenance and cameras, plus a strip of what needs someone now.
+- **Quality and planning:**
+  - **Quality › SPC:** control charts against the drawing, Cp / Cpk by machine and part, and drift warnings sent to the line before scrap.
+  - **Recall:** a supplier lot to every MO, shift, QC check and pallet tag to quarantine. A pallet tag back to its rolls and lots.
+  - **Reconciliation:** made vs. counted on MOs and rolls; filters counted twice are shown, never hidden.
+  - **Changeover report:** actual vs. target, handoff wait, slowest steps, part-to-part times. The Scheduler can plan with the real part-to-part times.
+  - **Scheduler › Suggest order** (⇅ on a Stage 1 line): groups parts and base parts to save changeovers without making more runs late. Nothing changes until Apply.
+  - **Stations** (/stations/): End Band, Arts & Crafts and Glue Bead check in work (Start, Log qty, Complete), and the Scheduler plans what's really left.
+  - **Supervisor › S2K posting:** finished runs and pallets against S2K's numbers, with what doesn't agree flagged. A CSV of what isn't posted yet and a Posted mark (nothing is ever sent to S2K).
+- **Maintenance:**
+  - PM parts lists (with "parts short" warnings and one-tap use).
+  - Low-stock notices and alerts, plus a reorder list CSV.
+  - Lockout and return to service from a request.
+  - **Reliability:** MTBF, MTTR, repeat failures, PM done on time, PM coming up, and parts usage.
+- **Screens:**
+  - One-row top bar, with Reports, Labor Budget and Admin under More, and only the sections the person signed in can open.
+  - One sign-in pill top right on every screen, with the version in it.
+  - On-screen PIN keypad (sends by itself when all PINs are one length).
+  - The kiosk's action buttons sit in one row.
+  - The operator badge switches operator.
+  - "Machine data 12 s ago" instead of a bare number.
+  - Schedule notices have Show on schedule.
+  - Scheduler:
+    - ＋ Schedule on each order;
+    - details on hover or tap (Inspect, Split, Zoom to day);
+    - the KPI chips filter the board;
+    - dragging while view-only asks for a PIN;
+    - narrow runs don't show cut-off text.
+  - Packaging:
+    - "Same as last" makes the next pallet in one tap;
+    - a two-row form;
+    - Find filters as you type, with quick filters.
+  - Data Kiosk: sharing under TV / share; the Grafana note is smaller and only for people who can set it up.
+  - Undo for scheduler moves, downtime reasons and voided pallet tags.
+  - "/" jumps to the page's search box.
+
 ## What's new in 1.9.9
 
 - **Linux updates now refresh the server's root helpers:**

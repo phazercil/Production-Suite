@@ -2,6 +2,7 @@
 import time
 from urllib.parse import urlencode, quote
 
+from django.db.models import Count, Sum
 from django.utils import timezone
 
 from hmi.engine import shift_stats
@@ -68,8 +69,11 @@ def line_card(name):
     ls = LineState.objects.filter(machine=m).first()
     feed = (ls.feed if ls else {}) or {}
     on = bool(sh)
+    lock = None
     if not on:
-        pill = ("bad", "Out of service") if not m.active else ("idle", "Idle")
+        from hmi.kscreen import lockout_for
+        lock = lockout_for(m.name) if not m.active else None
+        pill = ("bad", "Locked out") if lock else ("bad", "Out of service") if not m.active else ("idle", "Idle")
     else:
         pill = STATE_PILL.get(sh.state, ("idle", sh.state.title()))
     pts = list(PpmReading.objects.filter(shift=sh).order_by("t").values_list("t", "ppm")[:1500]) if on else []
@@ -77,6 +81,17 @@ def line_card(name):
     nxt = MO.objects.filter(line=m, status="OPEN").exclude(pk=mo.pk if mo else None).order_by("seq").first()
     st = shift_stats(sh) if on else None
     good = max(0, mo.produced - mo.scrap) if mo else 0
+    no_data = bool(on and feed.get("t") and not feed.get("ok"))
+    if no_data:
+        pill = ("warn", "Not reporting")   # not the same as stopped: the machine's data isn't coming in
+    perf = oee = None
+    if on and m.ppm:
+        agg = PpmReading.objects.filter(shift=sh, run=True).aggregate(s=Sum("ppm"), n=Count("id"))
+        if agg["n"]:
+            perf = min(150.0, 100 * (agg["s"] or 0) / (agg["n"] * m.ppm))
+            qual = 100 * good / mo.produced if mo and mo.produced else 100.0 if not (mo and mo.scrap) else None
+            if st and qual is not None:
+                oee = st["uptime"] * perf * qual / 10000
     return {
         "name": m.name, "color": m.color, "rated": int(m.ppm), "on": on, "pill": pill,
         "speed": pts[-1][1] if pts else 0,
@@ -87,6 +102,8 @@ def line_card(name):
         "uptime": st["uptime"] if st else None, "down": st["down"] if st else None,
         "uptimeBad": bool(st and st["uptime"] < 80), "downBad": bool(st and st["down"] > 30),
         "who": sh.user_name if on else "", "since": timezone.localtime(sh.start) if on else None,
-        "noData": bool(on and feed.get("t") and not feed.get("ok")),
+        "lockout": f"Maintenance request #{lock.pk}: {lock.type} · {lock.lockout_by}" if lock else "",
+        "noData": no_data, "perf": round(perf) if perf is not None else None, "oee": round(oee) if oee is not None else None,
+        "oeeBad": bool(oee is not None and oee < 60),
         "chart": speed_chart(pts, m.ppm, label=f"Pleater speed for {m.name}"),
     }

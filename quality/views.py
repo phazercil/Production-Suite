@@ -22,7 +22,7 @@ from plant.util import local, part_spec
 
 PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
-TABS = [("report", "Quality report"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"),
+TABS = [("report", "Quality report"), ("spc", "SPC"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"),
         ("viewer", "3D viewer")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
            "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
@@ -60,12 +60,13 @@ def filters(q):
     a = max(a, b - timedelta(days=366))
     return {"tab": q.get("tab") if q.get("tab") in dict(TABS) else "report", "line": str(q.get("line") or "")[:60], "q": str(q.get("q") or "").strip()[:80],
             "kind": q.get("kind") if q.get("kind") in dict(KINDS) else "", "part": str(q.get("part") or "").strip()[:40],
+            "m": str(q.get("m") or "len")[:12],
             "from": a, "to": b, "A": timezone.make_aware(datetime(a.year, a.month, a.day)),
             "B": timezone.make_aware(datetime(b.year, b.month, b.day)) + timedelta(days=1)}
 
 
 def _query(f, **change):
-    keep = {"tab": f["tab"], "line": f["line"], "kind": f["kind"], "part": f["part"], "q": f.get("q", ""), "from": f["from"].isoformat(),
+    keep = {"tab": f["tab"], "line": f["line"], "kind": f["kind"], "part": f["part"], "m": f.get("m", ""), "q": f.get("q", ""), "from": f["from"].isoformat(),
             "to": f["to"].isoformat()}
     keep.update(change)
     return urlencode({k: v for k, v in keep.items() if v not in ("", None)})
@@ -249,6 +250,8 @@ def page(request):
         return render(request, "quality/page.html", ctx)
     if f["tab"] == "trace":
         return trace_tab(request, f, ctx, err)
+    if f["tab"] == "spc":
+        return spc_tab(request, f, ctx)
     if f["tab"] == "tol":
         from hmi import integrations
         ctx["tols"] = tol_rows()
@@ -269,6 +272,37 @@ def page(request):
     return render(request, "quality/page.html", ctx)
 
 
+def spc_tab(request, f, ctx):
+    """SPC: one measurement of one part on one line over time (individuals chart), and Cp / Cpk for every machine
+    and part in the dates (quality/spc.py)."""
+    from django.utils.safestring import mark_safe
+
+    from plant.models import part_key
+
+    from . import spc
+    ms = spc.measures()
+    if f["m"] not in {k for k, _, _ in ms}:
+        f["m"] = "len"
+    cap = spc.capability(f["A"], f["B"], f["m"], f["line"])
+    if not f["part"] and cap:
+        best = max(cap, key=lambda r: r["n"])   # the busiest line and part, to start from
+        f["line"], f["part"] = f["line"] or best["line"], best["part"]
+    one = None
+    if f["line"] and f["part"]:
+        pts = spc.series(f["line"], part_key(f["part"]), f["m"], f["A"], f["B"])
+        lim = spc.limits(f["part"], f["m"])
+        st = spc.stats([v for _, v, _ in pts], lim)
+        warn = []
+        for i in range(max(0, len(pts) - 100), len(pts)):   # which of the last 100 set off a rule (at the time they came in)
+            w = spc.warnings([v for _, v, _ in pts[:i + 1]], lim)
+            if w:
+                warn.append({"t": pts[i][0], "v": pts[i][1], "rules": [x[1] for x in w]})
+        one = {"pts": pts, "lim": lim, "st": st, "svg": mark_safe(spc.chart_svg(pts, lim, st)), "warn": warn[-15:][::-1]}
+    ctx.update(measures=ms, cap=cap, one=one, mlabel=dict((k, lb) for k, lb, _ in ms).get(f["m"]),
+               lines=sorted({m.name for m in Machine.objects.filter(stage="s1")} | ({f["line"]} if f["line"] else set())))
+    return render(request, "quality/page.html", ctx)
+
+
 def trace_tab(request, f, ctx, err):
     """Traceability: which rolls and lots went into which MOs (hmi/trace.py), and how roll tags are read from a picture."""
     from hmi import rolltag, trace
@@ -276,6 +310,22 @@ def trace_tab(request, f, ctx, err):
     from plant.util import now
     t = now()
     q = f["q"]
+    if request.GET.get("view") == "recall" and q:
+        RC = trace.recall(q, t)
+        if request.GET.get("csv") == "1" and RC and not RC.get("none"):
+            resp = HttpResponse(content_type="text/csv; charset=utf-8")
+            resp["Content-Disposition"] = f'attachment; filename="recall-{q}.csv"'
+            w = csv.writer(resp)
+            for row in trace.recall_csv(RC):
+                w.writerow(row)
+            return resp
+        ctx.update(RC=RC, view="recall", recallCsv=_query(f, csv="1") + "&view=recall",
+                   lines=sorted({m.name for m in Machine.objects.filter(stage="s1")}))
+        return render(request, "quality/page.html", ctx)
+    if request.GET.get("view") == "rec":
+        ctx.update(view="rec", REC=trace.reconcile(t, f["A"], f["B"], f["line"]),
+                   lines=sorted({m.name for m in Machine.objects.filter(stage="s1")} | ({f["line"]} if f["line"] else set())))
+        return render(request, "quality/page.html", ctx)
     R = trace.search(q, t, None if q else f["A"], None if q else f["B"], f["line"])
     if request.GET.get("csv") == "1":
         resp = HttpResponse(content_type="text/csv; charset=utf-8")

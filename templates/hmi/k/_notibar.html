@@ -10,6 +10,7 @@
 {% if N.top %}<div class="notibar k-{{ N.top.kind }}" role="status"><span class="ic" aria-hidden="true">{{ N.icon|get:N.top.kind|default:"ℹ" }}</span>
   <span class="tx"><b class="num">{{ N.top.t|plan:S.t }}</b> · {{ N.top.text }}</span>
   {% if N.more %}<button class="btn sm ghost" hx-get="/kiosk/m/notices" hx-target="#modal" hx-swap="innerHTML">+{{ N.more }} more</button>{% endif %}
-  {% if N.top.go and N.top.go != page %}<a class="btn sm ghost" href="{{ base }}/{{ N.top.go }}/">Show me</a>{% endif %}
+  {% if N.top.go and N.top.go != page %}<a class="btn sm ghost" href="{{ base }}/{{ N.top.go }}/">Show me</a>
+  {% elif N.top.kind == "schedule" and N.top.text|mo_in %}{% if S.lock %}<a class="btn sm ghost" href="{{ base }}/schedule/?hl={{ N.top.text|mo_in|urlencode }}">Show on schedule</a>{% else %}<a class="btn sm ghost" href="/scheduler/?mo={{ N.top.text|mo_in|urlencode }}">Show on schedule</a>{% endif %}{% endif %}
   <button class="btn sm" hx-post="/kiosk/do/ackNotices" hx-vals='{"id": "{{ N.top.id }}"}'>Got it</button></div>{% endif %}
 </div>

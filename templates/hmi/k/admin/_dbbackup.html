@@ -3,6 +3,19 @@
   <p class="sub" style="margin-top:4px">Everything the suite keeps: shifts, downtime, counts, QC, the schedule, people, settings. The backup is taken from one consistent moment while the suite keeps running. Files go to <code>backups/database</code> in the suite's folder; the newest {{ DB.keep }} are kept. Download them to keep a copy off this server.</p>
   <div class="row" style="margin-top:10px;flex-wrap:wrap"><button class="btn primary" hx-post="/kiosk/do/dbBackup" hx-target="#dbbackup" hx-swap="outerHTML" {% if not S.perms.backup_manage %}disabled{% endif %}>Back up the database now</button><span class="htmx-indicator note">Backing up…</span></div>
   {% include "hmi/k/admin/_msg.html" with m=msg %}
+  <form class="dbplan" hx-post="/kiosk/do/dbBackupPlan" hx-target="#dbbackup" hx-swap="outerHTML" style="margin-top:12px">
+    <h3 class="h3">Scheduled backups and a copy off this server</h3>
+    <p class="note">A backup kept only on this server is lost with its disk. Copy each one to a share on another machine on the plant network; each copy is read back and test-restored.</p>
+    <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:6px">
+      <label class="fld"><span>Back up every (hours, 0 = by hand)</span><input name="every" inputmode="decimal" value="{{ DB.off.every|default:0 }}" style="width:120px"></label>
+      <label class="fld grow"><span>Copy to (a share on another machine)</span><input name="copyTo" value="{{ DB.off.copyTo }}" placeholder="\\nas01\backups\suite  or  /mnt/plant-nas/suite"></label>
+      <label class="fld"><span>Copies to keep there</span><input name="keep" inputmode="numeric" value="{{ DB.off.keep|default:30 }}" style="width:100px"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="btn" type="submit" {% if not S.perms.backup_manage %}disabled{% endif %}>Save</button>
+      {% if DB.off.on %}<button class="btn" type="button" hx-post="/kiosk/do/dbBackupCopy" hx-target="#dbbackup" hx-swap="outerHTML" {% if not S.perms.backup_manage %}disabled{% endif %}>Copy the newest now and check it</button>{% endif %}
+      <span class="htmx-indicator note">Working…</span></div>
+    {% if DB.off.msg %}<p class="note {% if DB.off.ok %}ok{% else %}bad{% endif %}" style="margin-top:6px">Last copy: {{ DB.off.msg }}</p>{% endif %}
+  </form>
   {% if DB.list %}<div class="tblwrap" style="margin-top:10px"><table class="xl"><thead><tr><th>Backup</th><th>Taken</th><th style="text-align:right">Size</th><th></th></tr></thead><tbody>
     {% for b in DB.list %}<tr><td class="mono">{{ b.name }}</td><td>{{ b.at|date:"D n/j/Y g:i a" }}</td><td style="text-align:right">{{ b.size|filesizeformat }}</td>
       <td>{% if S.perms.backup_manage %}<a class="btn sm" href="/kiosk/backup/{{ b.name }}" download>Download</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>

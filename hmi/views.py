@@ -1,5 +1,7 @@
 from plant.api import BadRequest, json_api, to_int
+import hmac
 import json
+import time
 
 from django.conf import settings
 from django.core.cache import cache
@@ -85,6 +87,17 @@ def pin_login(request, pin, user_id=None, perm=""):
     return u, None
 
 
+_LOCAL_FAILS = {}   # wrong PINs per address in this process: used when the shared cache can't be read or written
+
+
+def _local_fails(ip_key, t, add=False):
+    lst = [x for x in _LOCAL_FAILS.get(ip_key, []) if t - x < 60] + ([t] if add else [])
+    if len(_LOCAL_FAILS) > 5000:
+        _LOCAL_FAILS.clear()
+    _LOCAL_FAILS[ip_key] = lst
+    return lst
+
+
 def check_pin(request, pin, user_id=None, perm=""):
     """Whose PIN this is (and that they have permission `perm`), without logging them in.
     Slows down PIN guessing: after 5 wrong PINs from one screen (or 20 from one device address), wait 60 seconds."""
@@ -93,9 +106,9 @@ def check_pin(request, pin, user_id=None, perm=""):
     fails = [x for x in request.session.get("pin_fails", []) if t - x < 60]
     try:
         ip_fails = [x for x in (cache.get(ip_key) or []) if t - x < 60]
-    except Exception:  # the limit is a safeguard; never let it block a login
+    except Exception:  # the shared store is down: this process's own count still limits guessing
         log.exception("PIN limit store unavailable")
-        ip_fails = []
+        ip_fails = _local_fails(ip_key, t)
     # 5 per screen; 20 per address, so screens behind one proxy address don't lock each other out over a few typos
     for lst, limit in ((fails, 5), (ip_fails, 20)):
         if len(lst) >= limit:
@@ -112,10 +125,13 @@ def check_pin(request, pin, user_id=None, perm=""):
     u = matches[0] if pin and matches else None
     if not u:
         request.session["pin_fails"] = fails + [t]
+        from plant import health
+        health.count("pin")
         try:
             cache.set(ip_key, ip_fails + [t], 120)
-        except Exception:
+        except Exception:   # kept in this process instead
             log.exception("PIN limit store unavailable")
+            _local_fails(ip_key, t, add=True)
         return None, (f"That PIN can't do this ({perms.PERMS[perm]['label']})." if perm in perms.PERMS
                       else "That PIN does not match. Try again or ask your shift lead.")
     request.session["pin_fails"] = []
@@ -163,6 +179,38 @@ def command(request):
     return state_response(request, extra=r, note=note) if r.get("ok") else JsonResponse({**r, "note": note})
 
 
+def _too_big(request, limit):
+    try:
+        n = int(request.META.get("CONTENT_LENGTH") or 0)
+    except ValueError:
+        n = 0
+    return n > limit
+
+
+def _rate_ok(key, per_minute):
+    """At most per_minute requests a minute for this key (shared by every server process through the cache)."""
+    k = f"rate:{key}:{int(time.time() // 60)}"
+    try:
+        cache.add(k, 0, 120)
+        return cache.incr(k) <= per_minute
+    except Exception:  # noqa: BLE001 - the cache being down never stops machine data
+        return True
+
+
+def _depth(x, d=0):
+    if d > 12:
+        return d
+    if isinstance(x, dict):
+        return max([_depth(v, d + 1) for v in x.values()] or [d + 1])
+    if isinstance(x, list):
+        return max([_depth(v, d + 1) for v in x] or [d + 1])
+    return d
+
+
+FEED_MAX_BYTES, INGEST_MAX_BYTES = 64 * 1024, 2 * 1024 * 1024   # (Django refuses bodies over 2.5 MB anyway)
+FEED_PER_MIN, INGEST_PER_MIN = 240, 240
+
+
 @json_api
 @csrf_exempt
 @require_POST
@@ -172,11 +220,17 @@ def feed_push(request, machine):
     from plant import liveconfig
     liveconfig.refresh()
     key = settings.SUITE["FEED_KEY"]
-    if not key or request.headers.get("X-Feed-Key") != key:
+    if not key or not hmac.compare_digest(str(request.headers.get("X-Feed-Key") or "").encode(), key.encode()):
+        from plant import health
+        health.count("feedkey")
         return JsonResponse({"ok": False, "error": "Wrong or missing X-Feed-Key (set it in Operator Kiosk > Admin > Connections)."}, status=403)
+    if _too_big(request, FEED_MAX_BYTES):
+        return JsonResponse({"ok": False, "error": "A machine reading can be at most 64 KB."}, status=413)
     m = Machine.objects.filter(name=machine).first()
     if not m:
         return JsonResponse({"ok": False, "error": "Unknown machine."}, status=404)
+    if not _rate_ok(f"feed:{m.pk}", FEED_PER_MIN):
+        return JsonResponse({"ok": False, "error": f"Too many readings: at most {FEED_PER_MIN} a minute per machine."}, status=429)
     p = body(request)
     if not isinstance(p, dict) or engine.to_number(p.get("ppm")) is None or (p.get("count") not in (None, "") and engine.to_number(p.get("count")) is None):
         return JsonResponse({"ok": False, "error": 'Send {"ppm": number} and optionally "count": number.'}, status=400)
@@ -201,15 +255,23 @@ def ingest(request, name):
     if not src or src.mode != "push":
         return JsonResponse({"ok": False, "error": f"No data source named {name[:60]} takes pushed data. Set it up in Operator Kiosk > Admin > Connections."}, status=404)
     if not inbound.key_ok(src, request.headers.get("X-Source-Key")):
+        from plant import health
+        health.count("ingestkey")
         return JsonResponse({"ok": False, "error": "Wrong or missing X-Source-Key."}, status=403)
     if not src.enabled:
         return JsonResponse({"ok": False, "error": "This data source is turned off."}, status=409)
+    if _too_big(request, INGEST_MAX_BYTES):
+        return JsonResponse({"ok": False, "error": "Send at most 2 MB at a time (split the records into smaller batches)."}, status=413)
+    if not _rate_ok(f"ingest:{src.pk}", INGEST_PER_MIN):
+        return JsonResponse({"ok": False, "error": f"Too many requests: at most {INGEST_PER_MIN} a minute per data source."}, status=429)
     try:
         payload = json.loads(request.body or b"null")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({"ok": False, "error": "The body must be JSON: one object, or a list of objects."}, status=400)
     if not isinstance(payload, (dict, list)):
         return JsonResponse({"ok": False, "error": "The body must be JSON: one object, or a list of objects."}, status=400)
+    if _depth(payload) > 12:
+        return JsonResponse({"ok": False, "error": "The records are nested too deeply (at most 12 levels)."}, status=400)
     try:
         r = inbound.ingest(src, payload)
     except inbound.InboundError as e:

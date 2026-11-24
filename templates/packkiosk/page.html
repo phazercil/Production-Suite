@@ -6,6 +6,11 @@
   <div class="sv-head"><h1>Packaging Kiosk</h1><span class="muted">Pallet tags</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
 
+  {% if last %}<form method="post" action="/packaging/do/create" class="card pk-repeat">{% csrf_token %}
+    <input type="hidden" name="mo" value="{{ last.mo }}"><input type="hidden" name="part" value="{{ last.part }}"><input type="hidden" name="line" value="{{ last.line }}">
+    <input type="hidden" name="qty" value="{{ last.qty }}"><input type="hidden" name="description" value="{{ last.description }}">
+    <div class="grow"><b>Same as last</b> · {% if last.mo %}MO {{ last.mo }} · {% endif %}{{ last.part }} · {{ last.line }} · {{ last.qty|num }} pcs → <b>pallet #{{ lastNext }}</b></div>
+    <button class="btn ghost" name="andPrint" value="0">Save</button><button class="btn go" name="andPrint" value="1">Same as last, print #{{ lastNext }}</button></form>{% endif %}
   <div class="card"><h2>New pallet tag</h2>
     <form method="post" action="/packaging/do/create" class="pk-new" id="pk-new" autocomplete="off">{% csrf_token %}
       <label class="fld"><span>MO running today <i>(optional)</i></span><select name="mo" id="pk-mo"><option value="">{% if mos %}No MO{% else %}No MO (none on the schedule today){% endif %}</option>{% for m in mos %}<option value="{{ m.number }}" data-part="{{ m.part }}" {% if m.number == form.mo %}selected{% endif %}>{{ m.number }} · {{ m.part }} · {{ m.qty|num }}</option>{% endfor %}</select></label>
@@ -21,10 +26,14 @@
     </form></div>
 
   <div class="sv-kpis"><div class="kpi"><span>Pallets</span><b>{{ kpi.pallets }}</b></div><div class="kpi"><span>Pieces</span><b>{{ kpi.pcs|num }}</b></div><div class="kpi"><span>Not verified yet</span><b class="{% if kpi.unverified %}warn{% endif %}">{{ kpi.unverified }}</b></div></div>
-  <form class="sv-filter" method="get">
-    <label>Show<select name="range">{% for k, l in ranges %}<option value="{{ k }}" {% if k == range %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
-    <label>Find<input type="search" name="q" value="{{ find }}" placeholder="Part, MO, line or name"></label>
-    <button class="btn go" type="submit">Show</button></form>
+  <form class="sv-filter" method="get" id="pk-find">
+    <label>Show<select name="range" onchange="this.form.submit()">{% for k, l in ranges %}<option value="{{ k }}" {% if k == range %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <label>Find<input type="search" name="q" value="{{ find }}" placeholder="Part, MO, line or name" data-search data-live></label>
+    {% if need %}<input type="hidden" name="need" value="{{ need }}">{% endif %}{% if fline %}<input type="hidden" name="line" value="{{ fline }}">{% endif %}
+    <noscript><button class="btn go" type="submit">Show</button></noscript></form>
+  <nav class="pk-chips" aria-label="Quick filters"><a href="?range={{ range }}" {% if not need and not fline %}aria-current="page"{% endif %}>All {% if range == "today" %}today{% else %}in range{% endif %}</a>
+    <a href="?range={{ range }}&amp;need=verify" {% if need == "verify" %}aria-current="page"{% endif %}>Needs verification{% if kpi.unverified %} ({{ kpi.unverified }}){% endif %}</a>
+    {% for l in lines %}<a href="?range={{ range }}&amp;line={{ l|urlencode }}" {% if fline == l %}aria-current="page"{% endif %}>{{ l }}</a>{% endfor %}</nav>
   <div class="card"><div class="tblwrap"><table class="st pk-tbl"><thead><tr><th>Tag</th><th>Part</th><th>MO</th><th>Line</th><th class="n">Pallet</th><th class="n">Qty</th><th>Packed</th><th>Verified</th><th>Supervisor</th><th></th></tr></thead><tbody>
   {% for r in rows %}<tr id="t{{ r.pk }}" class="{% if r.voided %}muted voided{% endif %}">
     <td class="nw">{{ r.tag_no }}{% if r.voided %}<div class="note">VOID · {{ r.void_reason }} ({{ r.voided_by }})</div>{% elif r.prints %}<div class="note">printed {{ r.prints }}×</div>{% endif %}</td>

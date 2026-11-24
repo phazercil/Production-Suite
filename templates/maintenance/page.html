@@ -26,7 +26,11 @@
   <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th>Task</th><th>Every</th><th>Since last done</th><th></th><th>Falls due</th><th>Last done</th><th></th></tr></thead><tbody>
   {% for r in rows %}<tr>
     <td class="nw"><b>{{ r.task.machine }}</b></td>
-    <td><b>{{ r.task.title }}</b>{% if r.task.priority == "High" %} <span class="pill bad">HIGH</span>{% endif %}{% if r.task.steps %}<div class="note" style="white-space:pre-line">{{ r.task.steps|truncatechars:240 }}</div>{% endif %}</td>
+    <td><b>{{ r.task.title }}</b>{% if r.task.priority == "High" %} <span class="pill bad">HIGH</span>{% endif %}{% if r.task.steps %}<div class="note" style="white-space:pre-line">{{ r.task.steps|truncatechars:240 }}</div>{% endif %}
+      {% if r.parts %}<div class="note">Parts: {% for b in r.parts %}{{ b.qty|floatformat:"-3" }} × {{ b.item.name }} <span class="{% if b.item.qty < b.qty %}bad{% else %}muted{% endif %}">({{ b.item.qty|floatformat:"-3" }} on hand)</span>{% if not forloop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+      {% if r.short %}<span class="pill bad">PARTS SHORT</span>{% elif r.parts and r.state != "ok" and r.state != "off" %}<span class="pill ok">PARTS IN STOCK</span>{% endif %}
+      {% if canEdit and items %}<details class="inl"><summary class="linkbtn">Parts list</summary><form method="post" action="/maintenance/do/pmPartSet" class="sv-filter" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="task" value="{{ r.task.id }}"><input type="hidden" name="back" value="{{ here }}">
+        <select name="item" required><option value="">Part…</option>{% for i in items %}<option value="{{ i.pk }}">{{ i }}</option>{% endfor %}</select><input type="number" name="qty" min="0" step="any" value="1" class="qty" aria-label="How many each time"><button class="btn">Set</button><span class="note">0 takes it off</span></form></details>{% endif %}</td>
     <td class="nw">{{ r.everyTxt }}</td>
     <td class="nw">{{ r.usedTxt }} <span class="muted">· {{ r.pct }}%</span><div class="bar" role="img" aria-label="{{ r.pct }}% of the interval used"><i class="{{ r.pill.0 }}" style="width:{% if r.pct > 100 %}100{% else %}{{ r.pct }}{% endif %}%"></i></div><div class="note">{{ r.leftTxt }}</div></td>
     <td class="nw"><span class="pill {{ r.pill.0 }}">{{ r.pill.1 }}</span>{% if r.ticket %}<div class="note"><a href="?tab=requests#r{{ r.ticket.id }}">#{{ r.ticket.id }}</a> opened {{ r.ticket.t|plan:now }} · {{ r.ticket.status_label|lower }}</div>{% endif %}</td>
@@ -50,11 +54,16 @@
   {% empty %}<tr><td colspan="6" class="empty">No planned maintenance done yet{% if fmachine %} on {{ fmachine }}{% endif %}.</td></tr>{% endfor %}</tbody></table></div></div>
   {% endif %}
   {% elif tab == "inventory" %}
-  <div class="sv-kpis"><div class="kpi"><span>Items</span><b>{{ items|length }}</b></div><div class="kpi"><span>Low or out</span><b class="{% if low %}bad{% endif %}">{{ low }}</b></div></div>
+  <div class="sv-kpis"><div class="kpi"><span>Items</span><b>{{ items|length }}</b></div><div class="kpi"><span>Low or out</span><b class="{% if low %}bad{% endif %}">{{ low }}</b></div>
+    <a class="btn ghost" href="/maintenance/reorder.csv" style="align-self:center">Download reorder list</a></div>
   <form class="sv-filter" method="get"><input type="hidden" name="tab" value="inventory">
     <label>Find<input type="search" name="q" value="{{ q }}" placeholder="Name, part # or location"></label>
     <label class="chk"><input type="checkbox" name="all" value="1" {% if showAll %}checked{% endif %}> Include items taken off the list</label>
     <button class="btn go" type="submit">Show</button></form>
+  {% if canStock %}<form method="post" action="/maintenance/do/itemPolicy" class="sv-form mt-policy">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
+    <input type="hidden" name="below" value="{% if belowZero %}0{% else %}1{% endif %}">
+    <span>{% if belowZero %}A use may take an item below zero (emergency repairs); it then shows as a count to do.{% else %}A use can't take more than is on hand.{% endif %}</span>
+    <button class="btn" type="submit">{% if belowZero %}Don't allow below zero{% else %}Allow below zero{% endif %}</button></form>{% endif %}
   {% if canStock %}<details class="card mt-add" {% if not inv and not q %}open{% endif %}><summary><b>Add an item</b></summary>
     <form method="post" action="/maintenance/do/itemSave" class="sv-form mt-grid">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
       <label class="fld"><span>Name</span><input name="name" maxlength="120" required placeholder="e.g. Drive belt"></label>
@@ -98,10 +107,30 @@
   {% endwith %}{% empty %}<tr><td colspan="7" class="empty">{% if q %}No items match “{{ q }}”.{% else %}No items yet.{% if canStock %} Add the first one above.{% endif %}{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
   <div class="card"><h2>Recent changes</h2><div class="tblwrap"><table class="st"><thead><tr><th>When</th><th>Item</th><th>What</th><th>Machine</th><th>Request</th><th>By</th><th>Note</th></tr></thead><tbody>
     {% for m in moves %}<tr><td class="nw">{{ m.t|day }} {{ m.t|clock }}</td><td>{{ m.item }}</td>
-      <td class="nw">{% if m.kind == "used" %}Used {{ m.qty|floatformat:"-3" }}{% elif m.kind == "added" %}Added {{ m.qty|floatformat:"-3" }}{% else %}Counted ({% if m.qty >= 0 %}+{% endif %}{{ m.qty|floatformat:"-3" }}){% endif %} {{ m.item.unit }}</td>
+      <td class="nw">{% if m.kind == "used" %}Used {{ m.qty|floatformat:"-3" }}{% elif m.kind == "added" %}Added {{ m.qty|floatformat:"-3" }}{% elif m.kind == "undone" %}<s>Used {{ m.qty|floatformat:"-3" }}</s> (taken back){% elif m.kind == "back" %}Taken back {{ m.qty|floatformat:"-3" }}{% else %}Counted ({% if m.qty >= 0 %}+{% endif %}{{ m.qty|floatformat:"-3" }}){% endif %} {{ m.item.unit }}</td>
       <td>{{ m.machine|default:"—" }}</td><td>{% if m.ticket %}<a href="?tab={% if m.ticket.status == 'Closed' %}done{% else %}requests{% endif %}#r{{ m.ticket_id }}">#{{ m.ticket_id }}</a>{% else %}—{% endif %}</td><td>{{ m.by }}</td><td>{{ m.note }}</td></tr>
     {% empty %}<tr><td colspan="7" class="empty">Nothing yet.</td></tr>{% endfor %}</tbody></table></div></div>
 
+  {% elif tab == "reliability" %}
+  <form class="sv-filter" method="get"><input type="hidden" name="tab" value="reliability">
+    <label>Machine<select name="machine"><option value="">All</option>{% for m in machines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <label>Period<select name="days">{% for d in "30,90,180,365"|split %}<option value="{{ d }}" {% if d|add:0 == days %}selected{% endif %}>Last {{ d }} days</option>{% endfor %}</select></label>
+    <button class="btn go" type="submit">Show</button></form>
+  <div class="sv-kpis"><div class="kpi"><span>Repair requests</span><b>{{ R.failures }}</b></div>
+    <div class="kpi"><span>PM done on time</span><b class="{% if R.pm.pct is not None and R.pm.pct < 90 %}warn{% endif %}">{% if R.pm.pct is not None %}{{ R.pm.pct }}%{% else %}—{% endif %}</b><small>{{ R.pm.onTime }} on time · {{ R.pm.late }} late</small></div>
+    <div class="kpi"><span>PM coming up (30 days)</span><b>{{ R.comingN }}</b></div><div class="kpi"><span>Repeat failures</span><b class="{% if R.repeats %}bad{% endif %}">{{ R.repeats|length }}</b></div></div>
+  <div class="card"><h2>By machine</h2><div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th class="n">Repair requests</th><th class="n">Still open</th><th class="n">High · line down</th><th class="n">Locked out</th><th class="n">Running time</th><th class="n">MTBF</th><th class="n">MTTR</th></tr></thead><tbody>
+    {% for r in R.rows %}<tr><td><b>{{ r.machine }}</b></td><td class="n">{{ r.failures }}</td><td class="n">{{ r.open }}</td><td class="n">{{ r.high }}</td><td class="n">{{ r.locked }}</td><td class="n">{% if r.runH is not None %}{{ r.runH }} h{% else %}—{% endif %}</td><td class="n">{% if r.mtbf is not None %}{{ r.mtbf }} h{% else %}—{% endif %}</td><td class="n">{% if r.mttr is not None %}{{ r.mttr }} h{% else %}—{% endif %}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">No repair requests in this period.</td></tr>{% endfor %}</tbody></table></div>
+    <p class="note">MTBF: running time ÷ repair requests (the PM schedule's own requests aren't failures). MTTR: from a request being raised to it being completed. Running time comes from each machine's readings, so equipment without readings shows none.</p></div>
+  <div class="grid2">
+  <div class="card"><h2>Repeat failures</h2>{% if R.repeats %}<table class="st"><tbody>{% for x in R.repeats %}<tr><td><b>{{ x.machine }}</b></td><td>{{ x.type }}</td><td class="n">{{ x.n }}×</td><td class="nw">last {{ x.last|day }}</td></tr>{% endfor %}</tbody></table><p class="note">The same kind of request on one machine {{ R.repeatAt }} or more times: worth a root-cause look or a PM task.</p>{% else %}<p class="muted">None.</p>{% endif %}</div>
+  <div class="card"><h2>Planned maintenance coming up</h2>{% for d, xs in R.coming.items %}{% if xs %}<h3>Within {{ d }} days</h3><table class="st"><tbody>{% for x in xs %}<tr><td><b>{{ x.task.machine }}</b></td><td>{{ x.task.title }}</td><td class="nw">{% if x.state == "due" or x.state == "open" %}<span class="pill bad">DUE NOW</span>{% else %}{{ x.when|day }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}{% empty %}{% endfor %}{% if not R.comingN %}<p class="muted">Nothing falls due in the next 30 days.</p>{% endif %}</div>
+  </div>
+  <div class="grid2">
+  <div class="card"><h2>Parts used most</h2>{% if R.parts %}<table class="st"><tbody>{% for x in R.parts %}<tr><td>{{ x.item__name }}{% if x.item__part_no %} <span class="note">{{ x.item__part_no }}</span>{% endif %}</td><td class="n">{{ x.n|floatformat:"-3" }} {{ x.item__unit }}</td><td class="n">{{ x.times }}×</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">No parts used.</p>{% endif %}</div>
+  <div class="card"><h2>Parts used by machine</h2>{% if R.perMachine %}<table class="st"><tbody>{% for x in R.perMachine %}<tr><td><a href="?tab=machines&amp;machine={{ x.machine|urlencode }}">{{ x.machine|default:"—" }}</a></td><td class="n">{{ x.n }} use{{ x.n|pluralize }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="muted">No parts used.</p>{% endif %}</div>
+  </div>
   {% else %}
   <div class="mt-mach">
     <div class="card mt-mlist"><h2>Machines</h2>{% for r in mrows %}<a href="?tab=machines&machine={{ r.m|urlencode }}" {% if r.m == sel %}aria-current="page"{% endif %}><b>{{ r.m }}</b><span class="note">{% if r.n %}{{ r.n }} use{{ r.n|pluralize }} of parts{% else %}no parts recorded{% endif %}{% if r.last %} · last {{ r.last|day }}{% endif %}{% if r.open %} · <span class="warn">{{ r.open }} pending</span>{% endif %}</span></a>{% empty %}<p class="muted">No machines yet.</p>{% endfor %}</div>

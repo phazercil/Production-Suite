@@ -53,7 +53,24 @@
     } catch (e) { setOnline(false); }
     timer = setTimeout(watch, every);
   }
-  if (watchUrl) watch();
+  // Live updates (Admin › Network, off by default): the server sends a change the moment it happens; asking every
+  // few seconds stays as the fallback whenever the stream isn't there.
+  function apply(j) {
+    setOnline(true); setNow(j.now);
+    if (config !== null && j.config !== config) htmx.trigger(body, "suite:config");
+    else if (data !== null && j.data !== data) htmx.trigger(body, "suite:changed");
+    data = j.data; config = j.config;
+  }
+  let es = null;
+  function stream() {
+    if (!watchUrl || body.dataset.sse !== "1" || !window.EventSource) return false;
+    try { es = new EventSource(watchUrl.replace("/thin/watch", "/thin/events")); } catch (e) { return false; }
+    let opened = false;
+    es.onmessage = ev => { opened = true; clearTimeout(timer); try { apply(JSON.parse(ev.data)); } catch (e) {} timer = setTimeout(watch, 60000); };
+    es.onerror = () => { if (!opened || es.readyState === 2) { es.close(); es = null; watch(); } };   // off, or gone: back to asking
+    return true;
+  }
+  if (watchUrl && !stream()) watch();
   // after any action of this screen, refresh straight away instead of waiting for the next check
   body.addEventListener("suite:changed-now", () => { data = null; htmx.trigger(body, "suite:changed"); watch(); });
 
@@ -235,8 +252,15 @@
   }
   setInterval(tick, 1000); tick();
   // milliseconds since a moment (the kiosk banner: since the last machine data pull)
-  function tickMs() { const t = now(); document.querySelectorAll("[data-ms-since]").forEach(el => { el.textContent = Math.max(0, Math.round(t - +el.dataset.msSince)); }); }
-  setInterval(tickMs, 100); tickMs();
+  function tickMs() {
+    const t = now();
+    document.querySelectorAll("[data-ms-since]").forEach(el => {
+      const s = Math.max(0, Math.round((t - +el.dataset.msSince) / 1000));
+      el.textContent = (el.dataset.label || "") + (s < 120 ? s + " s ago" : Math.round(s / 60) + " min ago");
+      el.classList.toggle("stale", s > 150);
+    });
+  }
+  setInterval(tickMs, 1000); tickMs();
 
   // ------------------------------------------------------------ wall screens stay awake where the browser allows it
   if (body.dataset.awake && navigator.wakeLock) {

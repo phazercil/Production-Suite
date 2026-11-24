@@ -3,4 +3,5 @@
   <span><i class="dot {% if L.grafana %}ok{% else %}warn{% endif %}"></i>{% if L.grafana %}Grafana panels{% else %}Built-in charts{% endif %}</span>
   {% if L.demo %}<span><i class="dot warn"></i>Demo data</span>{% endif %}
   {% if L.planAt %}<span>Plan updated {{ L.planAt|clock }}</span>{% endif %}
+  <span class="ver">{{ suite_rev }}</span>
 </div>

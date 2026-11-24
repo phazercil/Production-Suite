@@ -12,6 +12,7 @@ is kept the same way: a completed request for the task.
 """
 from datetime import timedelta
 
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Sum
 
 from .models import PMTask, PpmReading, Ticket, TicketNote
@@ -105,7 +106,11 @@ def check(now):
     busy = set(Ticket.objects.filter(pm__isnull=False).exclude(status="Closed").values_list("pm_id", flat=True))
     for task in PMTask.objects.filter(active=True).exclude(pk__in=busy):
         if used(task, now) >= task.every:
-            opened.append(open_request(task, now))
+            try:
+                with transaction.atomic():     # the open_pm key: another process opened it a moment ago
+                    opened.append(open_request(task, now))
+            except IntegrityError:
+                pass
     return opened
 
 

@@ -322,25 +322,34 @@ def bind(sql, mark):
             i += 1
     return "".join(out), names
 # Anything that could change data, lock rows in the other system, or write files is refused before it is sent.
-NOT_READ_ONLY = re.compile(r"(?is)\b(insert|update|delete|create|alter|drop|truncate|rename|grant|revoke|"
-                           r"into\s+(outfile|dumpfile|@)|for\s+update|for\s+share|lock\s+in\s+share\s+mode|"
-                           r"get_lock|release_lock|sleep|benchmark)\b")
+NOT_READ_ONLY = re.compile(r"(?is)\b(insert|update|delete|create|alter|drop|truncate|rename|grant|revoke|merge|"
+                           r"into|for\s+update|for\s+share|lock\s+in\s+share\s+mode|lock\s+tables?|handler|"
+                           r"exec|execute|call|copy|vacuum|reindex|"
+                           r"get_lock|release_lock|sleep|benchmark|load_file|pg_sleep\w*|pg_read\w*|pg_write\w*|pg_ls_dir|"
+                           r"pg_terminate_backend|pg_cancel_backend|lo_\w+|dblink\w*|nextval|setval|set_config|"
+                           r"waitfor|xp_\w+|sp_\w+|openrowset|opendatasource|openquery|openxml|shutdown|dbcc|declare)\b")
 
 
-def _strip_literals(sql):
-    """The query without quoted text and comments, so a word inside a string doesn't count."""
-    sql = re.sub(r"(?s)/\*.*?\*/", " ", sql)
-    sql = re.sub(r"(?m)(--\s|#).*$", " ", sql)
-    return re.sub(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\"|`[^`]*`", " ", sql)
+def _strip_literals(sql, kind="mysql"):
+    """The query without quoted text and comments, so a word inside a string doesn't count. Read the way the database
+    kind reads it: only MySQL/MariaDB treat backslash as an escape in quotes and # as a comment, so on SQL Server and
+    PostgreSQL a quote or # never hides the rest of a statement from this check."""
+    sql = re.sub(r"(?s)/\*.*?\*/", " ", sql)    # (PostgreSQL nests /* */: what's left over is checked, never hidden)
+    sql = re.sub(r"(?m)(--\s|#).*$" if kind == "mysql" else r"(?m)--.*$", " ", sql)
+    if kind == "mysql":
+        return re.sub(r"'(?:[^'\\]|\\.|'')*'|\"(?:[^\"\\]|\\.)*\"|`[^`]*`", " ", sql)
+    return re.sub(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|\[[^\]]*\]", " ", sql)
 
 
-def check_select(sql, what="the asset database"):
+def check_select(sql, what="the asset database", kind="mysql"):
     sql = (sql or "").strip().rstrip(";").strip()
     if "/*!" in sql or "/*M!" in sql:
         raise ConnError("Version comments (/*! ... */) are not allowed.")
     if not re.match(r"(?is)^(select|with)\b", sql):
         raise ConnError(f"Only SELECT queries can run against {what}.")
-    bare = _strip_literals(sql)
+    bare = _strip_literals(sql, kind)
+    if bare.count("'") % 2 or bare.count('"') % 2:
+        raise ConnError("A quote in the query isn't closed.")
     if ";" in bare:
         raise ConnError("Use a single SELECT statement.")
     m = NOT_READ_ONLY.search(bare)
@@ -367,7 +376,7 @@ def quoters(db):
 def run_saved(sql, params, limit=500, db="assets"):
     if db == "viewer" or is_viewer_sql(sql):
         return viewer_run(sql, params, limit)
-    sql = check_select(sql, DB_NAMES.get(db, "that database").replace("The ", "the "))
+    sql = check_select(sql, DB_NAMES.get(db, "that database").replace("The ", "the "), kind_of(db))
     conn = _db(db)
     q, names = bind(sql.replace("%", "%%"), "%s")
     t0 = time.time()

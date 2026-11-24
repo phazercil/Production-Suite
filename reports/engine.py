@@ -126,7 +126,24 @@ def _filters(sc):
 
 def _blank():
     return {"obs": 0, "run": 0, "units": 0, "ppmAvg": None, "down": 0.0, "qc": 0, "qcFail": 0, "aq": 0, "aqFail": 0, "mos": 0, "moQty": 0,
-            "moMin": 0.0, "laborCost": None, "reasons": {}}
+            "moMin": 0.0, "laborCost": None, "reasons": {}, "speedSum": 0.0, "ratedSum": 0.0, "scrap": 0}
+
+
+def _rated():
+    """Each Stage 1 line's rated speed (Admin › Machines), in the same unit its minute readings are in."""
+    return {m.name: float(m.ppm or 0) for m in Machine.objects.filter(stage="s1")}
+
+
+def oee_parts(x):
+    """Availability (uptime) x Performance (speed while running against the rated speed) x Quality (good of made).
+    The speed loss is the running time the slow running cost: running minutes x (1 - performance)."""
+    perf = min(150.0, 100 * x["speedSum"] / x["ratedSum"]) if x.get("ratedSum") else None
+    qual = 100 * max(0, x["units"] - x["scrap"]) / x["units"] if x.get("units") else None
+    av = x.get("uptime")
+    oee = av * perf * qual / 10000 if None not in (av, perf, qual) else None
+    return {"perf": round(perf, 1) if perf is not None else None, "quality": round(qual, 1) if qual is not None else None,
+            "oee": round(oee, 1) if oee is not None else None,
+            "speedLossMin": round(x["run"] * max(0.0, 1 - perf / 100), 1) if perf is not None else None}
 
 
 def _clip(a, b, s, e):
@@ -162,6 +179,17 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
                 x = row(r[grp])
                 x.update(obs=r["obs"] or 0, run=r["runMins"] or 0, units=r["units"] or 0,
                          ppmAvg=round(r["ppmAvg"], 1) if r["ppmAvg"] is not None else None)
+        # performance: the speed each running minute ran at, against that line's rated speed
+        rated = _rated()
+        keys = ["line"] + ([grp] if grp and grp not in ("mo", "line") else [])
+        for r in qs.filter(run=True).values(*keys).annotate(s=Sum("ppm"), n=Count("id")):
+            rs = rated.get(r["line"], 0) * r["n"]
+            total["speedSum"] += r["s"] or 0
+            total["ratedSum"] += rs
+            if grp and grp != "mo":
+                x = row(r[grp])
+                x["speedSum"] += r["s"] or 0
+                x["ratedSum"] += rs
     # downtime, cut to the period
     for d in Downtime.objects.filter(start_time__lt=b, end_time__gt=a, **g).values("start_time", "end_time", "reason", *( [grp] if grp else [])):
         m = _clip(a, b, d["start_time"], d["end_time"])
@@ -183,16 +211,18 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
                 x = row(r[grp])
                 x[n_key], x[f_key] = r["n"], r["fails"]
     # MOs finished (a run of an MO that ended in the period)
-    for r in MoRun.objects.filter(end_time__gte=a, end_time__lt=b, **g).values("mo", "qty", "start_time", "end_time", *([grp] if grp and grp != "mo" else [])):
+    for r in MoRun.objects.filter(end_time__gte=a, end_time__lt=b, **g).values("mo", "qty", "scrap", "start_time", "end_time", *([grp] if grp and grp != "mo" else [])):
         mins = max(0.0, (r["end_time"] - r["start_time"]).total_seconds() / 60)
         total["mos"] += 1
         total["moQty"] += r["qty"] or 0
         total["moMin"] += mins
+        total["scrap"] += r["scrap"] or 0
         if grp:
             x = row(r[grp] if grp != "mo" else r["mo"])
             x["mos"] += 1
             x["moQty"] += r["qty"] or 0
             x["moMin"] += mins
+            x["scrap"] += r["scrap"] or 0
     if sc["level"] == "mo" or grp == "mo":
         # an MO's own filters made = what its runs recorded; its time = how long they ran
         if sc["level"] == "mo":
@@ -207,10 +237,62 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
         x["uptime"] = round(100 * x["run"] / x["obs"], 1) if x["obs"] and not per_mo else None
         x["qcPass"] = round(100 * (x["qc"] - x["qcFail"]) / x["qc"], 1) if x["qc"] else None
         x["aqPass"] = round(100 * (x["aq"] - x["aqFail"]) / x["aq"], 1) if x["aq"] else None
+        x.update(oee_parts(x) if not per_mo else {"perf": None, "quality": round(100 * max(0, x["units"] - x["scrap"]) / x["units"], 1)
+                                                  if x["units"] else None, "oee": None, "speedLossMin": None})
         x["reasons"] = sorted(({"reason": k, "min": round(v, 1)} for k, v in x["reasons"].items()), key=lambda r: -r["min"])[:5]
         if x["laborCost"] is not None:
             x["laborPerUnit"] = round(x["laborCost"] / x["units"], 4) if x["units"] else None
     return total, rows
+
+
+REPEAT = 3   # the same reason this many times on one line in the period is a repeat
+
+
+def downtime_intel(sc, a, b, labor=None):
+    """Downtime › Pareto (every reason, longest first, with the running share), repeats (the same reason again and
+    again on one line), the filters the stops cost (each line's own filters per running minute in the period x its
+    downtime) and, for shift leads, the crew wages paid while stopped."""
+    f, g = _filters(sc)
+    by_reason, by_line_reason, line_down = {}, {}, {}
+    rate_of = {}
+    plan, nums = labor if labor else (None, None)
+
+    def wage(line, shift_name):
+        k = (line, shift_name)
+        if k not in rate_of:
+            ln = plan.line_for(line) if plan else None
+            n = nums.get(shift_name) if nums else None
+            rate_of[k] = plan.shift_info(ln, n)["costPerHour"] if ln and n else 0
+        return rate_of[k]
+    wages = 0.0
+    for d in Downtime.objects.filter(start_time__lt=b, end_time__gt=a, **g).values("line", "reason", "start_time", "end_time", "shift__shift_name"):
+        m = _clip(a, b, d["start_time"], d["end_time"])
+        r = d["reason"] or "No reason given"
+        x = by_reason.setdefault(r, {"reason": r, "min": 0.0, "n": 0})
+        x["min"] += m
+        x["n"] += 1
+        y = by_line_reason.setdefault((d["line"], r), {"line": d["line"], "reason": r, "n": 0, "min": 0.0, "last": d["start_time"]})
+        y["n"] += 1
+        y["min"] += m
+        y["last"] = max(y["last"], d["start_time"])
+        line_down[d["line"]] = line_down.get(d["line"], 0) + m
+        if plan:
+            wages += m / 60 * wage(d["line"], d["shift__shift_name"])
+    total = sum(x["min"] for x in by_reason.values()) or 0
+    pareto, cum = [], 0.0
+    for x in sorted(by_reason.values(), key=lambda x: -x["min"]):
+        cum += x["min"]
+        pareto.append({**x, "min": round(x["min"], 1), "pct": round(100 * x["min"] / total, 1) if total else 0,
+                       "cum": round(100 * cum / total, 1) if total else 0})
+    lost = 0
+    for ln, m in line_down.items():
+        agg = PpmReading.objects.filter(t__gte=a, t__lt=b, line=ln, run=True).aggregate(u=Sum("units"), n=Count("id"))
+        if agg["n"]:
+            lost += m * (agg["u"] or 0) / agg["n"]
+    repeats = sorted((dict(y, min=round(y["min"], 1), last=y["last"].isoformat()) for y in by_line_reason.values()
+                      if y["n"] >= REPEAT and y["reason"] != "No reason given"), key=lambda y: (-y["n"], -y["min"]))
+    return {"pareto": pareto[:20], "repeats": repeats[:20], "lostFilters": round(lost), "total": round(total, 1),
+            "wages": round(wages, 2) if plan else None, "repeatAt": REPEAT}
 
 
 def _labor(sc, a, b, f, total, rows, grp, labor):
@@ -283,13 +365,16 @@ def report(scope, period, lead=False):
             continue
         t, _ = summarize(sc, a, b, stop, False, None)
         buckets.append({"key": key, "label": label, "units": t["units"], "uptime": t["uptime"], "down": t["down"], "obs": t["obs"],
-                        "qcFail": t["qcFail"] + t["aqFail"]})
+                        "qcFail": t["qcFail"] + t["aqFail"], "oee": t["oee"], "perf": t["perf"]})
     if not lead:
         total.pop("laborCost", None)
         for r in out_rows:
             r.pop("laborCost", None)
             r.pop("laborPerUnit", None)
-    return {"scope": {"key": sc["key"], "level": sc["level"], "label": sc["label"], "crumbs": scope_crumbs(sc)},
+    di = downtime_intel(sc, per["start"], min(per["end"], now), labor)
+    if not lead:
+        di.pop("wages", None)
+    return {"downtime": di, "scope": {"key": sc["key"], "level": sc["level"], "label": sc["label"], "crumbs": scope_crumbs(sc)},
             "period": {"key": per["key"], "kind": per["kind"], "label": per["label"], "crumbs": period_crumbs(per),
                        "week": per.get("week") or (f"week:{per['start'].date().isoformat()}" if per["kind"] == "day" else None),
                        "start": per["start"].isoformat(), "end": per["end"].isoformat()},
@@ -299,6 +384,7 @@ def report(scope, period, lead=False):
 
 def _finish(x):
     x["uptime"] = None
+    x["perf"] = x["quality"] = x["oee"] = x["speedLossMin"] = None
     x["laborPerUnit"] = None
     x["qcPass"] = x["aqPass"] = None
     x["reasons"] = []

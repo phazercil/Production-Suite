@@ -226,6 +226,7 @@ if env("LOG_DIR"):
     _handlers["file"] = {"class": "logging.handlers.RotatingFileHandler", "formatter": "plain", "encoding": "utf-8",
                          "filename": str(Path(env("LOG_DIR")) / f"{env('SUITE_LOG_NAME', 'suite')}.log"),
                          "maxBytes": 5 * 1024 * 1024, "backupCount": 5}
+_handlers["recent"] = {"class": "plant.health.RecentErrors", "level": "WARNING"}   # Admin › Health › Recent errors
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

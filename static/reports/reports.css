@@ -53,3 +53,5 @@ table.rt tfoot td{font-weight:700;border-top:2px solid var(--s-rule)}
 .pick{display:flex;flex-wrap:wrap;gap:10px;margin:8px 0}
 .pick label{display:flex;gap:6px;align-items:center}
 @media (max-width:700px){.crumbs{font-size:17px}.kpi b{font-size:22px}}
+.pareto td .pb{display:inline-block;height:8px;background:var(--s-accent);border-radius:2px;vertical-align:middle;max-width:80px}
+.pareto tr.vital td{font-weight:600}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Stations{% if m %} · {{ m.name }}{% endif %}{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block body_attrs %}data-watch="/thin/watch?scope=data" data-every="15000"{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}">{% endblock %}
+{% block content %}<div class="sv st-page">
+  <div class="sv-head"><h1>Stations</h1><span class="muted">{% if m %}{{ stage }} · {{ m.name }}{% else %}End Band, Arts &amp; Crafts and Glue Bead{% endif %}</span><span class="grow"></span><span class="who">{{ me.name }}</span><button type="button" class="btn ghost" id="sv-logout">Log out</button></div>
+  {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}{% if err %}<div class="flash bad" role="alert">{{ err }}</div>{% endif %}
+  {% if lines %}<nav class="sv-tabs" aria-label="Station">{% for l in lines %}<a href="?line={{ l.name|urlencode }}" {% if m and l.pk == m.pk %}aria-current="page"{% endif %}>{{ l.name }}</a>{% endfor %}</nav>{% endif %}
+  {% if not m %}<div class="card"><p class="muted">No End Band, Arts &amp; Crafts or Glue Bead lines are set up yet (Scheduler › Lines &amp; Shifts).</p></div>{% else %}
+  <div class="st-queue">{% for x in q %}
+    <div class="card st-job {% if x.j.wip_started %}on{% endif %}">
+      <div class="row"><h2 class="grow">MO {{ x.mo.number }} · {{ x.mo.part }}</h2>{% if x.j.wip_started %}<span class="pill ok">UNDER WAY · {{ x.j.wip_by }}</span>{% elif forloop.first %}<span class="pill warn">NEXT</span>{% endif %}</div>
+      <p class="note">{{ x.total|num }} to do{% if x.mo.due %} · due {{ x.mo.due|date:"D n/j" }}{% endif %}{% if x.start %} · planned {{ x.start|day }} {{ x.start|clock }} – {{ x.end|clock }}{% endif %}{% if x.j.wip_started %} · started {{ x.j.wip_started|clock }}{% endif %}</p>
+      {% if x.j.wip_started %}<div class="hbar" style="grid-template-columns:1fr auto"><i style="width:{{ x.pct }}%"></i><span class="n">{{ x.j.wip_qty|floatformat:0 }} of {{ x.total|num }}</span></div>
+        <form method="post" action="/stations/do/qty" class="row st-form">{% csrf_token %}<input type="hidden" name="id" value="{{ x.j.pk }}"><input type="hidden" name="how" value="add">
+          <label class="fld"><span>Add how many just done</span><input name="qty" type="number" min="0" inputmode="numeric" class="big" required></label>
+          <button class="btn go big">Log</button></form>
+        <form method="post" action="/stations/do/complete" class="row st-form">{% csrf_token %}<input type="hidden" name="id" value="{{ x.j.pk }}">
+          <label class="fld"><span>Total done (if different)</span><input name="qty" type="number" min="0" inputmode="numeric" placeholder="{{ x.j.wip_qty|floatformat:0 }}"></label>
+          <button class="btn primary big">Complete {{ stage }}</button></form>
+      {% else %}<form method="post" action="/stations/do/start">{% csrf_token %}<input type="hidden" name="id" value="{{ x.j.pk }}"><button class="btn go big">Start MO {{ x.mo.number }}</button></form>{% endif %}
+    </div>
+  {% empty %}<div class="card"><p class="muted">Nothing is scheduled on {{ m.name }}. The Scheduler puts work here.</p></div>{% endfor %}</div>
+  {% if done %}<div class="card"><h2>Completed (last 24 hours)</h2><table class="st"><tbody>{% for j in done %}<tr><td>MO {{ j.mo.number }} · {{ j.mo.part }}</td><td class="n">{{ j.wip_qty|floatformat:0 }}</td><td class="nw">{{ j.wip_done|clock }} · {{ j.wip_by }}</td>
+    <td><form method="post" action="/stations/do/undo">{% csrf_token %}<input type="hidden" name="id" value="{{ j.pk }}"><button class="btn ghost sm">Not finished</button></form></td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  {% endif %}
+</div>{% endblock %}
+{% block scripts %}<script src="{% static 'supervisor/supervisor.js' %}"></script>{% endblock %}

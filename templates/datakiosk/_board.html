@@ -1,6 +1,6 @@
 <div id="dk-board" class="dk-board" hx-get="/data/r/board{% if q %}?{{ q }}{% endif %}" hx-trigger="suite:config from:body{% if L.rotate %}, every {{ L.rotate }}s{% endif %}">
-  {% if not L.grafana and not view %}<section class="setup">Grafana is not connected, so these are the built-in charts. A shift lead can connect it in
-    <a href="/operator/#admin">Operator Kiosk › Admin › Connections</a> and pick the panels for this screen there.</section>{% endif %}
+  {% if not L.grafana and not view and canSetup %}<details class="setup"><summary>Built-in charts (Grafana isn't connected)</summary>Connect Grafana in
+    <a href="/admin/?tab=connections">Admin › Connections</a> and pick the panels for this screen there.</details>{% endif %}
   {% if L.dash %}<section class="dk-dash"><iframe title="Grafana dashboard" src="{{ L.dashSrc }}"></iframe></section>{% endif %}
   <section class="dk-lines" aria-live="polite">
     {% for b in L.bands %}

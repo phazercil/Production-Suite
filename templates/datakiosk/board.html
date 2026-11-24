@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% load static %}
 {% block title %}{% if L.focus %}{{ L.focus }} · {% endif %}Data Kiosk{% endblock %}
 {% block body_attrs %}data-watch="/thin/watch?scope=data" data-every="5000" data-awake="1" data-now="{{ now_ms }}"{% endblock %}
+{% block body_class %}dkpage{% endblock %}
 {% block head %}<link rel="stylesheet" href="{% static 'datakiosk/datakiosk.css' %}">{% endblock %}
 {% block content %}
 <div class="dk{% if L.focus %} focus{% endif %}{% if view %} viewonly{% endif %}">
@@ -12,8 +13,9 @@
   {% if not view %}<nav class="dk-pick" aria-label="Which lines">
     <a href="/data/" {% if not L.focus %}aria-current="page"{% endif %}>All lines</a>{% for n in L.lines %}<a href="/data/{{ n|urlencode }}/" {% if n == L.focus %}aria-current="page"{% endif %}>{{ n }}</a>{% endfor %}
     <span class="grow"></span>
-    <label class="dk-share"><span>View-only link</span><input type="text" readonly value="{{ share }}" id="dk-share" aria-label="View-only link for this screen"></label>
-    <button type="button" class="dk-copy" id="dk-copy">Copy link</button>
+    <details class="dk-tv"><summary class="dk-copy">TV / share</summary>
+      <div class="dk-tvbox"><label class="dk-share"><span>View-only link (for a TV, or to send)</span><input type="text" readonly value="{{ share }}" id="dk-share" aria-label="View-only link for this screen"></label>
+      <button type="button" class="dk-copy" id="dk-copy">Copy link</button></div></details>
   </nav>{% endif %}
   {% include "datakiosk/_board.html" %}
 </div>

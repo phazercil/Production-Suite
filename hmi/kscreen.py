@@ -34,6 +34,12 @@ def hms(seconds):
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}"
 
 
+
+def lockout_for(machine_name):
+    """The maintenance request that has this machine locked out (Maintenance › Lock out), if any."""
+    from .models import Ticket
+    return Ticket.objects.filter(machine=machine_name, lockout_t__isnull=False, returned_t__isnull=True).order_by("-lockout_t").first()
+
 class Screen:
     """One kiosk screen at one moment: the person logged in, the machine it is for, and what follows from them."""
 
@@ -333,6 +339,10 @@ class Screen:
 
     def banner(self):
         parts = []
+        lock = lockout_for(self.machine.name) if self.machine and not self.machine.active else None
+        if lock:
+            parts.append({"page": "maintenance", "pre": "LOCKED OUT by maintenance · ", "text": f"#{lock.pk} {lock.type}",
+                          "post": f" ({lock.lockout_by}). Don't run it until it's returned to service."})
         if self.reason_due():
             n = len(self.need_reason())
             parts.append({"modal": "downPrompt", "text": f"{n} downtime {'entries need' if n > 1 else 'entry needs'} a reason"})
@@ -347,7 +357,8 @@ class Screen:
         q = LineState.objects.filter(machine=self.machine) if self.machine else LineState.objects.all()
         last = max((x for x in q.values_list("last_tick", flat=True) if x), default=None)   # the last machine data pull
         return {"pulled": ms(last) if last else None, "parts": parts, "state": state, "shiftName": w["name"] if w else "Off shift",
-                "operator": (sh.user_name if sh else (self.me.name if self.me else "")),
+                "operator": (sh.user_name if sh and sh.user_name else (self.me.name if self.me else "")),
+                "lineOp": bool(sh and sh.user_name and not self.unattended),
                 "storeOk": srv["storeOk"], "storeErr": srv["storeErr"], "demo": self.st.demo, "admin": self.is_lead, "sysadmin": self.is_admin,
                 "choose": [m.name for m in self.active_lines] if not self.lock and len(self.active_lines) > 1 else []}
 
@@ -579,6 +590,11 @@ def schedule_page(s, view="timeline", status="OPEN", sort=None, week=0):
         wins = shift_windows(sod_ms(t_ms))
         ds = wins[0]["s"] if wins else sod_ms(t_ms) + 360 * 60000
         de = max(w["e"] for w in wins) if wins else ds + 16 * 3600000
+        # the board always shows now (with what is going on, a changeover included), even between shifts
+        if t_ms < ds:
+            ds = t_ms - t_ms % 1800000 - 3600000
+        if t_ms > de - 1800000:
+            de = t_ms + 2 * 3600000
         SLOT, SW, LW = 30 * 60000, 66, 190
         slots = max(1, -(-(de - ds) // SLOT))
         total, end = LW + slots * SW, ds + slots * SLOT

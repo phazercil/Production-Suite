@@ -17,6 +17,11 @@ class Job(models.Model):
     split_mode = models.CharField(max_length=8, blank=True)
     split_at = models.DateTimeField(null=True, blank=True)
     split_qty = models.FloatField(null=True, blank=True)
+    # End Band, Arts & Crafts and Glue Bead stations check in here (/stations/): started, how many done, completed
+    wip_started = models.DateTimeField(null=True, blank=True)
+    wip_qty = models.FloatField(default=0)
+    wip_done = models.DateTimeField(null=True, blank=True)
+    wip_by = models.CharField(max_length=120, blank=True)
     updated = models.DateTimeField(auto_now=True)
 
     class Meta:

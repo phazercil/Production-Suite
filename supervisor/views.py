@@ -12,7 +12,8 @@ from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 
-from hmi.models import ChangeoverPiece, Downtime, QCCheck, ShiftRun
+from cameras.models import Camera
+from hmi.models import ChangeoverPiece, Downtime, QCCheck, ShiftRun, Ticket
 from hmi.views import current_person, touch
 from plant import perms
 from plant.models import Machine, PlantSettings
@@ -21,7 +22,8 @@ from plant.util import local
 PERM = "section.supervisor"
 EDIT_PERM = "history.edit"   # Correct history: change, split or delete past records (supervisor/edit.py)
 PER_PAGE = 100
-TABS = [("status", "Line status"), ("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs")]
+TABS = [("status", "Line status"), ("logs", "Shift logs"), ("qc", "QC checks"), ("down", "Downtime"), ("co", "Changeovers"), ("morun", "MO runs"),
+        ("events", "Timeline"), ("s2k", "S2K posting")]
 NOBODY = "Nobody logged in"
 
 
@@ -55,12 +57,13 @@ def filters(q):
         pg = 1
     return {"tab": tab, "line": str(q.get("line") or "")[:60], "from": a, "to": b, "who": str(q.get("who") or "").strip()[:60],
             "mo": str(q.get("mo") or "").strip()[:40], "result": str(q.get("result") or "")[:12], "empty": q.get("empty") == "1", "page": pg,
+            "kind": str(q.get("kind") or "")[:12], "q": str(q.get("q") or "").strip()[:80],
             "A": timezone.make_aware(datetime(a.year, a.month, a.day)), "B": timezone.make_aware(datetime(b.year, b.month, b.day)) + timedelta(days=1)}
 
 
 def _query(f, **change):
     keep = {"tab": f["tab"], "line": f["line"], "from": f["from"].isoformat(), "to": f["to"].isoformat(), "who": f["who"], "mo": f["mo"],
-            "result": f["result"], "empty": "1" if f["empty"] else ""}
+            "result": f["result"], "empty": "1" if f["empty"] else "", "kind": f.get("kind", ""), "q": f.get("q", "")}
     keep.update(change)
     return urlencode({k: v for k, v in keep.items() if v not in ("", None)})
 
@@ -233,12 +236,22 @@ def line_status():
             co_since = from_ms(sh.co.get("first") or sh.co.get("start")) if (sh.co.get("first") or sh.co.get("start")) else None
         stats = shift_stats(sh) if sh else None
         made = max(0, mo.produced - mo.scrap) if mo else 0
+        target = None
+        if sh and sh.machine_id and m.ppm:
+            from hmi.engine import pleats_for, rules
+            per = pleats_for(sh)
+            sched = PpmReading.objects.filter(shift=sh, planned=False).count()   # scheduled minutes so far (breaks left out)
+            if per > 0 and sched:
+                target = round(sched * m.ppm / per * float(rules().get("eff", 85) or 85) / 100)
         cards.append({"m": m, "sh": sh, "pill": pill, "mo": mo, "next": nxt, "made": made, "qty": mo.qty if mo else 0,
                       "pct": min(100, round(100 * made / mo.qty)) if mo and mo.qty else None,
                       "ppm": last["ppm"] if fresh else None, "since": last["t"] if last else None, "stale": bool(last) and not fresh,
                       "who": (sh.user_name or "") if sh else "", "stats": stats, "recheck": qc.recheck_for(m.name),
                       "co": bool(sh and sh.co and sh.co.get("step", 1) >= 2), "coSince": co_since,
-                      "coMin": round((now - co_since).total_seconds() / 60) if co_since else None, "nodata": nodata})
+                      "coMin": round((now - co_since).total_seconds() / 60) if co_since else None, "nodata": nodata,
+                      "target": target, "behind": bool(target and sh.count < 0.9 * target),
+                      "tickets": Ticket.objects.filter(machine=m.name).exclude(status="Closed").count(),
+                      "cams": Camera.objects.filter(enabled=True, machines=m).exists()})
     run = sum(1 for c in cards if c["sh"] and c["sh"].state == "running" and not c["nodata"])
     tot = {"Running": run, "Stopped": sum(1 for c in cards if c["sh"] and c["sh"].state == "stopped" and not c["nodata"]),
            "No machine data": sum(1 for c in cards if c["nodata"]),
@@ -246,6 +259,15 @@ def line_status():
            "Made this shift": sum(c["sh"].count for c in cards if c["sh"])}
     if not tot["No machine data"]:
         del tot["No machine data"]
+    # what needs someone now, plant-wide (only shown when there is any)
+    need_ = {"Failed QC waiting": QCCheck.objects.filter(passed=False, review="pending").count(),
+             "High-priority requests": Ticket.objects.exclude(status="Closed").filter(priority="High").count()}
+    try:
+        from sensors.models import SensorAlarm
+        need_["Sensor alarms"] = SensorAlarm.objects.filter(end__isnull=True).count()
+    except Exception:  # noqa: BLE001
+        pass
+    tot.update({k: v for k, v in need_.items() if v})
     return cards, tot
 
 
@@ -277,6 +299,46 @@ def page(request):
         return render(request, "supervisor/page.html", {
             "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "cards": cards, "totals": totals, "now": timezone.now(), "openCo": open_changeovers(),
             "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS}, "nobody": NOBODY, "msg": request.GET.get("msg", "")[:200]})
+    if f["tab"] == "s2k":
+        from . import s2k
+        R = s2k.rows(f["A"], f["B"], f["line"], only_open=f["result"] == "open")
+        if request.GET.get("csv") == "1":
+            resp = HttpResponse(content_type="text/csv; charset=utf-8")
+            resp["Content-Disposition"] = f'attachment; filename="s2k-to-post-{f["from"]}-to-{f["to"]}.csv"'
+            w = csv.writer(resp)
+            for row in s2k.csv_rows(R):
+                w.writerow(row)
+            return resp
+        lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
+        return render(request, "supervisor/page.html", {
+            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "S2K": R, "n": len(R), "first": 1, "last": len(R), "lines": lines, "openCo": open_changeovers(),
+            "totals": {"MOs": len(R), "To post": sum(x["unposted"] for x in R), "Don't agree": sum(1 for x in R if x["flags"])},
+            "csv": _query(f, csv="1"), "here": _query(f), "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS},
+            "nobody": NOBODY, "canEdit": perms.can(me, EDIT_PERM), "canPost": perms.can(me, EDIT_PERM), "msg": request.GET.get("msg", "")[:200]})
+    if f["tab"] == "events":
+        from . import timeline
+        evs = timeline.events(f, f["kind"], f["q"])
+        if request.GET.get("csv") == "1":
+            resp = HttpResponse(content_type="text/csv; charset=utf-8")
+            resp["Content-Disposition"] = f'attachment; filename="timeline-{f["from"]}-to-{f["to"]}.csv"'
+            w = csv.writer(resp)
+            for row in timeline.csv_rows(evs):
+                w.writerow(row)
+            return resp
+        n = len(evs)
+        first = (f["page"] - 1) * PER_PAGE
+        by_kind = {}
+        for e in evs:
+            by_kind[e["label"]] = by_kind.get(e["label"], 0) + 1
+        lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
+        return render(request, "supervisor/page.html", {
+            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": evs[first:first + PER_PAGE], "n": n, "lines": lines,
+            "totals": {"Events": n, **dict(sorted(by_kind.items(), key=lambda kv: -kv[1])[:4])}, "kinds": timeline.KINDS, "openCo": open_changeovers(),
+            "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
+            "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,
+            "next": _query(f, page=f["page"] + 1) if first + PER_PAGE < n else None,
+            "csv": _query(f, csv="1"), "here": _query(f), "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS},
+            "nobody": NOBODY, "canEdit": perms.can(me, EDIT_PERM), "msg": request.GET.get("msg", "")[:200]})
     qs, totals = LISTS[f["tab"]](f)
     if request.GET.get("csv") == "1":
         resp = HttpResponse(content_type="text/csv; charset=utf-8")
@@ -300,8 +362,13 @@ def page(request):
         for q in rows:
             q.vals = qc_values(q, labels)
     lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
+    co_rep = None
+    if f["tab"] == "co":
+        from scheduler import cohist
+        co_rep = cohist.report(f["A"], f["B"], f["line"])
     return render(request, "supervisor/page.html", {
         "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": rows, "n": n, "totals": totals, "lines": lines, "openCo": open_changeovers(),
+        "coRep": co_rep,
         "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
         "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,
         "next": _query(f, page=f["page"] + 1) if first + PER_PAGE < n else None,
@@ -609,3 +676,20 @@ def build_add(request):
     ctx = _builder_ctx(me, rows, "", err)
     ctx.update({"form": form, "machines": list(Machine.objects.order_by("sort", "id").values_list("name", flat=True))})
     return render(request, "supervisor/build_add.html", ctx)
+
+
+@require_http_methods(["POST"])
+def s2k_mark(request):
+    """Supervisor › S2K posting › Mark these as posted (the rows the CSV holds for these filters)."""
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    if not perms.can(me, EDIT_PERM):
+        return HttpResponseRedirect("/supervisor/?" + urlencode({"tab": "s2k", "msg": "Marking as posted needs permission to correct history."}))
+    from hmi.engine import Ctx, audit
+
+    from . import s2k
+    f = filters(request.POST)
+    n = s2k.mark(s2k.rows(f["A"], f["B"], f["line"]), me.name, timezone.now())
+    audit(Ctx(user=me), f"S2K posting: marked {n} rows as posted ({f['from']} – {f['to']}{', ' + f['line'] if f['line'] else ''})")
+    return HttpResponseRedirect("/supervisor/?" + _query({**f, "tab": "s2k"}, msg=f"{n} rows marked as posted in S2K."))

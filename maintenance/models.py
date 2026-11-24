@@ -28,7 +28,7 @@ class InventoryItem(models.Model):
 
 class InventoryMove(models.Model):
     """One change to an item's stock: used on a machine (for a request or not), added, or counted."""
-    KINDS = [("used", "Used"), ("added", "Added"), ("count", "Counted")]
+    KINDS = [("used", "Used"), ("added", "Added"), ("count", "Counted"), ("undone", "Used, taken back"), ("back", "Taken back")]
     item = models.ForeignKey(InventoryItem, related_name="moves", on_delete=models.CASCADE)
     kind = models.CharField(max_length=8, choices=KINDS)
     qty = models.FloatField()                     # used / added: how many; count: the difference the count made
@@ -40,3 +40,15 @@ class InventoryMove(models.Model):
 
     class Meta:
         ordering = ["-t", "-id"]
+
+
+class PMPart(models.Model):
+    """A part a PM task uses each time (its parts list): what to have in stock before it falls due, and what using
+    the request's parts records when the PM is done."""
+    task = models.ForeignKey("hmi.PMTask", related_name="parts", on_delete=models.CASCADE)
+    item = models.ForeignKey(InventoryItem, related_name="pm_uses", on_delete=models.CASCADE)
+    qty = models.FloatField(default=1)
+
+    class Meta:
+        unique_together = [("task", "item")]
+        ordering = ["item__name", "id"]

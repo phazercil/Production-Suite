@@ -56,6 +56,8 @@
       kpi('Filters made', n0(T.units)),
       isMo ? kpi('Run time', hrs(T.obs)) : kpi('Uptime', `<span class="${T.uptime == null ? '' : T.uptime >= 85 ? 'ok' : T.uptime >= 70 ? 'warn' : 'bad'}">${pct(T.uptime)}</span>`, `${hrs(T.run)} running of ${hrs(T.obs)}`),
       kpi('Downtime', hrs(T.down), T.reasons[0] ? `Top: ${esc(T.reasons[0].reason)}` : ''),
+      isMo ? '' : kpi('OEE', `<span class="${T.oee == null ? '' : T.oee >= 75 ? 'ok' : T.oee >= 55 ? 'warn' : 'bad'}">${pct(T.oee)}</span>`, `uptime ${pct(T.uptime)} × speed ${pct(T.perf)} × good ${pct(T.quality)}`),
+      isMo ? '' : kpi('Speed loss', T.speedLossMin == null ? '—' : hrs(T.speedLossMin), T.perf == null ? 'set each line\'s rated speed in Admin › Machines' : `running at ${pct(T.perf)} of rated speed`),
       isMo ? '' : kpi('Average speed', T.ppmAvg == null ? '—' : `${n1(T.ppmAvg)} P/m`, 'while running'),
       kpi('Operator QC', pct(T.qcPass), `${n0(T.qc)} checks · ${n0(T.qcFail)} failed`),
       T.aq ? kpi('Machine vision QC', pct(T.aqPass), `${n0(T.aq)} measured · ${n0(T.aqFail)} failed`) : '',
@@ -72,7 +74,7 @@
     }).join('')}</div><div class="legend"><span><i style="background:var(--s-accent)"></i>Filters made</span><span><i style="background:#e3b341;border-radius:50%"></i>Uptime %</span>${R.drill.buckets ? '<span>Click a bar to look closer</span>' : ''}</div></div>`;
     // table
     const childName = { plant: 'Line', line: 'Shift', shift: 'MO' }[R.scope.level];
-    const cols = [['Filters', r => n0(r.units)], ...(R.scope.level === 'shift' ? [['Run time', r => hrs(r.obs)]] : [['Uptime', r => pct(r.uptime)], ['Running', r => hrs(r.run)], ['Avg P/m', r => n1(r.ppmAvg)]]),
+    const cols = [['Filters', r => n0(r.units)], ...(R.scope.level === 'shift' ? [['Run time', r => hrs(r.obs)]] : [['OEE', r => pct(r.oee)], ['Uptime', r => pct(r.uptime)], ['Speed', r => pct(r.perf)], ['Good', r => pct(r.quality)], ['Running', r => hrs(r.run)], ['Avg P/m', r => n1(r.ppmAvg)]]),
       ['Down', r => hrs(r.down)], ['Top reason', r => r.reasons && r.reasons[0] ? esc(r.reasons[0].reason) : '—'], ['QC pass', r => pct(r.qcPass)],
       ...(T.aq ? [['Vision pass', r => pct(r.aqPass)]] : []), ['MOs done', r => n0(r.mos)], ...(L ? [['Wages', r => money(r.laborCost, 0)], ['$ / filter', r => money(r.laborPerUnit, 4)]] : [])];
     const table = R.rows.length ? `<div class="card"><h2>By ${childName.toLowerCase()}</h2><div class="tw"><table class="rt"><thead><tr><th>${childName}</th>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead>
@@ -82,9 +84,13 @@
     const rmax = Math.max(1, ...T.reasons.map(x => x.min));
     const reasons = T.reasons.length ? `<div class="card"><h2>Downtime by reason</h2><div class="reasons">${T.reasons.map(x => `<div class="r"><span>${esc(x.reason)}</span><i style="width:${x.min / rmax * 100}%"></i><span style="text-align:right">${hrs(x.min)}</span></div>`).join('')}</div>
       <p class="muted" style="font-size:13px;margin:8px 0 0">Planned breaks, lunches and start-up time are not downtime.</p></div>` : '';
+    const D = R.downtime || { pareto: [], repeats: [] };
+    const pareto = D.pareto.length ? `<div class="card"><h2>Downtime Pareto</h2><table class="rt pareto"><thead><tr><th>Reason</th><th>Stops</th><th>Time</th><th>Share</th><th>Running share</th></tr></thead><tbody>${D.pareto.map(x => `<tr class="${x.cum - x.pct < 80 ? 'vital' : ''}"><td>${esc(x.reason)}</td><td>${n0(x.n)}</td><td>${hrs(x.min)}</td><td><i class="pb" style="width:${x.pct}%"></i> ${n1(x.pct)}%</td><td>${n1(x.cum)}%</td></tr>`).join('')}</tbody></table>
+      <p class="muted" style="font-size:13px;margin:8px 0 0">Bold rows are the few reasons that make up the first 80% of the downtime. The stops cost about <b>${n0(D.lostFilters)}</b> filters (each line's own filters per running minute × its downtime)${D.wages != null ? `, and <b>${money(D.wages, 0)}</b> of crew wages paid while stopped` : ''}.</p></div>` : '';
+    const repeats = D.repeats.length ? `<div class="card"><h2>Repeat stops</h2><p class="muted" style="font-size:13px;margin:0 0 8px">The same reason ${D.repeatAt} or more times on one line in this period: worth a maintenance request or a root-cause look.</p><table class="rt"><thead><tr><th>Line</th><th>Reason</th><th>Times</th><th>Time</th><th>Last</th></tr></thead><tbody>${D.repeats.map(x => `<tr><td>${esc(x.line)}</td><td>${esc(x.reason)}</td><td>${n0(x.n)}</td><td>${hrs(x.min)}</td><td>${esc(new Date(x.last).toLocaleString([], { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}</td></tr>`).join('')}</tbody></table></div>` : '';
     const gsec = R.grafana.ready ? `<div class="card"><div style="display:flex;gap:8px;align-items:center"><h2 style="flex:1;margin:0">From Grafana</h2>${R.lead ? '<button class="btn ghost" id="gpick">Choose panels</button>' : ''}</div>
       <div id="gpicker"></div><div id="gpanels">${R.grafana.panels.length ? '<p class="muted">Loading Grafana data…</p>' : `<p class="muted">${R.lead ? 'No Grafana panels chosen for reports yet.' : 'A shift lead can add Grafana panels here.'}</p>`}</div></div>` : '';
-    $('#rp-body').innerHTML = `<div class="kpis">${kpis}</div>${chart}${table}<div class="grid2">${reasons}</div>${gsec}`;
+    $('#rp-body').innerHTML = `<div class="kpis">${kpis}</div>${chart}${table}<div class="grid2">${reasons}${repeats}</div>${pareto}${gsec}`;
     if (gp) drawGrafana();
   }
 
@@ -125,8 +131,8 @@
 
   function csv() {
     if (!R) return;
-    const head = ['Name', 'Filters', 'Uptime %', 'Running min', 'Observed min', 'Avg P/m', 'Down min', 'Top reason', 'QC checks', 'QC fails', 'Vision measured', 'Vision fails', 'MOs done', ...(R.labor && R.lead ? ['Crew wages', '$ per filter'] : [])];
-    const line = r => [r.label, r.units, r.uptime, r.run, r.obs, r.ppmAvg, r.down, r.reasons && r.reasons[0] ? r.reasons[0].reason : '', r.qc, r.qcFail, r.aq, r.aqFail, r.mos,
+    const head = ['Name', 'Filters', 'OEE %', 'Uptime %', 'Performance %', 'Quality %', 'Speed loss min', 'Running min', 'Observed min', 'Avg P/m', 'Down min', 'Top reason', 'QC checks', 'QC fails', 'Vision measured', 'Vision fails', 'MOs done', ...(R.labor && R.lead ? ['Crew wages', '$ per filter'] : [])];
+    const line = r => [r.label, r.units, r.oee, r.uptime, r.perf, r.quality, r.speedLossMin, r.run, r.obs, r.ppmAvg, r.down, r.reasons && r.reasons[0] ? r.reasons[0].reason : '', r.qc, r.qcFail, r.aq, r.aqFail, r.mos,
       ...(R.labor && R.lead ? [r.laborCost, r.laborPerUnit] : [])];
     const rows = [head, ...R.rows.map(line), line({ ...R.total, label: 'Total' })];
     const text = rows.map(r => r.map(v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\r\n');

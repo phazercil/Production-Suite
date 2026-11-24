@@ -1,0 +1,50 @@
+{% with H=C.H %}
+<div class="panel health">
+  <div class="row"><h2 class="h2 grow">Health</h2><span class="pill {% if H.summary == 'ok' %}ok{% else %}warn{% endif %}">{% if H.summary == 'ok' %}All good{% else %}Needs a look{% endif %}</span>
+    <button class="btn ghost" hx-get="/kiosk/v/admin?tab=health" hx-target="#view">Check again</button></div>
+  <p class="sub" style="margin-top:4px">Everything the suite depends on, and when it last worked. A machine that is <b>not reporting</b> isn't the same as one that is stopped: its data isn't coming in, so the suite can't tell.</p>
+
+  <div class="hgrid">
+    <div class="hcard {% if not H.ticker.ok %}bad{% endif %}"><span>Minute ticker</span><b>{% if H.ticker.ok %}Running{% else %}Not running{% endif %}</b>
+      <small>{% if H.ticker.seen %}last checked in {{ H.ticker.ago }} ago · {{ H.ticker.owner }}{% else %}never checked in{% endif %}</small></div>
+    <div class="hcard {% if H.machinesBad %}bad{% endif %}"><span>Machine data</span><b>{{ H.machines|length }} line{{ H.machines|length|pluralize }}</b>
+      <small>{% if H.machinesBad %}{{ H.machinesBad }} not reporting{% else %}all reporting{% endif %}</small></div>
+    <div class="hcard {% if H.webhook.failing %}bad{% endif %}"><span>Webhook</span><b>{% if H.webhook.on %}{{ H.webhook.queue }} waiting{% else %}Off{% endif %}</b>
+      <small>{% if H.webhook.failing %}{{ H.webhook.failing }} failing · up to {{ H.webhook.maxTries }} tries{% elif H.webhook.on %}delivering{% endif %}</small></div>
+    <div class="hcard {% if H.backup.old %}bad{% endif %}"><span>Database backup</span><b>{% if H.backup.last %}{{ H.backup.last|day }} {{ H.backup.last|clock }}{% else %}None yet{% endif %}</b>
+      <small>{% if H.backup.offsite.on %}{% if H.backup.offsite.ok %}copied off this server{% else %}off-server copy failing{% endif %}{% else %}no off-server copy (Admin › Backup){% endif %}</small></div>
+    <div class="hcard"><span>Sign-in failures today</span><b>{{ H.auth.pin }} PIN{{ H.auth.pin|pluralize }}</b>
+      <small>refused keys: feed {{ H.auth.feed }} · data sources {{ H.auth.ingest }} · station {{ H.auth.station }}</small></div>
+    {% if H.sensors %}<div class="hcard {% if H.sensors.fault or H.sensors.alarms %}bad{% endif %}"><span>Sensors</span><b>{{ H.sensors.n }} on</b>
+      <small>{{ H.sensors.fault }} faulty · {{ H.sensors.alarms }} alarm{{ H.sensors.alarms|pluralize }} open</small></div>{% endif %}
+    <div class="hcard"><span>Cameras</span><b>{{ H.cameras.n }} on</b><small>{{ H.cameras.live }} live{% if H.cameras.live %} · video {% if H.cameras.video.fresh %}running{% else %}not running{% endif %}{% endif %}</small></div>
+  </div>
+</div>
+
+<div class="panel"><h2 class="h2">Machines</h2>
+  <div class="tblwrap"><table class="xl"><thead><tr><th>Line</th><th>Feed</th><th>Now</th><th>Last reading</th><th>Details</th></tr></thead><tbody>
+  {% for m in H.machines %}<tr><td><b>{{ m.name }}</b></td><td>{{ m.feed }}</td>
+    <td><span class="pill {% if m.state == 'running' %}ok{% elif m.state == 'not reporting' or m.state == 'no feed' %}bad{% elif m.state == 'stopped' %}warn{% else %}idle{% endif %}">{{ m.state|upper }}</span></td>
+    <td class="num">{% if m.last %}{{ m.last|clock }}{% else %}—{% endif %}</td><td class="note">{{ m.why }}{% if m.runSrc %} Run signal: {{ m.runSrc }}{% endif %}{% if m.error %} Error showing: {{ m.error }}{% endif %}</td></tr>
+  {% endfor %}</tbody></table></div></div>
+
+<div class="panel"><h2 class="h2">Connections</h2>
+  {% if H.conns %}<div class="tblwrap"><table class="xl"><thead><tr><th>Connection</th><th></th><th>Last answer</th><th>When</th></tr></thead><tbody>
+  {% for c in H.conns %}<tr><td>{{ c.label }}</td><td><span class="pill {% if c.ok %}ok{% else %}bad{% endif %}">{% if c.ok %}OK{% else %}FAILING{% endif %}</span></td><td class="note">{{ c.msg }}</td><td class="num">{% if c.t %}{{ c.t|day }} {{ c.t|clock }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="note">No connections have been tried yet.</p>{% endif %}
+  {% if H.sources %}<h3 class="h3" style="margin-top:12px">Incoming data sources</h3><div class="tblwrap"><table class="xl"><thead><tr><th>Source</th><th>How</th><th></th><th>Last</th><th>Received</th><th>Last message</th></tr></thead><tbody>
+  {% for d in H.sources %}<tr><td>{{ d.name }}</td><td>{{ d.mode }}</td><td>{% if not d.enabled %}<span class="pill idle">OFF</span>{% elif d.last_ok %}<span class="pill ok">OK</span>{% elif d.last_at %}<span class="pill bad">FAILING</span>{% else %}<span class="pill idle">NOTHING YET</span>{% endif %}</td>
+    <td class="num">{% if d.last_at %}{{ d.last_at|day }} {{ d.last_at|clock }}{% else %}—{% endif %}</td><td class="num">{{ d.received|num }}</td><td class="note">{{ d.last_msg }}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+  {% if H.webhook.on and H.webhook.lastError %}<p class="note bad" style="margin-top:8px">Webhook: {{ H.webhook.lastError }}{% if H.webhook.oldestAgo %} · oldest waiting {{ H.webhook.oldestAgo }}{% endif %}</p>{% endif %}
+</div>
+
+<div class="panel"><h2 class="h2">Disk space</h2>
+  {% for d in H.disks %}<div class="row note">{% if d.err %}<span class="bad">{{ d.label }}: {{ d.err }}</span>{% else %}<span class="grow">{{ d.label }} <code>{{ d.path }}</code></span><b class="{% if d.low %}bad{% endif %}">{{ d.free|filesizeformat }} free of {{ d.total|filesizeformat }} ({{ d.pct }}%)</b>{% endif %}</div>{% endfor %}
+</div>
+
+<div class="panel"><h2 class="h2">Recent server warnings and errors</h2>
+  {% if H.errors %}<div class="auditlog">{% for e in H.errors %}<div><span class="num note">{{ e.at|day }} {{ e.at|clock }}</span> · <b class="{% if e.level == 'ERROR' or e.level == 'CRITICAL' %}bad{% endif %}">{{ e.level }}</b> · {{ e.msg }}</div>{% endfor %}</div>
+  {% else %}<p class="note">None recorded.</p>{% endif %}
+</div>
+{% endwith %}

@@ -176,7 +176,9 @@ pre{background:var(--well-3);border:1px solid var(--rule);border-radius:6px;padd
 .bigbtn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:60px;border-radius:10px;font:700 18px var(--f-body);width:100%}
 .bigbtn svg{width:20px;height:20px}
 .actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px;position:sticky;bottom:0;z-index:15;background:var(--ground);padding-block:10px calc(10px + env(safe-area-inset-bottom,0px));margin-bottom:-20px}
-@media (min-width:761px){.actions{grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}.act{font-size:15px}}
+@media (max-width:760px){.actions{grid-template-columns:repeat(4,minmax(0,1fr))}}   /* a clean 4 x 2 on narrow screens */
+@media (min-width:761px){.actions{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}.act{font-size:15px}}   /* one row, however many buttons */
+@media (min-width:761px) and (max-width:1366px){.act{min-height:60px;font-size:14px;padding:6px 4px}.act svg{width:20px;height:20px}}
 .act{min-height:68px;border-radius:10px;border:1px solid var(--rule-2);background:var(--well-2);color:var(--ink);font:700 16px var(--f-body);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px;position:relative}
 .act svg{width:22px;height:22px}
 .act:hover{border-color:var(--ink-3)}
@@ -606,3 +608,17 @@ label.f small{font-size:12px;color:var(--ink-3,var(--ink-2))}
 /* Never sideways: something wider than the screen scrolls in its own box (tables, the builder), so the browser can't
    shove the whole page left (Log out half off the screen, no way to swipe it back) */
 .adminpage > .view, #view { overflow-x: clip; }
+/* Admin › Health */
+.health .hgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:12px}
+.health .hcard{background:var(--card-2,rgba(255,255,255,.04));border:1px solid var(--line,rgba(255,255,255,.1));border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.health .hcard span{font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.75}
+.health .hcard b{font-size:20px}
+.health .hcard small{opacity:.75}
+.health .hcard.bad{border-color:var(--bad)}
+.health .hcard.bad b{color:var(--bad)}
+.banner button.who{background:none;border:1px solid transparent;border-radius:10px;color:inherit;cursor:pointer;padding:4px 8px;font:inherit;text-align:left}
+.banner button.who:hover,.banner button.who:focus-visible{border-color:var(--rule-2)}
+.banner button.who .swap{opacity:.6;margin-left:4px}
+.banner .pullage{min-width:auto;white-space:nowrap}
+.banner .pullage.stale{color:var(--bad)}
+tr.hl td{background:rgba(242,182,109,.22)!important;outline:2px solid var(--warn)}

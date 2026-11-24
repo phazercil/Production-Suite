@@ -117,8 +117,14 @@ def _sensors_from_feed(m, s, minute):
         s.pop("sensors", None)
 
 
-def _tick_one_minute(m, t):
-    """Process the next due minute for one machine in its own transaction. Returns False when it is up to date."""
+class LeaseLost(Exception):
+    pass
+
+
+def _tick_one_minute(m, t, owner=None):
+    """Process the next due minute for one machine in its own transaction. Returns False when it is up to date.
+    `owner`: the ticker's lease name. The minute is only written while that lease is still held (and the lease is
+    renewed in the same transaction), so a ticker that stalled past its lease and was replaced never writes."""
     with transaction.atomic():
         ls, _ = LineState.objects.select_for_update().get_or_create(machine=m)
         if ls.next_tick is None or t - ls.next_tick > timedelta(minutes=5):
@@ -143,6 +149,8 @@ def _tick_one_minute(m, t):
         cur = LineState.objects.select_for_update().get(pk=ls.pk)
         if cur.next_tick != minute:
             return True        # done meanwhile by another pass: nothing to count twice
+        if owner and not PlantSettings.objects.filter(pk=1, ticker_owner=owner).update(ticker_seen=now()):
+            raise LeaseLost(owner)   # fenced: another ticker holds the lease now
         cur.feed, cur.demo_idx = feed, ls.demo_idx
         cur.save(update_fields=["feed", "demo_idx"])
         _sensors_from_feed(m, s, minute)
@@ -160,7 +168,7 @@ def _skip_minute(m, t):
         ls.save(update_fields=["next_tick", "feed"])
 
 
-def tick_machines(t=None, renew=None):
+def tick_machines(t=None, renew=None, owner=None):
     """Advance every running pleater to the current minute. Each machine and each minute is handled on its
     own, so a bad reading or a failing feed on one machine never stops counting on the others."""
     t = t or now()
@@ -171,9 +179,12 @@ def tick_machines(t=None, renew=None):
             break
         for _ in range(10):  # at most 10 catch-up minutes per pass
             try:
-                if not _tick_one_minute(m, t):
+                if not _tick_one_minute(m, t, owner):
                     break
                 any_tick = True
+            except LeaseLost:
+                log.warning("ticker lease taken over while reading %s; stopping this pass", m.name)
+                return
             except Exception:
                 log.exception("ticker failed for %s", m.name)
                 try:
@@ -261,6 +272,15 @@ def timed_pulls(state, t):
             from .models import RollTagPhoto
             RollTagPhoto.objects.filter(roll__isnull=True, t__lt=t - timedelta(days=1)).delete()
         run("rollphotos", purge_roll_photos)
+    # Scheduled database backups and their off-server copy (Admin › Backup), looked at every 10 minutes
+    if due("dbbackup", 10):
+        try:
+            from plant import offsite
+            r = offsite.tick(state, t)
+            if r:
+                log.info("scheduled backup: %s", r)
+        except Exception as e:  # noqa: BLE001 - shows on Admin › Health; never stops the ticker
+            log.warning("scheduled backup failed: %s", e)
     # Planned maintenance (Maintenance › PM schedule): open a request for each task that has fallen due
     if due("pm", 5):
         def pm_check():
@@ -305,12 +325,17 @@ def timed_pulls(state, t):
     if s.get("webhook"):
         batch = list(Event.objects.filter(sent=False).order_by("id")[:200])
         if batch:
+            ids = [e.id for e in batch]
+            Event.objects.filter(id__in=ids).update(attempts=models.F("attempts") + 1, last_try=t)
             try:
-                integrations.post_webhook(s["webhook"], [{"kind": e.kind, "t": ms(e.t), **e.data} for e in batch])
-                Event.objects.filter(id__in=[e.id for e in batch]).update(sent=True)
+                # each event carries its own id (the same on every try): if the answer was lost after the receiver
+                # stored them, the next try sends the same ids and the receiver can skip what it already has
+                integrations.post_webhook(s["webhook"], [{"id": str(e.uid or e.id), "kind": e.kind, "t": ms(e.t), **e.data} for e in batch])
+                Event.objects.filter(id__in=ids).update(sent=True, last_error="")
                 Event.objects.filter(sent=True, t__lt=t - timedelta(days=7)).delete()
             except integrations.ConnError as e:
                 log.warning("webhook failed: %s", e)
+                Event.objects.filter(id__in=ids).update(last_error=str(e)[:300])
 
 
 def loop(stop=None, interval=5):
@@ -326,7 +351,7 @@ def loop(stop=None, interval=5):
                 if waiting:
                     log.info("plant ticker took over")
                 waiting = False
-                tick_machines(t, renew=lambda: claim_lease(owner))
+                tick_machines(t, renew=lambda: claim_lease(owner), owner=owner)
                 timed_pulls(state, t)
                 try:
                     from cameras import live

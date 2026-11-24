@@ -21,17 +21,19 @@ from hmi import engine, pm
 from hmi.models import PMTask, Ticket, TicketNote, TicketPhoto
 from hmi.views import current_person, touch
 from plant import perms
+from plant.models import Machine
 
 from .actions import machines
 from .models import InventoryItem, InventoryMove
 
 PERM = "section.maintenance"
 TABS = [("requests", "Pending requests"), ("done", "Completed"), ("pm", "PM schedule"), ("history", "PM history"), ("inventory", "Inventory"),
-        ("machines", "Parts by machine")]
+        ("machines", "Parts by machine"), ("reliability", "Reliability")]
 PM_ACTIONS = {"pmSave", "pmDelete", "pmDone", "pmOpenNow"}   # posted to the page itself, so a refused PM task form keeps what was typed
 STATE = {"due": ("bad", "DUE"), "open": ("warn", "REQUEST OPEN"), "soon": ("warn", "DUE SOON"), "ok": ("ok", "OK"), "off": ("idle", "PAUSED")}
 ORDER = {"due": 0, "open": 1, "soon": 2, "ok": 3, "off": 4}
-POSTS = {"ticketSet", "itemSave", "itemArchive", "itemStock", "itemUse", "itemUseUndo"}
+POSTS = {"ticketSet", "itemSave", "itemArchive", "itemStock", "itemUse", "itemUseUndo", "itemPolicy", "itemUseBom", "pmPartSet", "lockout",
+         "returnService"}
 PRIORITY = {"High": 0, "Medium": 1, "Low": 2}
 
 
@@ -55,7 +57,14 @@ def _tickets(qs, now):
         pics.setdefault(p["ticket_id"], []).append(p["id"])
     for m in InventoryMove.objects.filter(ticket__in=tickets, kind="used").select_related("item"):
         used.setdefault(m.ticket_id, []).append(m)
+    from .models import PMPart
+    bom = {}
+    for b in PMPart.objects.filter(task_id__in={t.pm_id for t in tickets if t.pm_id}).select_related("item"):
+        bom.setdefault(b.task_id, []).append(b)
+    mnames = set(Machine.objects.values_list("name", flat=True))
     return [{"t": t, "notes": notes.get(t.id, []), "photos": pics.get(t.id, []), "used": used.get(t.id, []),
+             "bom": bom.get(t.pm_id, []), "bomUsed": any(u.note.startswith("PM parts list") for u in used.get(t.id, [])),
+             "isMachine": t.machine in mnames,
              "age": round((now - t.t).total_seconds() / 60),
              "took": round((t.updated - t.t).total_seconds() / 60) if t.status == "Closed" and t.updated else None} for t in tickets]
 
@@ -69,9 +78,15 @@ def schedule(t, machine=""):
     for x in Ticket.objects.filter(pm__isnull=False).exclude(status="Closed").order_by("t"):
         opened.setdefault(x.pm_id, x)
     rows = []
+    from .models import PMPart
+    bom = {}
+    for b in PMPart.objects.filter(task__in=tasks).select_related("item"):
+        bom.setdefault(b.task_id, []).append(b)
     for task in tasks:
         st = pm.status(task, t, opened.get(task.id))
+        parts = bom.get(task.id, [])
         rows.append({"task": task, **st, "pill": STATE[st["state"]], "usedTxt": pm.fmt_amount(st["used"], task.unit),
+                     "parts": parts, "short": [b for b in parts if b.item.qty < b.qty],
                      "everyTxt": pm.fmt_amount(task.every, task.unit),
                      "leftTxt": pm.fmt_amount(abs(st["left"]), task.unit) + (" over" if st["left"] < 0 else " left")})
     rows.sort(key=lambda r: (ORDER[r["state"]], -r["pct"], r["task"].machine, r["task"].title))
@@ -156,7 +171,8 @@ def page(request):
         on = {}
         for r in InventoryMove.objects.filter(kind="used", item__in=items).values("item_id", "machine").annotate(n=Sum("qty")).order_by("-n"):
             on.setdefault(r["item_id"], []).append((r["machine"], r["n"]))
-        ctx.update(inv=[{"i": i, "on": on.get(i.pk, [])} for i in items], q=s, showAll=show_all,
+        from .actions import stock_below_zero
+        ctx.update(inv=[{"i": i, "on": on.get(i.pk, [])} for i in items], q=s, showAll=show_all, belowZero=stock_below_zero(),
                    low=sum(1 for i in items if i.active and i.low),
                    edit=int(q.get("edit")) if str(q.get("edit") or "").isdigit() else None,
                    moves=list(InventoryMove.objects.select_related("item", "ticket")[:60]),
@@ -168,6 +184,10 @@ def page(request):
                    form={**{k: "" for k in ("machine", "title", "every", "unit", "priority", "steps")}, **(form or {})})
     elif tab == "history":
         ctx["hist"] = pm_history(now, mach)
+    elif tab == "reliability":
+        from . import reliability
+        days = _int(q.get("days")) if _int(q.get("days")) in (30, 90, 180, 365) else 90
+        ctx.update(R=reliability.build(now, days, mach), days=days)
     else:   # parts by machine
         names = list(dict.fromkeys(ctx["machines"] + list(InventoryMove.objects.exclude(machine="").values_list("machine", flat=True).distinct())))
         sel = mach if mach in names else ""
@@ -206,3 +226,26 @@ def do(request, name):
         q.append(("edit", str(request.POST.get("id"))))
     anchor = request.POST.get("anchor") or ""
     return HttpResponseRedirect(urlunsplit(("", "", u.path, urlencode(q), anchor)))
+
+
+@require_http_methods(["GET"])
+def reorder_csv(request):
+    """Maintenance › Inventory › Reorder list: every item at or below its reorder point (or below zero)."""
+    import csv
+
+    from django.http import HttpResponse
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    resp = HttpResponse(content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="reorder-{timezone.localdate().isoformat()}.csv"'
+    w = csv.writer(resp)
+    w.writerow(["Item", "Part #", "Location", "On hand", "Unit", "Reorder at", "Used last 30 days", "Used on"])
+    month = timezone.now() - timedelta(days=30)
+    for i in InventoryItem.objects.filter(active=True):
+        if not i.low:
+            continue
+        used = InventoryMove.objects.filter(item=i, kind="used", t__gte=month).aggregate(n=Sum("qty"))["n"] or 0
+        on = ", ".join(sorted(set(InventoryMove.objects.filter(item=i, kind="used").values_list("machine", flat=True)))[:8])
+        w.writerow([i.name, i.part_no, i.location, f"{i.qty:g}", i.unit, "" if i.min_qty is None else f"{i.min_qty:g}", f"{used:g}", on])
+    return resp

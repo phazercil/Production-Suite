@@ -29,7 +29,7 @@
 .mo b{color:var(--ink);font-family:var(--f-mono);font-weight:600}
 .track{height:14px;border-radius:7px;background:var(--ground);border:1px solid var(--rule);overflow:hidden}
 .track i{display:block;height:100%;background:var(--accent)}
-.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .stats div{background:var(--card);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
 .stats span{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
 .stats b{font:600 22px var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -56,3 +56,11 @@
 .dk-copy.done{background:var(--ok)}
 .dk.focus .chartbox{height:clamp(260px,52vh,640px)}
 @media (max-width:900px){.band{grid-template-columns:minmax(0,1fr)}.speed b{font-size:48px}.dk-clock{font-size:28px}}
+.dk-tv{position:relative}
+.dk-tv>summary{list-style:none;cursor:pointer}.dk-tv>summary::-webkit-details-marker{display:none}
+.dk-tvbox{position:absolute;right:0;top:calc(100% + 6px);z-index:30;background:var(--card);border:1px solid var(--rule,#343C45);border-radius:10px;padding:10px;display:flex;gap:8px;align-items:flex-end;min-width:min(560px,90vw);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.dk-tvbox .dk-share{flex:1}
+details.setup{font-size:13px;opacity:.8;background:none;border:0;padding:0 2px;color:var(--ink-2)}
+details.setup>summary{cursor:pointer}
+.dk-status .ver{opacity:.55;font-size:11px}
+body.dkpage .suite-rev{display:none}

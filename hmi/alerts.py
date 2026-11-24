@@ -29,6 +29,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from plant import liveconfig, netsafety
+from plant.models import PlantSettings
 
 from .models import AlertContact, AlertLog, ShiftRun
 
@@ -217,6 +218,73 @@ def pm_jobs(now, contacts):
     return jobs
 
 
+def digest(now):
+    """The daily plant digest: the last 24 hours (made, OEE, top downtime reasons, failed QC checks still waiting for
+    review), and what needs attention now (high-priority requests, PMs overdue, parts to reorder, lines not reporting)."""
+    from maintenance.models import InventoryItem
+    from plant import health
+    from plant.models import Machine
+    from reports.engine import downtime_intel, parse_scope, summarize
+
+    from . import pm
+    from .models import LineState, PMTask, QCCheck, Ticket
+    a = now - timedelta(hours=24)
+    stop = (PlantSettings.load().config.get("rules") or {}).get("stopPpm", 5)
+    tot, rows = summarize(parse_scope("plant"), a, now, stop)
+    di = downtime_intel(parse_scope("plant"), a, now)
+    pct = lambda v: "—" if v is None else f"{v:.0f}%"   # noqa: E731
+    L = [f"Plant digest for the 24 hours to {timezone.localtime(now):%a %b %d, %I:%M %p}", "",
+         f"Filters made: {tot['units']:,}", f"OEE: {pct(tot.get('oee'))}  (uptime {pct(tot.get('uptime'))} x speed {pct(tot.get('perf'))} x good {pct(tot.get('quality'))})",
+         f"Downtime: {tot['down'] / 60:.1f} h" + (f", costing about {di['lostFilters']:,} filters" if di["lostFilters"] else ""), ""]
+    if rows:
+        L.append("By line:")
+        for k, r in sorted(rows.items()):
+            L.append(f"  {k}: {r['units']:,} made · OEE {pct(r.get('oee'))} · uptime {pct(r.get('uptime'))} · {r['down']:.0f} min down")
+        L.append("")
+    if di["pareto"]:
+        L.append("Top downtime reasons:")
+        for x in di["pareto"][:5]:
+            L.append(f"  {x['reason']}: {x['min']:.0f} min ({x['n']} stops)")
+        L.append("")
+    waiting = QCCheck.objects.filter(passed=False, review="pending").count()
+    high = list(Ticket.objects.exclude(status="Closed").filter(priority="High").order_by("t")[:10])
+    overdue = [t for t in PMTask.objects.filter(active=True) if pm.status(t, now)["state"] in ("due", "open")]
+    low = [i for i in InventoryItem.objects.filter(active=True) if i.low]
+    lss = {x.machine_id: x for x in LineState.objects.all()}
+    shs = {x.machine_id: x for x in ShiftRun.objects.filter(active=True)}
+    quiet = []
+    for m in Machine.objects.filter(stage="s1", active=True):
+        state, _ = health.machine_state(m, lss.get(m.pk), shs.get(m.pk), now)
+        if state == "not reporting":
+            quiet.append(m.name)
+    L.append("Needs attention:")
+    L.append(f"  Failed QC checks waiting for a supervisor: {waiting}")
+    L.append(f"  High-priority maintenance requests open: {len(high)}" + "".join(f"\n    #{t.pk} {t.machine}: {t.type}" for t in high))
+    L.append(f"  Planned maintenance due or overdue: {len(overdue)}" + "".join(f"\n    {t.machine}: {t.title}" for t in overdue[:10]))
+    L.append(f"  Parts at or below their reorder point: {len(low)}" + "".join(f"\n    {i.name} ({i.part_no or 'no part #'}): {i.qty:g} on hand, reorder at {i.min_qty:g}" for i in low[:15]))
+    if quiet:
+        L.append(f"  Lines not reporting machine data: {', '.join(quiet)}")
+    L += ["", "Sent by Production Suite (Admin › Alerts › Daily digest)."]
+    return f"Plant digest · {tot['units']:,} made · OEE {pct(tot.get('oee'))}", "\n".join(L)
+
+
+def digest_jobs(now, contacts):
+    at = str(((PlantSettings.load().settings or {}).get("digest") or {}).get("at") or "")
+    people = [c for c in contacts if c.digest and c.email]
+    if not at or not people:
+        return []
+    h, m = (int(x) for x in at.split(":"))
+    loc = timezone.localtime(now)
+    if (loc.hour, loc.minute) < (h, m):
+        return []
+    key = f"digest|{loc.date().isoformat()}"
+    todo = [c for c in people if not AlertLog.objects.filter(stop_key=key, contact=c.name, kind="digest").exists()]
+    if not todo:
+        return []
+    subject, body = digest(now)
+    return [(c.name, c.email, "", subject, body, "digest", "", key) for c in todo]
+
+
 def check(now=None):
     """Called by the ticker. Works out who should be told what, then sends in the background."""
     now = now or timezone.now()
@@ -240,6 +308,11 @@ def check(now=None):
                 jobs.append((c.name, c.email, c.phone, subject, body, "down", line, key))
     jobs += quality_jobs(now, contacts, running)
     jobs += pm_jobs(now, contacts)
+    try:
+        jobs += digest_jobs(now, contacts)
+    except Exception:  # noqa: BLE001 - the digest never stops the stop alerts
+        import logging
+        logging.getLogger("plant").exception("daily digest")
     # back running: a stop someone was told about has ended
     since = now - timedelta(hours=24)
     told = AlertLog.objects.filter(kind="down", t__gte=since, ok=True).values("stop_key", "contact", "line").distinct()
