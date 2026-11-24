@@ -319,12 +319,24 @@ def split_segs(segs, dur):
 
 
 def frac_at(segs, t):
+    """Share of the output made by time t. A segment (a, b) makes output evenly over its time; (a, b, w) at w units a
+    unit of time, so two machines (or End Bands and Glue Beads) at different speeds are weighted by what each makes."""
     tot = done = 0
-    for a, b in segs:
-        tot += b - a
+    for s in segs:
+        a, b = s[0], s[1]
+        w = s[2] if len(s) > 2 else 1
+        tot += (b - a) * w
         if t > a:
-            done += min(b, t) - a
+            done += (min(b, t) - a) * w
     return done / tot if tot else 1
+
+
+def _weighted(out):
+    """A job's running segments weighted by its output per unit of time (its quantity over its running time)."""
+    segs = [(s[0], s[1]) for s in out["runSegs"]]
+    t = sum(b - a for a, b in segs)
+    w = (out.get("qty") or 0) / t if t else 0
+    return [(a, b, w) for a, b in segs]
 
 
 def keeps_up(down, up):
@@ -332,9 +344,10 @@ def keeps_up(down, up):
         return True
     a, b = down[0][0], down[-1][1]
     pts = []
-    for x, y in down:
-        pts += [x, y]
-    for x, y in up:
+    for s in down:
+        pts += [s[0], s[1]]
+    for s in up:
+        x, y = s[0], s[1]
         if a < x < b:
             pts.append(x)
         if a < y < b:
@@ -425,8 +438,12 @@ def _compute(world, jobs, cuts):
                     is_running = True   # under way at its station: what's left, from now
                 earliest = max(t_now, prev_end) if is_running else max(j["reqStart"], prev_end)
                 waiting, up = False, None
+                ps0 = parts.get((mo["id"], st)) or [j]
+                cut_first = len(ps0) > 1 and j is ps0[0] and (j.get("split") or {}).get("mode") == "time" and qty <= 0 and not rest
+                if cut_first:   # the split time comes before part 1 can run: it makes nothing; kept on the board, flagged
+                    warn.append("The split time is before part 1 can start, so part 1 makes nothing: part 2 makes it all")
                 if st == "s1":
-                    if qty <= 0 and not rest:
+                    if qty <= 0 and not rest and not cut_first:
                         if _stage_total(mo, st) <= 0 or mo["status"] != "OPEN" and all(_part_qty(x, mo, st, parts, cuts)[0] <= 0 for x in ps):
                             s1_done.add(mo["id"])  # Stage 1 already made the full quantity
                         continue
@@ -547,10 +564,12 @@ def _compute(world, jobs, cuts):
                     prev_part, prev_no = pkey, mo["part"]
                 if st == "s1" and not rest:   # later stages pace against every part of Stage 1
                     u = s1_res.get(mo["id"])
-                    s1_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
+                    s1_res[mo["id"]] = {**out, "runSegs": _weighted(out)} if not u else \
+                        {**u, "runSegs": sorted(u["runSegs"] + _weighted(out)), "end": max(u["end"], out["end"])}
                 elif st in ("eb", "ac", "gb") and not rest:
                     u = mid_res.get(mo["id"])
-                    mid_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}
+                    mid_res[mo["id"]] = {**out, "runSegs": _weighted(out)} if not u else \
+                        {**u, "runSegs": sorted(u["runSegs"] + _weighted(out)), "end": max(u["end"], out["end"])}
     return {"res": res, "byM": by_m, "cal": cal, "cuts": new_cuts}
 
 

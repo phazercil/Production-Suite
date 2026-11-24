@@ -18,6 +18,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from hmi import engine, pm
+from maintenance.reliability import done
 from hmi.models import PMTask, Ticket, TicketNote, TicketPhoto
 from hmi.views import current_person, touch
 from plant import perms
@@ -66,7 +67,7 @@ def _tickets(qs, now):
              "bom": bom.get(t.pm_id, []), "bomUsed": any(u.note.startswith("PM parts list") for u in used.get(t.id, [])),
              "isMachine": t.machine in mnames,
              "age": round((now - t.t).total_seconds() / 60),
-             "took": round((t.updated - t.t).total_seconds() / 60) if t.status == "Closed" and t.updated else None} for t in tickets]
+             "took": round((done(t) - t.t).total_seconds() / 60) if t.status == "Closed" and done(t) else None} for t in tickets]
 
 
 def schedule(t, machine=""):
@@ -98,11 +99,12 @@ def pm_history(t, machine=""):
     for x in pm.history(since=t - timedelta(days=365)):
         task = x.pm
         late = None
-        prev = Ticket.objects.filter(pm=task, status="Closed", updated__lt=x.updated).order_by("-updated").first() if task else None
-        if task and task.unit == "days":
-            start = prev.updated if prev else task.created
-            late = (x.updated - start).total_seconds() / 86400 - task.every
-        rows.append({"t": x, "task": task, "late": late, "waited": round((x.updated - x.t).total_seconds() / 60) if x.updated else None,
+        fin = done(x)
+        prev = Ticket.objects.filter(pm=task, status="Closed", closed_at__lt=fin).order_by("-closed_at").first() if task and fin else None
+        if task and task.unit == "days" and fin:
+            start = done(prev) if prev else task.created
+            late = (fin - start).total_seconds() / 86400 - task.every
+        rows.append({"t": x, "task": task, "late": late, "waited": round((fin - x.t).total_seconds() / 60) if fin else None,
                      "note": (x.repairs.filter(kind="closed").order_by("-t").values_list("text", flat=True).first() or "")})
     return [r for r in rows if r["t"].machine == machine] if machine else rows
 
@@ -148,14 +150,14 @@ def page(request):
            "counts": {"open": Ticket.objects.filter(status="Open").count(),
                       "work": Ticket.objects.filter(status__in=("Reviewed", "In progress")).count(),
                       "parts": Ticket.objects.filter(status="Waiting on parts").count(),
-                      "done": Ticket.objects.filter(status="Closed", updated__gte=now - timedelta(days=7)).count()}}
+                      "done": Ticket.objects.filter(status="Closed", closed_at__gte=now - timedelta(days=7)).count()}}
     if tab in ("requests", "done"):
-        qs = Ticket.objects.exclude(status="Closed") if tab == "requests" else Ticket.objects.filter(status="Closed", updated__gte=now - timedelta(days=30))
+        qs = Ticket.objects.exclude(status="Closed") if tab == "requests" else Ticket.objects.filter(status="Closed", closed_at__gte=now - timedelta(days=30))
         if mach:
             qs = qs.filter(machine=mach)
         if st and tab == "requests":
             qs = qs.filter(status=st)
-        rows = _tickets(qs.order_by("-updated" if tab == "done" else "t")[:300], now)
+        rows = _tickets(qs.order_by("-closed_at" if tab == "done" else "t")[:300], now)
         if tab == "requests":
             rows.sort(key=lambda r: (PRIORITY.get(r["t"].priority, 1), r["t"].t))
         ctx["rows"] = rows

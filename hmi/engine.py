@@ -157,21 +157,33 @@ def machine_shift_at(machine, t):
     return None if w["noShift"] else {"name": w["name"], "s": ms(w["s"]), "e": ms(w["e"])}
 
 
-def open_log(machine, t, start=None, mo=None, offer=None, co=None, force=False):
+def open_log(machine, t, start=None, mo=None, offer=None, co=None, force=False, carry=None, at=None):
     """Start the log of the window t is in (nobody on it yet). `force`: also when Rules turn automatic logs off (a
-    changeover passed over keeps going for the next operator)."""
+    changeover passed over keeps going for the next operator). `carry`: the log this one follows on from (its QC
+    due after a changeover, pleats override and a stop under way go on). `at`: name the log for the window at
+    exactly this time (a pass-over in the first seconds of a shift belongs to the new shift)."""
     if rules().get("autoRuns", True) is False and not force:
         return None
-    w = machine_window(machine, t - timedelta(seconds=30))
+    w = machine_window(machine, at or t - timedelta(seconds=30))
     start = start or max(w["s"], t - timedelta(minutes=1))
     if mo and mo.status != "OPEN":
         mo = None
     sh = ShiftRun.objects.create(machine=machine, line=machine.name, person=None, user_name="", shift_name=w["name"], start=start,
                                  mo=mo, mo_start=start if mo else None, state="changeover" if co and not co.get("ranAt") else "running", co=co,
                                  qc_last=start,
-                                 offer=offer or "")
+                                 offer=offer or "", **_carried(carry, start))
     event("shift_auto", {"line": machine.name, "shift": w["name"]})
     return ShiftRun.objects.select_for_update().select_related("mo").get(pk=sh.pk)
+
+
+def _carried(old, at):
+    """What a new log takes over from the one before it at a shift change, operator change or pass-over."""
+    if not old:
+        return {}
+    out = {"qc_after_co": old.qc_after_co, "qc_due_at": old.qc_due_at, "override": old.override}
+    if getattr(old, "_stopped_at", None):   # stopped at the change: the stop goes on in the new log
+        out.update(stop_start=at, stop_what=old._stopped_what or "")
+    return out
 
 
 def open_unattended(machine, t):
@@ -219,12 +231,14 @@ def co_piece(sh, end, ended, note=""):
     if end > s0 and not PpmReading.objects.filter(shift=sh, t__gt=s0, t__lte=end).exists():
         # no machine data during it (a line without a feed, or the feed was down): the changeover time itself
         add_down(sh, max(s0, sh.stop_start or s0), end, "Changeover")
-        sh.stop_start = None if ended == "finished" else end
+        # no data to say it's stopped: the next minute's reading decides (no stop is started at a moment mid-minute)
+        sh.stop_start = None
     elif sh.stop_start and end > sh.stop_start:
         # the line's stop going on now is Changeover downtime (only the time it's stopped, not the whole changeover;
         # the minute counter logs the stops that already ended)
         add_down(sh, sh.stop_start, end, "Changeover")
-        sh.stop_start, sh.stop_what = (None if ended == "finished" else end), ""   # a changeover going on: so does its stop
+        # a changeover going on: so does its stop, from the start of this minute (never a moment after the next tick's)
+        sh.stop_start, sh.stop_what = (None if ended == "finished" else end.replace(second=0, microsecond=0)), ""
     steps = co_steps(co, sh.line)
     done = set(co.get("done") or [])
     mine = sorted(int(i) for i, d in (co.get("doneBy") or {}).items()
@@ -282,10 +296,11 @@ def roll_over(sh, t):
         return sh
     end = w["e"]
     mo, who, was_co = sh.mo, sh.person_id, bool(sh.co) and (sh.state == "changeover" or bool(sh.co.get("ranAt")))
+    sh._stopped_at, sh._stopped_what = sh.stop_start, sh.stop_what
     close_log(sh, end)
     co = dict(sh.co) if was_co else None
     nxt = machine_window(sh.machine, t - timedelta(seconds=30))
-    return open_log(sh.machine, t, start=max(end, nxt["s"]), mo=mo, offer=str(who) if who else None, co=co)
+    return open_log(sh.machine, t, start=max(end, nxt["s"]), mo=mo, offer=str(who) if who else None, co=co, carry=sh)
 
 
 def close_unattended_if_over(sh, t):
@@ -330,7 +345,7 @@ def spec_for(item):
 
 def has_counter(machine, sample=None):
     """True when the machine reports a parts counter: its feed has a count field, or the reading carries a count."""
-    return bool(machine.feed_count_field) or "count" in (sample or {})
+    return bool(machine.feed_count_field) or (sample or {}).get("count") not in (None, "")
 
 
 def pleats_for(sh):
@@ -370,7 +385,7 @@ def planned_windows(sh, kinds=False):
     if not ids:
         return []
     a = sh.start
-    b = max(sh.end or now(), now()) + timedelta(days=1)
+    b = sh.end if sh.end else now() + timedelta(days=1)   # a closed run only needs its own time
     grace = rules().get("startGrace", 0) or 0
     through = set(sh.machine.lunch_shifts or []) if sh.machine else set()   # shifts on which the line runs through lunch
     occ, out = [], []
@@ -450,6 +465,8 @@ def minus_planned(start, end, windows):
 def add_down(sh, start, end, reason=None):
     """Log a stop as downtime. Planned time (breaks, lunch, start-up) inside it is left out; what remains is
     logged only if it adds up to the Rules > minDown minutes (changeovers are always logged)."""
+    if not start or not end or end <= start:
+        return None   # nothing to log (a stop that began after its end: a boundary inside a minute)
     if reason == "Changeover":   # a changeover's time counts through breaks, but never when no shift is scheduled
         pieces = minus_planned(start, end, [(a, b) for a, b, k in planned_windows(sh, kinds=True) if k == "No shift scheduled"])
     else:
@@ -459,6 +476,8 @@ def add_down(sh, start, end, reason=None):
         return None
     d = None
     for s, e in pieces:
+        if e <= s:
+            continue
         d = Downtime.objects.create(shift=sh, line=sh.line, mo=sh.mo.number if sh.mo else "", start_time=s, end_time=e,
                                     minutes=max(1, round((e - s).total_seconds() / 60)), reason=reason,
                                     notes=f"{sh.stop_what} stopped" if reason != "Changeover" and sh.stop_what and sh.stop_what != sh.line else "")
@@ -691,7 +710,8 @@ def start_shift(p, ctx):
         need(not mo.line_id or mo.line_id == m.id, f"MO {mo.number} is scheduled on {mo.line.name if mo.line else ''}, not {m.name}.")
         need(not running_elsewhere(mo, m), f"MO {mo.number} is already running on another machine.")
     picked = None
-    if cur and mo and cur.mo_id and cur.mo_id != mo.pk and cur.count:
+    co_going = bool(cur and cur.state == "changeover" and cur.co)
+    if cur and mo and cur.mo_id and cur.mo_id != mo.pk and cur.count and not co_going:
         # the line ran another MO while nobody was logged in: when did it change over? (a stop in this shift, or
         # before this shift: then a supervisor sorts out the earlier logs)
         at = str(p.get("coAt") or "")
@@ -732,6 +752,10 @@ def start_shift(p, ctx):
             sh.mo, sh.mo_start, sh.mo_count = mo, picked.end_time, after
             audit(ctx, f"{m.name}: changed over from MO {old.number} to {mo.number} with nobody logged in, during the stop at "
                        f"{fmt_t(picked.start_time)} ({before:,} on {old.number}, {after:,} on {mo.number})")
+        elif mo and sh.mo_id != mo.pk and co_going:
+            # a changeover under way (passed over): the MO scanned is the one it changes over to; the log stays in
+            # the changeover until it's finished on the kiosk
+            sh.co = {**sh.co, "newMo": sh.co.get("newMo") or mo.pk}
         elif mo and sh.mo_id != mo.pk:
             if sh.mo_id and sh.mo_count:   # the log carried another MO: its count moves to the one scanned
                 MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") - sh.mo_count)
@@ -752,7 +776,7 @@ def start_shift(p, ctx):
         event("shift_start", {"line": m.name, "mo": mo.number if mo else None, "user": ctx.user.name, "issues": sh.issues, "since": ms(sh.start)})
         return {"msg": f"Shift started on {m.name}: everything recorded since {fmt_t(sh.start)} is yours"
                        + (f" ({sh.count:,} made)" if sh.count else "")}
-    w = shift_at(ms(ctx.now))
+    w = machine_window(m, ctx.now)   # this machine's own shifts (the same naming the logs it opens use)
     sh = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=(w or {}).get("name", ""),
                                  start=ctx.now, mo=mo, mo_start=ctx.now, state="running", issues=str(p.get("issues") or "").strip(),
                                  safety=safety, pm=p.get("pm") if isinstance(p.get("pm"), list) else [], qc_last=ctx.now)
@@ -801,12 +825,13 @@ def change_operator(p, ctx):
         return {"msg": f"{ctx.user.name} is on {m.name} now"}
     need(sh.person_id != ctx.user.pk, f"{ctx.user.name} is already the operator on {m.name}.")
     before, mo, was_co = sh.user_name, sh.mo, bool(sh.co) and (sh.state == "changeover" or bool(sh.co.get("ranAt")))
+    sh._stopped_at, sh._stopped_what = sh.stop_start, sh.stop_what
     close_log(sh, ctx.now, why="operator change")
     co = dict(sh.co) if was_co else None
     new = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=sh.shift_name, start=ctx.now,
                                   mo=mo if mo and mo.status == "OPEN" else None, mo_start=ctx.now,
                                   state="changeover" if co and not co.get("ranAt") else "running",
-                                  co=co, qc_last=ctx.now, safety=sh.safety, pm=sh.pm)
+                                  co=co, qc_last=ctx.now, safety=sh.safety, pm=sh.pm, **_carried(sh, ctx.now))
     audit(ctx, f"Operator change on {m.name}: {before} → {ctx.user.name}")
     event("shift_start", {"line": m.name, "mo": new.mo.number if new.mo else None, "user": ctx.user.name, "change": before})
     return {"msg": f"{ctx.user.name} took over {m.name} from {before}"}
@@ -822,7 +847,7 @@ def pass_over(sh, ctx, ended, note):
     co["handoff"] = {"by": sh.user_name, "shift": sh.shift_name, "t": ms(ctx.now), "note": note}
     sh.co = None
     sh.save(update_fields=["co"])
-    nxt = open_log(m, ctx.now, start=ctx.now, co=co, force=True)
+    nxt = open_log(m, ctx.now, start=ctx.now, co=co, force=True, carry=sh, at=ctx.now)
     audit(ctx, f"{sh.user_name} passed over the changeover on {sh.line}" + (f": {note}" if note else ""))
     event("co_pass", {"line": sh.line, "by": sh.user_name, "note": note})
     return nxt
@@ -881,19 +906,21 @@ def co_end(p, ctx):
     sh = shift_of(p, ctx)
     co = sh.co
     need(co and co.get("step") == 1, "Open the changeover first.")
-    mo = MO.objects.filter(pk=co.get("oldMo")).first()
+    mo = MO.objects.select_for_update().filter(pk=co.get("oldMo")).first()   # locked: no lost update from the ticker
     if mo:
-        q = to_number(p.get("qty") or 0)
+        raw = str(p.get("qty") if p.get("qty") is not None else "").strip()
+        need(raw != "", "Enter the final count for this run (the counter shows how many were counted).")
+        q = to_number(raw)
         logged = run_scrap(sh, mo)
         sc = to_number(p.get("scrap")) if str(p.get("scrap") or "").strip() != "" else logged
-        need(q is not None and 0 <= q <= 10_000_000, "Enter the final count for this run as a whole number.")
-        need(sc is not None and 0 <= sc <= 10_000_000, "Enter scrap as a whole number (0 if none).")
+        need(q is not None and float(q).is_integer() and 0 <= q <= 10_000_000, "Enter the final count for this run as a whole number.")
+        need(sc is not None and float(sc).is_integer() and 0 <= sc <= 10_000_000, "Enter scrap as a whole number (0 if none).")
         n = len(machine_list("endSteps", sh.line))
         checks = p.get("checks") if isinstance(p.get("checks"), list) else []
         need(len(checks) >= n and all(checks[:n]), f"Check off all {n} end-of-order items first.")
         q, sc = int(q), int(sc)
-        mo.produced += q - sh.mo_count
-        mo.scrap += sc - logged   # scrap already logged this run (QC checks, disapprovals) is in it
+        mo.produced = max(0, mo.produced + q - sh.mo_count)
+        mo.scrap = max(0, mo.scrap + sc - logged)   # scrap already logged this run (QC checks, disapprovals) is in it
         if p.get("close"):
             mo.status = "CLOSE"
             mo.line, mo.seq = None, 0
@@ -1450,6 +1477,8 @@ def ticket_status(p, ctx):
     need(len(note) <= 4000, "Keep the repair note under 4,000 characters.")
     t.status = "In progress" if t.status != "In progress" and not p.get("close") else "Closed"
     t.updated, t.updated_by = ctx.now, ctx.by
+    if t.status == "Closed":
+        t.closed_at = ctx.now
     t.save()
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="closed" if t.status == "Closed" else "started",
                               text=note or ("Completed" if t.status == "Closed" else "Started work"))

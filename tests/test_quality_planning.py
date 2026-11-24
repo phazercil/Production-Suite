@@ -49,7 +49,9 @@ class Spc(TestCase):
         self.assertEqual(lim, (10.0, 9.94, 10.06))
         vals = [v for _, v, _ in spc.series("Barbara", "MG4062HP", "len", self.t0, timezone.now())]
         st = spc.stats(vals, lim)
-        self.assertGreater(st["cpk"], 1.33)
+        self.assertAlmostEqual(st["cpk"], min(10.06 - st["mean"], st["mean"] - 9.94) / (3 * st["mr"] / 1.128), places=6)   # within: MR-bar / d2
+        self.assertGreater(st["ppk"], 1.33)                                           # overall standard deviation
+        self.assertTrue(st["preliminary"])
         self.assertEqual(spc.warnings([10.0, 10.01, 10.03, 10.05], lim)[0][0], "near")
         self.assertIn("trend", [r for r, _ in spc.warnings([10.0, 10.01, 10.02, 10.03], lim)])
         self.assertIn("side", [r for r, _ in spc.warnings([10.01] * 7, lim)])
@@ -172,8 +174,22 @@ class SequenceStationsS2K(TestCase):
         self.assertEqual(j.wip_qty, 40)
         r = compute(load_world())["res"].get(j.key)
         self.assertTrue(r and r["running"])
+        j.refresh_from_db()
+        self.assertEqual(j.wip_lane, f"{eb.pk}:eb")
+        # a second MO can't be under way on the same station: the check, and the database rule behind it
+        mo2 = MO.objects.filter(status="OPEN").exclude(pk=mo.pk).first()
+        Job.objects.filter(mo=mo2, op="eb").delete()
+        j2 = Job.objects.create(mo=mo2, op="eb", machine=eb, req_start=timezone.now())
+        self.assertIn("still under way", c.post("/stations/do/start", {"id": j2.pk}, follow=True).content.decode())
+        Job.objects.filter(pk=j.pk).update(wip_started=None)          # as if both passed the check at the same instant
+        self.assertIn("was just started", c.post("/stations/do/start", {"id": j2.pk}, follow=True).content.decode())
+        Job.objects.filter(pk=j.pk).update(wip_started=timezone.now())
+        self.assertIsNone(Job.objects.get(pk=j2.pk).wip_started)
         c.post("/stations/do/complete", {"id": j.pk})
         self.assertNotIn(j.key, compute(load_world())["res"])
+        self.assertIsNone(Job.objects.get(pk=j.pk).wip_lane)
+        c.post("/stations/do/start", {"id": j2.pk})
+        self.assertIn("under way", c.post("/stations/do/undo", {"id": j.pk}, follow=True).content.decode())
 
     def test_s2k_posting(self):
         mo = MO.objects.filter(status="OPEN").first()

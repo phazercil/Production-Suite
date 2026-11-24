@@ -22,6 +22,8 @@ class Job(models.Model):
     wip_qty = models.FloatField(default=0)
     wip_done = models.DateTimeField(null=True, blank=True)
     wip_by = models.CharField(max_length=120, blank=True)
+    wip_lane = models.CharField(max_length=24, null=True, blank=True, unique=True,
+                                help_text="'machine:stage' while this MO is under way at a station, else empty: one per station at a time")
     updated = models.DateTimeField(auto_now=True)
 
     class Meta:

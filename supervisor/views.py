@@ -307,7 +307,8 @@ def page(request):
             "tabq": {k: _query(f, tab=k, result="", page="") for k, _ in TABS}, "nobody": NOBODY, "msg": request.GET.get("msg", "")[:200]})
     if f["tab"] == "events":
         from . import timeline
-        evs = timeline.events(f, f["kind"], f["q"])
+        cut = {}
+        evs = timeline.events(f, f["kind"], f["q"], info=cut)
         if request.GET.get("csv") == "1":
             resp = HttpResponse(content_type="text/csv; charset=utf-8")
             resp["Content-Disposition"] = f'attachment; filename="timeline-{f["from"]}-to-{f["to"]}.csv"'
@@ -322,7 +323,7 @@ def page(request):
             by_kind[e["label"]] = by_kind.get(e["label"], 0) + 1
         lines = sorted({m.name for m in Machine.objects.all()} | ({f["line"]} if f["line"] else set()))
         return render(request, "supervisor/page.html", {
-            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": evs[first:first + PER_PAGE], "n": n, "lines": lines,
+            "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": evs[first:first + PER_PAGE], "n": n, "lines": lines, "cut": cut,
             "totals": {"Events": n, **dict(sorted(by_kind.items(), key=lambda kv: -kv[1])[:4])}, "kinds": timeline.KINDS, "openCo": open_changeovers(),
             "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
             "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,

@@ -51,7 +51,13 @@
       '<p class="err" aria-live="polite"></p><div style="display:flex;gap:8px;margin-top:8px"><button type="submit" class="btn go">Sign in</button><button type="button" class="btn ghost" data-x>Cancel</button></div></form>';
     document.body.appendChild(box);
     var f = box.querySelector("form"), inp = f.querySelector("input[name=pin]"), err = f.querySelector(".err"), list = f.querySelector(".suite-people");
+    var switching = true;
     fetch("/api/hmi/people", { credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (r) {
+      if (!r.ok) {   // nobody signed in on this screen: not a switch, the PIN (or badge) alone signs in
+        switching = false; list.remove(); f.querySelector("h2").textContent = "Sign in"; f.querySelector("p.note").remove();
+        inp.disabled = false; inp.placeholder = "PIN or badge"; inp.focus();
+        return;
+      }
       list.innerHTML = (r.people || []).map(function (u) {
         return '<label><input type="radio" name="who" value="' + u.id + '"><span>' + esc(u.name) + '<small>' + esc(u.role || "") + '</small></span></label>';
       }).join("") || '<span class="note">No people set up yet.</span>';
@@ -63,8 +69,8 @@
     box.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
     f.addEventListener("submit", function (e) {
       e.preventDefault();
-      if (!who()) { err.textContent = "Pick your name first."; return; }
-      post("/api/hmi/login", { pin: inp.value, userId: who(), "switch": true }).then(function (r) {
+      if (switching && !who()) { err.textContent = "Pick your name first."; return; }
+      post("/api/hmi/login", switching ? { pin: inp.value, userId: who(), "switch": true } : { pin: inp.value }).then(function (r) {
         if (r && r.ok) location.reload(); else { err.textContent = (r && r.error) || "That PIN doesn't match."; inp.value = ""; inp.focus(); }
       });
     });

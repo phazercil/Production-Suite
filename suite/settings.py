@@ -32,6 +32,10 @@ def _load_env(path):
         key, val = key.strip(), val.strip()
         if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
             val = val[1:-1]
+        else:   # an unquoted value with a comment after it (WEB_PORT=8000  # comment); a # inside a word stays
+            cut = min([i for i in (val.find(" #"), val.find("\t#")) if i >= 0], default=-1)
+            if cut >= 0:
+                val = val[:cut].rstrip()
         os.environ.setdefault(key, val)
 
 

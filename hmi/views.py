@@ -43,6 +43,7 @@ def current_person(request):
     last = request.session.get("last_act", 0)
     if u.role in Person.LEADS and timeout and timezone.now().timestamp() - last > timeout * 60:
         request.session.pop("pid", None)
+        request.session.pop("sup", None)
         return None, f"Shift lead logged out after {timeout} min idle"
     return u, note
 
@@ -110,16 +111,19 @@ def check_pin(request, pin, user_id=None, perm=""):
     t = timezone.now().timestamp()
     ip_key = "pin_fails:" + (request.META.get("REMOTE_ADDR") or "?")
     fails = [x for x in request.session.get("pin_fails", []) if t - x < 60]
+    # per address: counted in the shared cache with add + incr (one counter per minute, this and the last), so
+    # parallel guesses can't overwrite each other's count, and a client that drops its cookie is still counted
+    bucket = int(t // 60)
     try:
-        ip_fails = [x for x in (cache.get(ip_key) or []) if t - x < 60]
+        ip_n = sum(int(cache.get(f"{ip_key}:{b}") or 0) for b in (bucket, bucket - 1))
     except Exception:  # the shared store is down: this process's own count still limits guessing
         log.exception("PIN limit store unavailable")
-        ip_fails = _local_fails(ip_key, t)
+        ip_n = len(_local_fails(ip_key, t))
     # 5 per screen; 20 per address, so screens behind one proxy address don't lock each other out over a few typos
-    for lst, limit in ((fails, 5), (ip_fails, 20)):
-        if len(lst) >= limit:
-            log.warning("PIN attempts paused for %s", request.META.get("REMOTE_ADDR"))
-            return None, f"Too many wrong PINs. Wait {int(60 - (t - lst[-limit])) + 1} seconds and try again."
+    if len(fails) >= 5 or ip_n >= 20:
+        log.warning("PIN attempts paused for %s", request.META.get("REMOTE_ADDR"))
+        wait = int(60 - (t - fails[-5])) + 1 if len(fails) >= 5 else 61 - int(t % 60)
+        return None, f"Too many wrong PINs. Wait {wait} seconds and try again."
     pin = str(pin or "").strip()
     qs = Person.objects.filter(active=True, pin=pin).exclude(pin="")
     if user_id:
@@ -127,14 +131,16 @@ def check_pin(request, pin, user_id=None, perm=""):
     from plant import perms
     if perm is True:   # older screens asking for "a shift lead"
         perm = "section.admin"
-    matches = [u for u in qs if u.pin == pin and (not perm or perms.can(u, perm))]  # exact PIN match even where the database ignores letter case
+    matches = [u for u in qs.order_by("pk") if u.pin == pin and (not perm or perms.can(u, perm))]  # exact PIN match even where the database ignores letter case
     u = matches[0] if pin and matches else None
     if not u:
         request.session["pin_fails"] = fails + [t]
         from plant import health
         health.count("pin")
         try:
-            cache.set(ip_key, ip_fails + [t], 120)
+            k = f"{ip_key}:{bucket}"
+            cache.add(k, 0, 180)
+            cache.incr(k)
         except Exception:   # kept in this process instead
             log.exception("PIN limit store unavailable")
             _local_fails(ip_key, t, add=True)
@@ -146,11 +152,19 @@ def check_pin(request, pin, user_id=None, perm=""):
 
 @require_GET
 def people(request):
-    """The names to pick from when switching person from the top bar (then the PIN is checked)."""
+    """The names to pick from when switching person from the top bar (then the PIN is checked). Only for a screen that
+    already has someone signed in (switching is what needs it); never cached."""
     from plant import perms
+    me, _ = current_person(request)
+    if not me:
+        r = JsonResponse({"ok": False, "error": "Sign in first."}, status=403)
+        r["Cache-Control"] = "no-store"
+        return r
     roles = dict(perms.ROLES)
-    return JsonResponse({"ok": True, "people": [{"id": u.pk, "name": u.name, "role": roles.get(u.role, u.role)}
-                                                for u in Person.objects.filter(active=True).exclude(pin="").order_by("name")]})
+    r = JsonResponse({"ok": True, "people": [{"id": u.pk, "name": u.name, "role": roles.get(u.role, u.role)}
+                                             for u in Person.objects.filter(active=True).exclude(pin="").order_by("name")]})
+    r["Cache-Control"] = "no-store"
+    return r
 
 
 @json_api
@@ -176,8 +190,12 @@ def logout(request):
 @json_api
 @require_POST
 def ping(request):
-    touch(request)
-    return JsonResponse({"ok": True})
+    # a screen's automatic ping keeps nobody signed in who has gone idle: the idle check runs first, and a ping only
+    # counts as activity for someone still signed in
+    me, note = current_person(request)
+    if me:
+        touch(request)
+    return JsonResponse({"ok": True, "note": note})
 
 
 @json_api
@@ -195,10 +213,17 @@ def command(request):
 
 
 def _too_big(request, limit):
+    """Over `limit` bytes. A body sent without a length (chunked) is measured by reading it (Django already caps what
+    it will read at DATA_UPLOAD_MAX_MEMORY_SIZE)."""
     try:
         n = int(request.META.get("CONTENT_LENGTH") or 0)
     except ValueError:
         n = 0
+    if not n and request.META.get("HTTP_TRANSFER_ENCODING"):
+        try:
+            n = len(request.body)
+        except Exception:  # noqa: BLE001 - too large for Django to read: too big
+            return True
     return n > limit
 
 
@@ -254,7 +279,12 @@ def feed_push(request, machine):
             and (v is None or isinstance(v, (bool, int, float)) or (isinstance(v, str) and len(v) <= 200) or isinstance(v, dict))}
     if len(json.dumps(keep, default=str)) > 8000:
         keep = {k: v for k, v in keep.items() if not isinstance(v, dict)}
-    ls.pushed, ls.pushed_at = {**keep, "ppm": p.get("ppm"), "count": p.get("count")}, now()
+    ls.pushed = {**keep, "ppm": p.get("ppm")}
+    if p.get("count") not in (None, ""):   # no counter: no count key, so the ticker counts from the speed instead
+        ls.pushed["count"] = p.get("count")
+    else:
+        ls.pushed.pop("count", None)
+    ls.pushed_at = now()
     ls.save(update_fields=["pushed", "pushed_at"])
     return JsonResponse({"ok": True})
 

@@ -126,8 +126,8 @@ def log_done(task, now, by, note=""):
     if not t:
         t = Ticket.objects.create(t=now, line=task.machine if is_machine(task.machine) else "", by=by, machine=task.machine,
                                   type=f"PM · {task.title}"[:80], priority=task.priority, pm=task, notes=task.steps or "")
-    t.status, t.updated, t.updated_by = "Closed", now, by
-    t.save(update_fields=["status", "updated", "updated_by"])
+    t.status, t.updated, t.updated_by, t.closed_at = "Closed", now, by, now
+    t.save(update_fields=["status", "updated", "updated_by", "closed_at"])
     TicketNote.objects.create(ticket=t, t=now, by=by, kind="closed", text=note or "Completed")
     completed(t, now, by)
     return t
@@ -139,5 +139,5 @@ def history(task=None, since=None, limit=300):
     if task:
         qs = qs.filter(pm=task)
     if since:
-        qs = qs.filter(updated__gte=since)
-    return list(qs.order_by("-updated")[:limit])
+        qs = qs.filter(closed_at__gte=since)
+    return list(qs.order_by("-closed_at")[:limit])

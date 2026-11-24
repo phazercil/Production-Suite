@@ -788,7 +788,7 @@ def maintenance_page(s, show="open"):
     if show == "open":
         qs = qs.exclude(status="Closed")
     elif show == "done":
-        qs = qs.filter(status="Closed", updated__gte=month)
+        qs = qs.filter(status="Closed", closed_at__gte=month)
     else:
         qs = qs.filter(Q(t__gte=month) | ~Q(status="Closed"))
     tickets = list(qs.order_by("-t")[:200])
@@ -808,7 +808,7 @@ def maintenance_page(s, show="open"):
         rows.sort(key=lambda r: (order.get(r["t"].priority, 1), r["t"].t))
     return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
             "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status__in=("Reviewed", "In progress", "Waiting on parts")).count(),
-                       "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
+                       "done": Ticket.objects.filter(status="Closed", closed_at__gte=week).count()},
             "canWork": s.can("tickets.work")}
 
 

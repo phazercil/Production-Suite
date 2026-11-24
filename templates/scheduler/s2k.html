@@ -23,7 +23,7 @@
   {% for x in S2K %}<tr><td class="nw"><b>{{ x.mo }}</b>{% if x.m %} <span class="note">{{ x.m.status }}</span>{% endif %}</td><td>{{ x.part }}</td><td>{{ x.stageLabel|default:"—" }}</td>
     <td class="n">{% if x.m %}{{ x.own|num }}{% else %}—{% endif %}</td><td class="n">{% if x.m.remaining is not None %}{{ x.m.remaining|num }}{% else %}—{% endif %}</td>
     <td class="n">{% if x.floor is not None %}{{ x.floor|num }}{% else %}—{% endif %}</td>
-    <td class="n">{{ x.inDates|num }}{% if x.scrapSum %} <span class="s2k-sub">+ {{ x.scrapSum|num }} scrap</span>{% endif %}<div class="s2k-sub">{% for e in x.entries %}{{ e.label }}{% if e.no %} #{{ e.no }}{% endif %} {{ e.qty|num }}{% if e.posted %} ✓{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}</div></td>
+    <td class="n">{{ x.inDates|num }}{% if x.scrapSum %} <span class="s2k-sub">+ {{ x.scrapSum|num }} scrap</span>{% endif %}<div class="s2k-sub">{% for e in x.entries %}{{ e.label }}{% if e.no %} #{{ e.no }}{% endif %} {{ e.qty|num }}{% if e.posted %} ✓{% endif %}{% if e.note and not e.posted %} ({{ e.note }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}</div></td>
     <td class="n">{% if x.unposted %}<b>{{ x.unposted }}</b>{% else %}<span class="pill ok">POSTED</span>{% endif %}</td>
     <td>{% for fl in x.flags %}<div class="note bad">{{ fl }}</div>{% empty %}<span class="muted">—</span>{% endfor %}</td></tr>
   {% empty %}<tr><td colspan="9" class="empty">No MO runs finished, end bands completed or pallets packed in these dates.</td></tr>{% endfor %}</tbody></table>

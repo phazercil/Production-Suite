@@ -12,6 +12,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -49,10 +53,63 @@ def _read(path, default):
 
 
 def _write(path, data):
+    """Write JSON through a temporary file of this writer's own (never a shared name), then swap it in."""
     path = Path(path)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, indent=1))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+_held = threading.local()
+LOCK_STALE = 120   # seconds: a lock file older than this was left by a process that died
+
+
+@contextmanager
+def locked(timeout=20):
+    """One update action at a time across every process (the web server and the ticker): reading and changing the
+    state, taking a file into ready/, removing it, and starting the updater. Re-entrant within a thread."""
+    if getattr(_held, "n", 0):
+        _held.n += 1
+        try:
+            yield
+        finally:
+            _held.n -= 1
+        return
+    p = root() / "updates.lock"
+    start = time.time()
+    while True:
+        try:
+            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - p.stat().st_mtime > LOCK_STALE:
+                    p.unlink()
+                    continue
+            except OSError:
+                continue
+            if time.time() - start > timeout:
+                raise UpdError("Another update action is under way. Try again in a moment.")
+            time.sleep(0.1)
+    _held.n = 1
+    try:
+        yield
+    finally:
+        _held.n = 0
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
 
 def state():
@@ -60,10 +117,11 @@ def state():
 
 
 def set_state(**kw):
-    cur = state()
-    cur.update(kw, at=timezone.localtime().isoformat(timespec="seconds"))
-    _write(root() / "state.json", cur)
-    return cur
+    with locked():
+        cur = state()
+        cur.update(kw, at=timezone.localtime().isoformat(timespec="seconds"))
+        _write(root() / "state.json", cur)
+        return cur
 
 
 def policy():
@@ -87,7 +145,11 @@ def backups():
     if r.is_dir():
         for p in r.iterdir():
             m = _read(p / "meta.json", None)
-            if m and int(m.get("revision") or 0) < current()[1]:
+            try:
+                rev = int(m.get("revision") or 0) if isinstance(m, dict) else None
+            except (TypeError, ValueError):
+                rev = None   # a damaged meta.json: not offered
+            if rev is not None and rev < current()[1]:
                 out.append({"version": m.get("version"), "revision": m.get("revision"), "at": m.get("at"), "mtime": p.stat().st_mtime})
     return sorted(out, key=lambda x: x["mtime"], reverse=True)
 
@@ -130,9 +192,14 @@ def busy():
 
 def receive(src_path, name, by, when="now", at=""):
     """Take a checked update file into updates/ready (replacing one waiting there)."""
+    m = check(src_path)   # (checking can take a while: done before taking the lock)
+    with locked():
+        return _receive(src_path, name, by, when, at, m)
+
+
+def _receive(src_path, name, by, when, at, m):
     if busy():
         raise UpdError("An update is being installed right now. Wait for it to finish.")
-    m = check(src_path)
     when, at_iso = _when(when, at)
     for old in (root() / "ready").glob("*.zip"):
         old.unlink()
@@ -162,22 +229,29 @@ def _when(when, at):
 
 
 def schedule(when, at, by):
-    st = state()
-    if st.get("status") != "ready":
-        raise UpdError("There's no update waiting to install.")
-    when, at_iso = _when(when, at)
-    set_state(when=when, whenAt=at_iso, by=by)
+    with locked():
+        st = state()
+        if st.get("status") != "ready":
+            raise UpdError("There's no update waiting to install.")
+        when, at_iso = _when(when, at)
+        set_state(when=when, whenAt=at_iso, by=by)
 
 
 def cancel(by):
-    if busy():
-        raise UpdError("The update is already installing.")
-    for old in (root() / "ready").glob("*.zip"):
-        old.unlink()
-    set_state(status="idle", message=f"Waiting update removed by {by}.", log=[])
+    with locked():
+        if busy():
+            raise UpdError("The update is already installing.")
+        for old in (root() / "ready").glob("*.zip"):
+            old.unlink()
+        set_state(status="idle", message=f"Waiting update removed by {by}.", log=[])
 
 
 def request_goback(by):
+    with locked():
+        _request_goback(by)
+
+
+def _request_goback(by):
     if busy():
         raise UpdError("An update is being installed right now.")
     b = backups()
@@ -270,7 +344,10 @@ def tick(now=None):
                 set_state(status="failed", message="The updater didn't start within 5 minutes. Check the \"Production Suite Updater\" "
                           "scheduled task, or run Setup.exe; nothing was changed.")
         if st.get("status") == "ready" and _due(st, now):
-            launch(st)
+            with locked():
+                st = state()   # read again under the lock: removed or replaced meanwhile from Admin › Updates?
+                if st.get("status") == "ready" and (st.get("job") == "goback" or (root() / "ready" / str(st.get("file") or "")).is_file()):
+                    launch(st)
     except Exception:
         log.exception("update check failed")
 

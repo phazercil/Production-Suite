@@ -3,6 +3,7 @@
   <div class="row"><h2 class="h2 grow">Health</h2><span class="pill {% if H.summary == 'ok' %}ok{% else %}warn{% endif %}">{% if H.summary == 'ok' %}All good{% else %}Needs a look{% endif %}</span>
     <button class="btn ghost" hx-get="/kiosk/v/admin?tab=health" hx-target="#view">Check again</button></div>
   <p class="sub" style="margin-top:4px">Everything the suite depends on, and when it last worked. A machine that is <b>not reporting</b> isn't the same as one that is stopped: its data isn't coming in, so the suite can't tell.</p>
+  {% if H.problems %}<ul class="sub" style="margin:6px 0 0 18px">{% for x in H.problems %}<li><b>{{ x }}</b></li>{% endfor %}</ul>{% endif %}
 
   <div class="hgrid">
     <div class="hcard {% if not H.ticker.ok %}bad{% endif %}"><span>Minute ticker</span><b>{% if H.ticker.ok %}Running{% else %}Not running{% endif %}</b>

@@ -70,10 +70,12 @@ def _feed_sample(m, ls, t):
             log.warning("machine table for %s: %s", m.name, e)
             return None, {"type": "db", "ok": ls.gap < 2, "err": str(e)[:200], "ppm": None, "t": ms(t), "src": prev}
     if m.feed_type == "push":
-        if ls.pushed is not None and ls.pushed_at and (t - ls.pushed_at).total_seconds() < 150:
+        if ls.pushed is not None and ls.pushed_at and -60 < (t - ls.pushed_at).total_seconds() < 150:   # (not a reading from after a missed minute)
             from . import machinedata
-            s = machinedata.add_extras(m, {"ppm": ls.pushed.get("ppm"), "count": ls.pushed.get("count")},
-                                       lambda f: integrations.pick(ls.pushed, f))
+            base = {"ppm": ls.pushed.get("ppm")}
+            if ls.pushed.get("count") not in (None, ""):
+                base["count"] = ls.pushed["count"]
+            s = machinedata.add_extras(m, base, lambda f: integrations.pick(ls.pushed, f))
             return s, {"type": "push", "ok": True, "err": "", "ppm": ls.pushed.get("ppm"), "t": ms(t)}
         return None, {"type": "push", "ok": False, "err": "No reading pushed in the last 2½ minutes", "ppm": None, "t": ms(t)}
     return None, {"type": "none", "ok": False, "err": "No machine feed set", "ppm": None, "t": ms(t)}
@@ -136,7 +138,11 @@ def _tick_one_minute(m, t, owner=None):
         minute = ls.next_tick
     # The machine's readings (a URL, InfluxDB or a database, with timeouts of several seconds) are read with no
     # transaction open, so no lock (on SQLite: the whole database's) is held while waiting on the network.
-    s, feed = sample_for(m, ls, minute)
+    if m.feed_type == "http" and (t - minute).total_seconds() > 90:
+        # a minute being caught up: a URL only gives what the machine reads now, which isn't that minute's reading
+        s, feed = None, {"type": "http", "ok": True, "err": "", "ppm": None, "t": ms(minute), "missed": True}
+    else:
+        s, feed = sample_for(m, ls, minute)
     if (m.error_src or {}).get("type"):
         from . import machineerrors
         try:   # a broken alarm log never stops this minute from counting
@@ -159,9 +165,12 @@ def _tick_one_minute(m, t, owner=None):
         return True
 
 
-def _skip_minute(m, t):
-    """A minute that could not be processed is skipped and flagged on that machine's screen."""
+def _skip_minute(m, t, owner=None):
+    """A minute that could not be processed is skipped and flagged on that machine's screen (only while this ticker
+    still holds the lease, like a counted minute)."""
     with transaction.atomic():
+        if owner and not PlantSettings.objects.filter(pk=1, ticker_owner=owner).exists():
+            raise LeaseLost(owner)
         ls, _ = LineState.objects.select_for_update().get_or_create(machine=m)
         ls.next_tick = (ls.next_tick or t.replace(second=0, microsecond=0)) + timedelta(minutes=1)
         ls.feed = {"type": m.feed_type, "ok": False, "err": "The server could not process this machine's last reading", "ppm": None, "t": ms(t)}
@@ -170,12 +179,15 @@ def _skip_minute(m, t):
 
 def tick_machines(t=None, renew=None, owner=None):
     """Advance every running pleater to the current minute. Each machine and each minute is handled on its
-    own, so a bad reading or a failing feed on one machine never stops counting on the others."""
+    own, so a bad reading or a failing feed on one machine never stops counting on the others.
+    Returns False when the ticker lost its lease during the pass (then nothing else of this pass may run)."""
     t = t or now()
     any_tick = False
+    held = True
     for m in Machine.objects.filter(stage="s1", active=True):
         if renew and not renew():  # keep the single-ticker lock alive through a slow pass; stop if it was lost
             log.warning("ticker lock lost; stopping this pass")
+            held = False
             break
         for _ in range(10):  # at most 10 catch-up minutes per pass
             try:
@@ -184,17 +196,20 @@ def tick_machines(t=None, renew=None, owner=None):
                 any_tick = True
             except LeaseLost:
                 log.warning("ticker lease taken over while reading %s; stopping this pass", m.name)
-                return
+                return False
             except Exception:
                 log.exception("ticker failed for %s", m.name)
                 try:
-                    _skip_minute(m, t)
+                    _skip_minute(m, t, owner)
                     any_tick = True
+                except LeaseLost:
+                    return False
                 except Exception:
                     log.exception("could not record ticker failure for %s", m.name)
                     break
     if any_tick:
         PlantSettings.bump()
+    return held
 
 
 LEASE_SECONDS = 30
@@ -351,13 +366,15 @@ def loop(stop=None, interval=5):
                 if waiting:
                     log.info("plant ticker took over")
                 waiting = False
-                tick_machines(t, renew=lambda: claim_lease(owner), owner=owner)
-                timed_pulls(state, t)
-                try:
-                    from cameras import live
-                    live.keep()          # live camera video (go2rtc) while an RTSP camera is set to it
-                except Exception:  # noqa: BLE001 - never let video stop the plant clock
-                    log.exception("live video")
+                if not tick_machines(t, renew=lambda: claim_lease(owner), owner=owner):
+                    waiting = True   # another ticker has the lease: its pulls, backups and video, not this one's
+                else:
+                    timed_pulls(state, t)
+                    try:
+                        from cameras import live
+                        live.keep()          # live camera video (go2rtc) while an RTSP camera is set to it
+                    except Exception:  # noqa: BLE001 - never let video stop the plant clock
+                        log.exception("live video")
             elif not waiting:
                 waiting = True
                 log.warning("another plant ticker is already running; this one is standing by")

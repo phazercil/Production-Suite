@@ -3,7 +3,8 @@
 The exact measurements are already kept: operator QC checks (length, width, pleat height, side band L and R, and the
 measurements added in Quality › Tolerances) and machine vision. Here they become an individuals chart (I-MR: the
 centre line, control limits at the mean ± 2.66 × the average moving range, and the drawing's limits), Cp and Cpk per
-machine and part, and warnings that catch a line drifting before it makes scrap:
+machine and part (from the within-process spread, average moving range / 1.128) with Pp and Ppk (from the overall
+standard deviation) beside them, and warnings that catch a line drifting before it makes scrap:
 
 - near the limit: a measurement still in spec but past 80% of the tolerance on its side
 - trending: 3 measurements in a row each further from the drawing, on the same side
@@ -72,6 +73,9 @@ def limits(part, key):
     return float(t), float(t) - under, float(t) + over
 
 
+D2_MR = 1.128    # d2 for moving ranges of two: sigma within = average moving range / 1.128
+CAP_MIN_N = 25   # fewer measurements than this: capability is shown as preliminary
+
 def stats(vals, lim):
     n = len(vals)
     if n < 2:
@@ -82,10 +86,19 @@ def stats(vals, lim):
     mrbar = sum(mr) / len(mr) if mr else 0
     out = {"n": n, "mean": mean, "sd": sd, "ucl": mean + D2 * mrbar, "lcl": mean - D2 * mrbar, "mr": mrbar,
            "min": min(vals), "max": max(vals)}
+    # Cp / Cpk use the within-process spread, the average moving range / d2 (1.128 for ranges of 2): what the process
+    # can do when steady. Pp / Ppk use the overall standard deviation: what it actually did, drift included.
+    within = mrbar / D2_MR if mrbar else 0
+    out["sdWithin"] = within
+    out["preliminary"] = n < CAP_MIN_N
+    if lim and within > 0:
+        _, lsl, usl = lim
+        out["cp"] = (usl - lsl) / (6 * within)
+        out["cpk"] = min(usl - mean, mean - lsl) / (3 * within)
     if lim and sd > 0:
         _, lsl, usl = lim
-        out["cp"] = (usl - lsl) / (6 * sd)
-        out["cpk"] = min(usl - mean, mean - lsl) / (3 * sd)
+        out["pp"] = (usl - lsl) / (6 * sd)
+        out["ppk"] = min(usl - mean, mean - lsl) / (3 * sd)
     if lim:
         out["out"] = sum(1 for v in vals if v < lim[1] - qc.EPS or v > lim[2] + qc.EPS)
     return out

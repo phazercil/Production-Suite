@@ -92,6 +92,7 @@
       <td>{% if d.shift_id %}<a href="/supervisor/log/{{ d.shift_id }}/?back={{ here|urlencode }}">Shift</a>{% endif %}{% if canEdit %} · <a class="edit" href="/supervisor/edit/downtime/{{ d.pk }}/?back={{ backq }}">Edit</a>{% endif %}</td></tr>
     {% empty %}<tr><td colspan="10" class="empty">No downtime for these filters.</td></tr>{% endfor %}</tbody></table>
   {% elif f.tab == "events" %}
+    {% if cut %}<p class="flash warn">So much happened in these dates that only events since <b>{{ cut.cutoff|date:"M j, H:i" }}</b> are shown ({{ cut.sources|join:", " }} had more than {{ 3000|num }}). Pick fewer days, a line or a kind to see the rest.</p>{% endif %}
     <table class="st"><thead><tr><th>When</th><th>What</th><th>Line</th><th>Who / what</th><th>What happened</th><th>Before → after</th><th>Why / note</th></tr></thead><tbody>
     {% for e in rows %}<tr><td class="nw">{{ e.t|day }} {{ e.t|clock }}</td><td><span class="pill k-{{ e.kind }}">{{ e.label }}</span></td><td>{{ e.line }}</td><td>{{ e.who }}</td>
       <td>{% if e.href %}<a href="{{ e.href }}?back={{ here|urlencode }}">{{ e.what }}</a>{% else %}{{ e.what }}{% endif %}</td>

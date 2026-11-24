@@ -30,7 +30,8 @@ def _order(m):
 
 
 def _stage_mo(m, stage):
-    """The S2K MO of this order for one stage (its own MO when the order has no stage MOs)."""
+    """The S2K MO of this order for one stage. An order with no stage MOs at all (a legacy single MO) is its own MO
+    for every stage; an order that has stage MOs but not this one gives None (the entry can't be posted yet)."""
     o = _order(m)
     if not o:
         return None
@@ -59,15 +60,16 @@ class _Lookup:
         return self.mos[n]
 
     def run_target(self, number, line):
+        """(the stage MO it posts to or None, the stage, the order MO it was run on or None)"""
         stage = POSTS_TO.get(self.stages.get(line, "s1"))
         if not stage:
-            return None, None   # a line with no S2K MO of its own
+            return None, None, None   # a line with no S2K MO of its own
         m = self.mo(number)
-        return (_stage_mo(m, stage) or m) if m else None, stage
+        return (_stage_mo(m, stage) if m else None), stage, m
 
     def pallet_target(self, number):
         m = self.mo(number)
-        return (_stage_mo(m, "pk") or m) if m else None
+        return _stage_mo(m, "pk") if m else None
 
 
 def _family_numbers(m):
@@ -87,7 +89,33 @@ def floor_total(target, stage, look):
     return tot
 
 
+def _posted():
+    """What has been marked as posted, per entry: {(kind, ref): (total qty posted, last posting, how many postings)}.
+    Postings are a ledger: a change after posting is posted as its own correction, never by editing the first one."""
+    out = {}
+    for k, r, q, t, mo in S2KPost.objects.order_by("t").values_list("kind", "ref", "qty", "t", "mo"):
+        tot, _, n, _ = out.get((k, r), (0, None, 0, ""))
+        out[(k, r)] = (tot + q, t, n + 1, mo)
+    return out
+
+
+def _now_qty(kind, ref):
+    """What an entry that was posted stands at now (0 when it was deleted, voided or its completion undone), its line
+    and its time."""
+    from scheduler.models import Job
+    if kind == "run":
+        r = MoRun.objects.filter(pk=ref).first()
+        return (r.qty - r.scrap, r.line, r.end_time, r.mo) if r else (0, "", None, "")
+    if kind == "pallet":
+        p = PalletTag.objects.filter(pk=ref).first()
+        return ((0 if p.voided else p.qty), p.line, p.t, p.mo) if p else (0, "", None, "")
+    j = Job.objects.select_related("machine", "mo").filter(pk=ref).first()
+    return ((int(j.wip_qty or 0) if j.wip_done else 0), j.machine.name, j.wip_done or j.updated, j.mo.number) if j else (0, "", None, "")
+
+
 def rows(a, b, line="", only_open=False):
+    from django.utils import timezone
+
     from scheduler.models import Job
     look = _Lookup()
     runs = MoRun.objects.filter(end_time__gte=a, end_time__lt=b)
@@ -95,40 +123,75 @@ def rows(a, b, line="", only_open=False):
     jobs = Job.objects.filter(op__in=("eb", "gb"), wip_done__gte=a, wip_done__lt=b, wip_qty__gt=0).select_related("mo", "machine")
     if line:
         runs, pallets, jobs = runs.filter(line=line), pallets.filter(line=line), jobs.filter(machine__name=line)
-    posted = {(k, r) for k, r in S2KPost.objects.values_list("kind", "ref")}
+    posted = _posted()
     by = {}
 
-    def group(target, typed, part, stage):
-        key = target.pk if target else f"?{typed}"
+    def group(target, typed, part, stage, order=None):
+        if target:
+            key = target.pk
+        else:
+            key = f"?{typed}:{stage}"
         if key not in by:
             st = target.stage if target and target.stage else stage
-            by[key] = {"mo": target.s2k_number if target else typed, "part": target.part if target else part, "m": target, "stage": st,
-                       "stageLabel": STAGE_LABEL.get(st, ""), "entries": []}
+            x = {"mo": target.s2k_number if target else typed, "part": target.part if target else part, "m": target, "stage": st,
+                 "stageLabel": STAGE_LABEL.get(st, ""), "entries": [], "blocked": ""}
+            if not target:
+                o = _order(order)
+                x["blocked"] = (f"order {o.number} has no {STAGE_LABEL.get(stage, stage)} MO from S2K: can't be posted until S2K has it" if o
+                                else "not an MO the suite has from S2K: can't be posted until it's fixed")
+            by[key] = x
         return by[key]
 
+    def add(x, kind, label, ref, ln, t, qty, scrap=0, no="", typed=""):
+        tot, last, n, _ = posted.get((kind, ref), (0, None, 0, ""))
+        e = {"kind": kind, "label": label, "id": ref, "line": ln, "t": t, "qty": qty, "scrap": scrap, "no": no, "typed": typed,
+             "posted": bool(n) and tot == qty, "was": tot if n else None, "lastPost": last}
+        if n and tot != qty:   # changed since it was posted: what's left to post is the difference
+            e["label"] = f"{label} · correction"
+            e["qty"] = qty - tot
+            e["note"] = f"was posted as {tot:,} on {timezone.localtime(last):%b %-d}, now {qty:,}"
+        x["entries"].append(e)
+
+    seen = set()
     for r in runs.order_by("end_time"):
-        target, stage = look.run_target(r.mo, r.line)
+        target, stage, m = look.run_target(r.mo, r.line)
         if not stage:
             continue
-        x = group(target, r.mo, r.item, stage)
-        x["entries"].append({"kind": "run", "label": "MO run", "id": r.pk, "line": r.line, "t": r.end_time, "qty": r.qty - r.scrap, "scrap": r.scrap,
-                             "no": "", "typed": r.mo, "posted": ("run", r.pk) in posted})
+        seen.add(("run", r.pk))
+        add(group(target, r.mo, r.item, stage, m), "run", "MO run", r.pk, r.line, r.end_time, r.qty - r.scrap, r.scrap, typed=r.mo)
     for j in jobs.order_by("wip_done"):
-        target = _stage_mo(j.mo, "eb") or j.mo
-        x = group(target, j.mo.number, j.mo.part, "eb")
-        x["entries"].append({"kind": "eb", "label": "Glue bead" if j.op == "gb" else "End bands", "id": j.pk, "line": j.machine.name, "t": j.wip_done, "qty": int(j.wip_qty), "scrap": 0,
-                             "no": "", "typed": j.mo.number, "posted": ("eb", j.pk) in posted})
+        seen.add(("eb", j.pk))
+        add(group(_stage_mo(j.mo, "eb"), j.mo.number, j.mo.part, "eb", j.mo), "eb", "Glue bead" if j.op == "gb" else "End bands",
+            j.pk, j.machine.name, j.wip_done, int(j.wip_qty), typed=j.mo.number)
     for p in pallets.order_by("t"):
-        target = look.pallet_target(p.mo)
-        x = group(target, p.mo, p.part, "pk")
-        x["entries"].append({"kind": "pallet", "label": "Pallet", "id": p.pk, "line": p.line, "t": p.t, "qty": p.qty, "scrap": 0,
-                             "no": p.pallet_no, "typed": p.mo, "posted": ("pallet", p.pk) in posted})
+        seen.add(("pallet", p.pk))
+        add(group(look.pallet_target(p.mo), p.mo, p.part, "pk", look.mo(p.mo)), "pallet", "Pallet", p.pk, p.line, p.t, p.qty, no=p.pallet_no, typed=p.mo)
+    # posted entries that changed since (voided, undone, deleted or a new quantity), whatever their dates: a reversal or
+    # correction is owed until it's posted too
+    for (kind, ref), (tot, last, n, mo_posted) in posted.items():
+        if (kind, ref) in seen:
+            continue
+        now_q, ln, t, typed = _now_qty(kind, ref)
+        if now_q == tot or (line and ln and ln != line):
+            continue
+        target = look.mo(mo_posted)
+        x = group(target, mo_posted, "", target.stage if target else "", target)
+        x["blocked"] = ""   # posted to that S2K MO before: the correction goes to the same one
+        label = {"run": "MO run", "pallet": "Pallet", "eb": "Station job"}.get(kind, kind)
+        x["entries"].append({"kind": kind, "id": ref, "line": ln, "t": t or last, "qty": now_q - tot, "scrap": 0, "no": "", "typed": typed or mo_posted,
+                             "posted": False, "was": tot, "lastPost": last,
+                             "label": f"{label} · {'reversal' if not now_q else 'correction'}",
+                             "note": f"posted as {tot:,} on {timezone.localtime(last):%b %-d}, " + ("since voided, undone or deleted" if not now_q else f"now {now_q:,}")})
     out = []
     for x in sorted(by.values(), key=lambda v: (str(v["mo"]), v["stage"])):
         m, flags = x["m"], []
         x["inDates"] = sum(e["qty"] for e in x["entries"])
         x["scrapSum"] = sum(e["scrap"] for e in x["entries"])
         x["floor"] = None
+        if x["blocked"]:
+            flags.append(x["blocked"])
+        if any(e.get("note") and not e["posted"] for e in x["entries"]):
+            flags.append("changed after it was posted: post the correction (it's in the CSV)")
         if m:
             x["own"] = own_qty(m)
             x["floor"] = floor_total(m, x["stage"], look)
@@ -150,8 +213,6 @@ def rows(a, b, line="", only_open=False):
             odd = sorted({e["typed"] for e in x["entries"] if e["kind"] == "pallet"} - {m.number, m.s2k_number, m.base})
             if odd:
                 flags.append(f"pallet tags say MO {', '.join(odd)}: posted here, to the packaging MO")
-        else:
-            flags.append("not an MO the suite has from S2K")
         x["flags"] = flags
         x["unposted"] = sum(1 for e in x["entries"] if not e["posted"])
         if only_open and not x["unposted"]:
@@ -161,19 +222,32 @@ def rows(a, b, line="", only_open=False):
 
 
 def csv_rows(R):
-    yield ["Type", "Stage", "S2K MO", "Part", "Line", "When", "Good qty", "Scrap", "Pallet #", "Suite id"]
+    yield ["Type", "Stage", "S2K MO", "Part", "Line", "When", "Good qty", "Scrap", "Pallet #", "Suite id", "Note"]
     for x in R:
+        if x["blocked"]:
+            continue   # no S2K MO to post to yet
         for e in x["entries"]:
             if not e["posted"]:
-                yield [e["label"], x["stageLabel"], x["mo"], x["part"], e["line"], e["t"].isoformat(timespec="minutes"), e["qty"],
-                       e["scrap"] if e["kind"] == "run" else "", e["no"], f"{e['kind']}-{e['id']}"]
+                yield [e["label"], x["stageLabel"], x["mo"], x["part"], e["line"], e["t"].isoformat(timespec="minutes") if e["t"] else "", e["qty"],
+                       e["scrap"] if e["kind"] == "run" else "", e["no"], f"{e['kind']}-{e['id']}", e.get("note", "")]
 
 
 def mark(R, by, now):
+    """Record each entry in the CSV as posted: its first posting, or a correction/reversal for the difference."""
+    from django.db import IntegrityError, transaction
+    from django.db.models import Max
     n = 0
     for x in R:
+        if x["blocked"]:
+            continue
         for e in x["entries"]:
-            if not e["posted"]:
-                _, made = S2KPost.objects.get_or_create(kind=e["kind"], ref=e["id"], defaults={"mo": x["mo"], "qty": e["qty"], "t": now, "by": by})
-                n += made
+            if e["posted"] or not e["qty"] and e["was"] is None:
+                continue
+            try:
+                with transaction.atomic():
+                    seq = (S2KPost.objects.filter(kind=e["kind"], ref=e["id"]).aggregate(n=Max("seq"))["n"] or 0) + 1
+                    S2KPost.objects.create(kind=e["kind"], ref=e["id"], seq=seq, mo=x["mo"], qty=e["qty"], t=now, by=by)
+                n += 1
+            except IntegrityError:   # marked at the same moment from another screen
+                pass
     return n

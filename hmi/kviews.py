@@ -803,7 +803,7 @@ def co_pick(line, number):
     m = engine.line_of(line)
     cur = engine.active_run(m) if m else None
     mo = engine.open_mo(str(number or "").strip()) if number else None
-    if not (cur and engine.unattended(cur) and cur.mo_id and cur.count and mo and mo.pk != cur.mo_id):
+    if not (cur and engine.unattended(cur) and cur.mo_id and cur.count and mo and mo.pk != cur.mo_id) or (cur.state == "changeover" and cur.co):
         return {"ask": False}
     stops = list(Downtime.objects.filter(shift=cur).order_by("start_time"))
     return {"ask": True, "old": cur.mo, "new": mo, "since": cur.start, "made": cur.count, "stops": stops, "stopped": cur.stop_start}

@@ -63,3 +63,43 @@ class StageMOs(TestCase):
                                  start_time=now - timedelta(hours=3), end_time=now - timedelta(hours=1))
         R = s2k.rows(now - timedelta(days=1), now + timedelta(minutes=1))
         self.assertEqual([(x["mo"], x["stage"], x["inDates"]) for x in R], [("312152-030", "eb", 800)])   # Arts & Crafts: no S2K MO
+
+    def test_changes_after_posting_are_corrections(self):
+        from scheduler.models import Job
+        from plant.models import Machine
+        now = timezone.now()
+        jsr = Machine.objects.create(name="JSR2", stage="eb")
+        j = Job.objects.create(mo=self.order, op="eb", machine=jsr, req_start=now - timedelta(hours=5),
+                               wip_started=now - timedelta(hours=4), wip_qty=900, wip_done=now - timedelta(hours=2))
+        p = PalletTag.objects.create(part="MG4107HP", mo="312153-030", line="Barbara", pallet_no=9, qty=1500, t=now - timedelta(minutes=30), packed_by="x")
+        win = (now - timedelta(days=1), now + timedelta(minutes=1))
+        self.assertEqual(s2k.mark(s2k.rows(*win), "me", now), 2)
+        self.assertEqual(s2k.rows(*win, only_open=True), [])
+        # undo the station job, fix its quantity, complete it again; void the pallet
+        Job.objects.filter(pk=j.pk).update(wip_qty=950)
+        PalletTag.objects.filter(pk=p.pk).update(voided=True)
+        R = s2k.rows(*win, only_open=True)
+        es = {e["kind"]: e for x in R for e in x["entries"] if not e["posted"]}
+        self.assertEqual((es["eb"]["qty"], es["eb"]["label"]), (50, "End bands · correction"))
+        self.assertEqual((es["pallet"]["qty"], es["pallet"]["label"]), (-1500, "Pallet · reversal"))
+        self.assertTrue(any("Pallet · reversal" in r[0] for r in s2k.csv_rows(R)))
+        self.assertEqual(s2k.mark(R, "me", now), 2)
+        self.assertEqual(s2k.rows(*win, only_open=True), [])
+        # an undone completion that's never redone: reversed in full, even outside the dates shown
+        Job.objects.filter(pk=j.pk).update(wip_done=None)
+        R = s2k.rows(now - timedelta(days=30), now - timedelta(days=29), only_open=True)
+        self.assertEqual([e["qty"] for x in R for e in x["entries"]], [-950])
+
+    def test_missing_stage_mo_is_blocked_not_posted_elsewhere(self):
+        from plant.models import Machine
+        Machine.objects.create(name="Foam GB2", stage="gb")
+        MO.objects.filter(stage="eb").delete()       # the order has no Stage 2 MO from S2K
+        now = timezone.now()
+        MoRun.objects.create(line="Foam GB2", mo=self.order.number, item=self.order.part, qty=500, scrap=0,
+                             start_time=now - timedelta(hours=3), end_time=now - timedelta(hours=1))
+        R = s2k.rows(now - timedelta(days=1), now + timedelta(minutes=1))
+        self.assertEqual(len(R), 1)
+        self.assertIsNone(R[0]["m"])
+        self.assertIn("has no Stage 2 MO", R[0]["blocked"])
+        self.assertEqual(list(s2k.csv_rows(R))[1:], [])
+        self.assertEqual(s2k.mark(R, "me", now), 0)

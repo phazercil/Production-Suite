@@ -5,7 +5,7 @@
   {% include "hmi/k/admin/_msg.html" with m=msg %}
   <form class="dbplan" hx-post="/kiosk/do/dbBackupPlan" hx-target="#dbbackup" hx-swap="outerHTML" style="margin-top:12px">
     <h3 class="h3">Scheduled backups and a copy off this server</h3>
-    <p class="note">A backup kept only on this server is lost with its disk. Copy each one to a share on another machine on the plant network; each copy is read back and test-restored.</p>
+    <p class="note">A backup kept only on this server is lost with its disk. Copy each one to a share on another machine on the plant network; each copy is read back and checked. SQLite copies are test-restored; MariaDB copies get a dump check (read to the end, every table there), which is not a full restore: test a restore into a spare database now and then.</p>
     <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:6px">
       <label class="fld"><span>Back up every (hours, 0 = by hand)</span><input name="every" inputmode="decimal" value="{{ DB.off.every|default:0 }}" style="width:120px"></label>
       <label class="fld grow"><span>Copy to (a share on another machine)</span><input name="copyTo" value="{{ DB.off.copyTo }}" placeholder="\\nas01\backups\suite  or  /mnt/plant-nas/suite"></label>

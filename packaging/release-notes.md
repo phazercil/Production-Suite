@@ -7,6 +7,51 @@
   - Each stage MO is checked against S2K's own quantity and "still to make" for that MO.
   - Packaging is checked against what Stage 1 made good, allowing for products that use two stage units per finished filter.
   - The CSV has a Stage column and the S2K MO number with its current revision.
+  - **Postings are kept as a record that's never edited.** If a station job, pallet or MO run changes after it was marked as posted (a new quantity, a completion undone, a pallet voided, a run deleted), the difference shows as a **correction** or **reversal** to post, even outside the dates shown.
+  - When an order has stage MOs but not the one a line posts to (no 2MG… MO yet, say), its entries are flagged and held back, never posted to another stage's MO.
+- **A changeover done with nobody logged in.** When Start of shift finds the line ran another MO with nobody on it, it asks when it changed over:
+  - **One of this shift's stops:** that stop becomes the changeover. What was made before it stays on the old MO, and what was made after goes to the new one.
+  - **Now:** the line is still stopped for the changeover.
+  - **Before this shift:** a supervisor is told to sort out the earlier logs.
+- **Stations:** two screens starting work on one station at the same moment can't both start; the database allows one MO under way per station. Quantity updates no longer overwrite each other.
+- **Maintenance inventory:**
+  - A take-back pressed twice at once only credits the stock once.
+  - A PM's parts list is only used once per request.
+  - Requests now keep when they were completed. MTTR, PM on-time and "completed this week" use it, so a note added later no longer moves them.
+- **Reports, OEE:**
+  - Availability is now running time against **planned production time** (the Schedule's shifts less breaks) for the plant and each line, not against the minutes that happened to have readings.
+  - When readings cover less than 90% of the planned time, the report says so.
+  - An MO run spanning two days puts each day's share of its scrap and output on that day.
+- **Quality, SPC:**
+  - Cp/Cpk now use the within-process spread (average moving range ÷ 1.128). Pp/Ppk (overall spread) are shown beside them.
+  - Capability from under 25 measurements is marked preliminary.
+- **Admin › Health:**
+  - "All good" now also checks data sources, sensors in fault or alarm, live video and the off-server backup copy.
+  - The page lists what needs a look.
+  - MariaDB off-server copies are labelled as a dump check, not a test restore.
+- **Supervisor › Timeline:** when a busy period has more events than it can load, it says from when the list is complete instead of leaving some out silently.
+- **Switch person:** the list of names is only given to a screen where someone is signed in.
+- **Fixes:**
+  - **Machine counts:** a push-feed machine with no counter now counts from its speed instead of recording 0.
+  - **Ticker:**
+    - A reading isn't stamped onto minutes being caught up.
+    - A ticker that lost its lease no longer runs pulls, backups or video.
+  - **Downtime:**
+    - No more downtime entries that end before they start.
+    - A stop, the QC due after a changeover and a pleats override carry into the next log at a shift or operator change.
+  - **Changeovers:**
+    - End order needs the count, as a whole number, and locks the MO while it updates it.
+    - Picking up a passed-over changeover with an MO scanned keeps the line in the changeover.
+    - Passing over a changeover in the first seconds of a shift names the new shift.
+  - **Shifts:** shift names follow each machine's own schedule.
+  - **Sign-in:**
+    - Wrong-PIN limits count per address even without cookies.
+    - The kiosk's automatic ping no longer keeps an idle shift lead signed in.
+  - **Scheduler:**
+    - Pacing weighs each upstream line by what it makes, not by time.
+    - A time split before part 1 can start keeps part 1 on the board, flagged.
+  - **Updates:** state writes and the waiting file are now safe when the web server and the ticker act at once.
+  - **Settings:** a `.env` value with a comment after it is read correctly.
 
 ## What's new in 1.9.12
 

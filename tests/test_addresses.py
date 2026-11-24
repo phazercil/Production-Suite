@@ -42,6 +42,7 @@ class Addresses(TestCase):
         self.assertIn("Pick your name", r["error"])
         self.assertFalse(login(pin="4444", userId=Person.objects.get(pin="9999").pk, switch=True)["ok"])   # someone else's name
         self.assertTrue(login(pin="4444", userId=lead.pk, switch=True)["ok"])
+        self.assertEqual(Client().get("/api/hmi/people").status_code, 403)   # only for a screen someone is signed in on
         names = self.c.get("/api/hmi/people").json()["people"]
         self.assertIn(lead.name, [x["name"] for x in names])
         self.assertNotIn("pin", names[0])
