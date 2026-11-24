@@ -71,6 +71,14 @@ def todays_mos(keep=""):
     return [{"number": m.number, "part": m.part, "qty": m.qty} for m in qs.distinct().order_by("due", "number")]
 
 
+def _today():
+    """Today, local: [midnight, next midnight) as aware times. (t__date needs MariaDB's time zone tables, which a
+    Windows install often hasn't got: then it finds nothing.)"""
+    from plant.util import at_wall
+    d = timezone.localdate()
+    return at_wall(d, 0), at_wall(d, 1440)
+
+
 def _live(qs):
     return qs.filter(voided=False)
 
@@ -80,8 +88,8 @@ def next_pallet(mo="", part=""):
     if mo:
         qs = _live(PalletTag.objects.filter(mo=mo))
     elif part:
-        today = timezone.localdate()
-        qs = _live(PalletTag.objects.filter(part=part, mo="", t__date=today))
+        a, b = _today()
+        qs = _live(PalletTag.objects.filter(part=part, mo="", t__gte=a, t__lt=b))
     else:
         return 1
     return (qs.aggregate(m=Max("pallet_no"))["m"] or 0) + 1
@@ -124,7 +132,8 @@ def create(p, me):
             return {"ok": False, "error": f"MO {mo} is for {m.part}, not {part}."}
         dup = _live(PalletTag.objects.filter(mo=mo, pallet_no=pal)).first()
     else:
-        dup = _live(PalletTag.objects.filter(part=part, mo="", pallet_no=pal, t__date=timezone.localdate())).first()
+        a, b = _today()
+        dup = _live(PalletTag.objects.filter(part=part, mo="", pallet_no=pal, t__gte=a, t__lt=b)).first()
     if dup:
         return {"ok": False, "error": f"Pallet {pal} already has a tag ({dup.tag_no}, {dup.qty:,} pcs by {dup.packed_by}). "
                                       f"Use pallet {next_pallet(mo, part)}, or void the old tag first."}

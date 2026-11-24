@@ -12,7 +12,6 @@ from scheduler import views as sch
 from quality import viewer as fviewer
 from quality import views as quality
 from supervisor import views as supervisor
-from maintenance import views as maintenance
 from packkiosk import views as packkiosk
 from cameras import views as cameras
 from sensors import views as sensors

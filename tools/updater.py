@@ -48,7 +48,9 @@ WIN = os.name == "nt"
 
 
 class Failed(Exception):
-    pass
+    def __init__(self, msg, recorded=False):
+        super().__init__(msg)
+        self.recorded = recorded   # the outcome (what was put back, where) is already in state.json: keep it
 
 
 # ------------------------------------------------------------------ state and log
@@ -367,7 +369,7 @@ class Run:
                 self.services.start()
                 raise Failed(why)
             self.back_out(b, before, old_r, stage, why, m["hasPackages"])
-            raise Failed(why)
+            raise Failed(why, recorded=True)
         # the root-owned updater and network helper come out of the update file: before it is deleted
         self.refresh_root_copy(zip_path)
         try:
@@ -445,7 +447,7 @@ class Run:
             self.services.start()
             self.state(status="failed", message=f"Going back didn't finish ({why}). Check logs/update.log, or run Setup.exe.",
                        finished=datetime.now().astimezone().isoformat(timespec="seconds"))
-            raise Failed(why)
+            raise Failed(why, recorded=True)
         shutil.rmtree(b, ignore_errors=True)  # used up: the next Go back goes one further
         self.state(status="done", message=f"Went back to v{meta['version']} rev {meta['revision']}.",
                    finished=datetime.now().astimezone().isoformat(timespec="seconds"))
@@ -530,8 +532,9 @@ def main(argv=None):
         # Always say why, in Admin > Updates and the log, including failures before anything was installed
         # (e.g. "go back" with no earlier version), so a request never just disappears.
         print(f"Failed: {e}", flush=True)
-        extra = {} if run.lines else {"job": args.job}
-        run.state(status="failed", message=str(e), finished=datetime.now().astimezone().isoformat(timespec="seconds"), **extra)
+        if not e.recorded:
+            extra = {} if run.lines else {"job": args.job}
+            run.state(status="failed", message=str(e), finished=datetime.now().astimezone().isoformat(timespec="seconds"), **extra)
         return 1
     finally:
         try:

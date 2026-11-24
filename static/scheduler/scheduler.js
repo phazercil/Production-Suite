@@ -454,7 +454,7 @@ async function sizeDrag(d){
   const lines=S.cfg.machines.filter(m=>m.stage===d.op);d.dur={};
   await Promise.all(lines.map(async m=>{
     const j=await fetch("/api/scheduler/preview",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRFToken":csrf()},
-      body:JSON.stringify({moId:d.moId,op:d.op,machineId:m.id,reqStart:Date.now()})}).then(r=>r.json()).catch(()=>null);   // quietly: no toasts mid-drag
+      body:JSON.stringify({moId:d.moId,op:d.op,part:d.part||1,machineId:m.id,reqStart:Date.now()})}).then(r=>r.json()).catch(()=>null);   // quietly: no toasts mid-drag
     if(j&&j.ok&&j.res)d.dur[m.id]={co:j.res.coMin||0,run:j.res.runMin||0}}));
 }
 /* the time `mins` working minutes after t on line mid (its shifts, breaks left out); past the hours on the board,

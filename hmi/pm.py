@@ -70,7 +70,7 @@ def status(task, now, open_ticket=None):
     eta = None
     if task.active and left > 0:
         r = rate(task, now)
-        if r:
+        if r and left / r <= 3650:   # beyond 10 years at this pace: no date (and none past year 9999)
             eta = now + timedelta(days=left / r)
     return {"used": u, "left": left, "pct": pct, "state": state, "eta": eta, "ticket": open_ticket}
 

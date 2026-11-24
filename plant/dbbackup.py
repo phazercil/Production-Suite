@@ -106,7 +106,14 @@ def _dump_mariadb(dest):
     d = settings.DATABASES["default"]
     conn = MySQLdb.connect(host=d.get("HOST") or "127.0.0.1", port=int(d.get("PORT") or 3306), user=d.get("USER") or "",
                            password=d.get("PASSWORD") or "", database=d["NAME"], charset="utf8mb4")
-    lit = getattr(conn, "escape", None) or (lambda v: conn.literal(v).decode("utf-8", "surrogateescape"))
+    def lit(v):
+        """A SQL literal for one value. Binary (pictures) as a hex literal like mysqldump --hex-blob, so the file stays
+        valid UTF-8; mysqlclient's literal() gives bytes, PyMySQL's a str."""
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            b = bytes(v)
+            return "0x" + b.hex() if b else "''"
+        r = conn.literal(v)
+        return r.decode("utf-8", "surrogateescape") if isinstance(r, (bytes, bytearray)) else r
     try:
         c = conn.cursor()
         c.execute("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ")

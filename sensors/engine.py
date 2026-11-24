@@ -267,7 +267,7 @@ def condition(r, s, t, clearing=False):
     if r.op == "eq":
         return abs(v - a) <= max(db, 1e-9)
     if r.op == "ne":
-        return abs(v - a) > max(db, 1e-9) if not clearing else abs(v - a) > 1e-9
+        return abs(v - a) > (max(db, 1e-9) if clearing else 1e-9)   # alarms on any change; clears back within the deadband
     if b is None:
         return False
     lo, hi = sorted((a, b))
@@ -392,12 +392,16 @@ def check_rule(r, s, t, state=None):
 
 def check_rules(s, t):
     state = machine_state(s.machine)
-    for r in s.rules.filter(enabled=True).select_related("alarm"):
+    for pk in list(s.rules.filter(enabled=True).values_list("pk", flat=True)):
         try:
             with transaction.atomic():
-                check_rule(r, s, t, state)
+                # read under a lock: a pushed reading and the ticker can check the same rule at once, and only one
+                # of them may open (or close) its alarm and maintenance request
+                r = SensorRule.objects.select_for_update().select_related("alarm").filter(pk=pk, enabled=True).first()
+                if r:
+                    check_rule(r, s, t, state)
         except Exception:  # noqa: BLE001 - a broken rule never stops the others
-            log.exception("sensor rule %s", r.pk)
+            log.exception("sensor rule %s", pk)
 
 
 def check_all(t):

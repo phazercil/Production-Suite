@@ -155,8 +155,11 @@ def map_item(src, item, now, lines, specs):
 
 
 def _spec(item, specs):
+    """The part's specs: its own, else the longest spec key it starts with (MG3672 before MG36)."""
     k = part_key(item)
-    return specs.get(k) or next((s for key, s in specs.items() if k.startswith(key)), None)
+    if not k:
+        return None
+    return specs.get(k) or next((specs[key] for key in sorted(specs, key=len, reverse=True) if key and k.startswith(key)), None)
 
 
 def ingest(src, payload):
@@ -194,7 +197,8 @@ def ingest(src, payload):
                     target = {"len": sp.len, "wid": sp.wid, "ph": sp.ph, "sbl": sp.sb, "sbr": sp.sb}
                     tols = tols if tols is not None else qc.plant_tols()
                     spec = {"len": "len", "wid": "wid", "ph": "ph", "sbl": "sb", "sbr": "sb"}
-                    passed = all(qc.in_tol(v, target[k], spec[k], {"tol": sp.tol}, tols) for k, v in r["vals"].items() if v is not None)
+                    passed = all(qc.in_tol(v, target[k], spec[k], {"tol": sp.tol}, tols) for k, v in r["vals"].items()
+                                 if v is not None and target.get(k) is not None)   # a dimension the specs don't have isn't judged
                 extra = {k: v for k, v in r["raw"].items() if isinstance(v, (int, float, str, bool)) and len(str(v)) < 200} if isinstance(r["raw"], dict) else {}
                 AutoQC.objects.create(source=src, source_name=src.name, shift=sh, t=r["t"], line=r["line"], mo=mo, item=part,
                                       passed=bool(passed), data=dict(list(extra.items())[:40]), **r["vals"])

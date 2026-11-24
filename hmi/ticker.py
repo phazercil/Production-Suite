@@ -128,21 +128,26 @@ def _tick_one_minute(m, t):
         if t < ls.next_tick:
             return False
         minute = ls.next_tick
-        s, feed = sample_for(m, ls, minute)
-        if (m.error_src or {}).get("type"):
-            from . import machineerrors
-            try:
-                with transaction.atomic():  # a broken alarm log never stops this minute from counting
-                    machineerrors.collect(m, ls, s, minute)
-            except Exception as e:  # noqa: BLE001
-                log.warning("machine errors for %s: %s", m.name, e)
-            if s is not None and machineerrors.is_error(m, s.get("error")):
-                feed["error"] = machinedata_text(s.get("error"), s.get("errorText"))
-        ls.feed = feed
-        ls.save(update_fields=["feed", "demo_idx"])
+    # The machine's readings (a URL, InfluxDB or a database, with timeouts of several seconds) are read with no
+    # transaction open, so no lock (on SQLite: the whole database's) is held while waiting on the network.
+    s, feed = sample_for(m, ls, minute)
+    if (m.error_src or {}).get("type"):
+        from . import machineerrors
+        try:   # a broken alarm log never stops this minute from counting
+            machineerrors.collect(m, ls, s, minute)
+        except Exception as e:  # noqa: BLE001
+            log.warning("machine errors for %s: %s", m.name, e)
+        if s is not None and machineerrors.is_error(m, s.get("error")):
+            feed["error"] = machinedata_text(s.get("error"), s.get("errorText"))
+    with transaction.atomic():
+        cur = LineState.objects.select_for_update().get(pk=ls.pk)
+        if cur.next_tick != minute:
+            return True        # done meanwhile by another pass: nothing to count twice
+        cur.feed, cur.demo_idx = feed, ls.demo_idx
+        cur.save(update_fields=["feed", "demo_idx"])
         _sensors_from_feed(m, s, minute)
         engine.tick(m, s, minute)
-        LineState.objects.filter(pk=ls.pk).update(next_tick=minute + timedelta(minutes=1))
+        LineState.objects.filter(pk=cur.pk).update(next_tick=minute + timedelta(minutes=1))
         return True
 
 

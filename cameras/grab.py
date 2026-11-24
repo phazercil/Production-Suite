@@ -69,8 +69,17 @@ def credentials(cam):
     return v.get(cam.env_user, ""), v.get(cam.env_password, "")
 
 
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow a camera's redirect only to another plant-network http(s) address (checked like the one typed in)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        from urllib.parse import urljoin
+        check_url("http", urljoin(req.full_url, newurl))   # CamError if it points off the plant network
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _opener(url, user, pw):
-    hs = [urllib.request.ProxyHandler({})]   # straight to the camera, never through a proxy
+    hs = [urllib.request.ProxyHandler({}), _SafeRedirect()]   # straight to the camera, never through a proxy
     if user or pw:
         mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
         mgr.add_password(None, url, user, pw)
@@ -79,6 +88,8 @@ def _opener(url, user, pw):
 
 
 def _http_error(e):
+    if isinstance(e, CamError):   # e.g. a redirect off the plant network
+        return e
     code = getattr(e, "code", None)
     if code == 401:
         return CamError("The camera refused the user name or password (401).")
@@ -228,6 +239,23 @@ class Reader(threading.Thread):
                 self.img, self.t, self.err = buf[a:b + 2], time.time(), ""
                 buf = buf[b + 2:]
 
+    def _pipe(self, f):
+        """read(n) on ffmpeg's output that waits at most a second at a time, so a stream that hangs without closing
+        still lets go when nobody watches, and gives up after 20 s with no data (then connects again)."""
+        import os
+        import select
+        fd, last = f.fileno(), [time.time()]
+
+        def read(n):
+            while not self.stop.is_set() and time.time() - self.seen < IDLE:
+                if select.select([fd], [], [], 1.0)[0]:
+                    last[0] = time.time()
+                    return os.read(fd, n)
+                if time.time() - last[0] > 20:
+                    raise CamError("The camera stopped sending video (nothing for 20 seconds); connecting again.")
+            return b""
+        return read
+
     def _rtsp(self):
         exe = ffmpeg()
         if not exe:
@@ -246,7 +274,7 @@ class Reader(threading.Thread):
         with tempfile.TemporaryFile() as errf:
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL)
             try:
-                self._frames(self.proc.stdout.read1 if hasattr(self.proc.stdout, "read1") else self.proc.stdout.read)
+                self._frames(self._pipe(self.proc.stdout))
             finally:
                 if self.proc and self.proc.poll() is None:
                     self.proc.kill()

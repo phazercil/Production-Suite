@@ -23,6 +23,11 @@ class BadPeriod(ValueError):
     pass
 
 
+
+def _md(d):
+    """Mon 3/9 (strftime's %-m is glibc-only: Windows refuses it)."""
+    return f"{d.strftime('%a')} {d.month}/{d.day}"
+
 def _aware(d, h=0):
     return timezone.make_aware(datetime(d.year, d.month, d.day, h))
 
@@ -47,7 +52,7 @@ def parse_period(p):
         if kind == "week":
             d0 = date.fromisoformat(val)
             d0 -= timedelta(days=d0.weekday())  # Monday
-            kids = [(f"day:{(d0 + timedelta(days=i)).isoformat()}", (d0 + timedelta(days=i)).strftime("%a %-m/%-d") if hasattr(d0, "strftime") else "",
+            kids = [(f"day:{(d0 + timedelta(days=i)).isoformat()}", _md(d0 + timedelta(days=i)),
                      _aware(d0 + timedelta(days=i)), _aware(d0 + timedelta(days=i + 1))) for i in range(7)]
             return {"key": f"week:{d0.isoformat()}", "kind": kind, "label": f"Week of {d0.strftime('%b')} {d0.day}, {d0.year}",
                     "start": _aware(d0), "end": _aware(d0 + timedelta(days=7)), "children": kids, "parent": f"month:{d0.year}-{d0.month:02d}"}

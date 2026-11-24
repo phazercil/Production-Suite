@@ -8,7 +8,7 @@ completed, planned maintenance (PM schedule and PM history), the inventory, and 
 People with "Open Maintenance" (Admin › Permissions). Changing the PM schedule needs "PM schedule", logging a job
 done needs "Work maintenance requests". PM rules are in hmi/pm.py and hmi/engine.py."""
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.db.models import Count, Max, Q, Sum
 from django.http import HttpResponseRedirect
@@ -199,10 +199,10 @@ def do(request, name):
     else:
         p = {k: request.POST.get(k) for k in request.POST if k not in ("csrfmiddlewaretoken", "back")}
         r = engine.execute(name, p, engine.Ctx(user=me))
-    base = back.split("#")[0]
-    base = "&".join(x for x in base.split("&") if not x.startswith(("msg=", "err=", "edit="))).replace("?&", "?")
-    sep = "&" if "?" in base else "?"
-    msg = urlencode({"msg": r.get("msg") or "Saved."}) if r.get("ok") else urlencode({"err": r.get("error") or "That didn't save."})
+    u = urlsplit(back)
+    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if k not in ("msg", "err", "edit")]   # the last answer goes
+    q.append(("msg", r.get("msg") or "Saved.") if r.get("ok") else ("err", r.get("error") or "That didn't save."))
     if not r.get("ok") and name == "itemSave" and request.POST.get("id"):
-        msg += "&edit=" + str(request.POST.get("id"))
-    return HttpResponseRedirect(f"{base}{sep}{msg}" + (f"#{request.POST.get('anchor')}" if request.POST.get("anchor") else ""))
+        q.append(("edit", str(request.POST.get("id"))))
+    anchor = request.POST.get("anchor") or ""
+    return HttpResponseRedirect(urlunsplit(("", "", u.path, urlencode(q), anchor)))

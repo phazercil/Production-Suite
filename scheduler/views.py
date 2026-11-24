@@ -233,7 +233,8 @@ def del_job(request):
 def preview(request):
     p = body(request)
     world = load_world()
-    key = f"{p.get('moId')}__{p.get('op')}"
+    part = to_int(p.get("part") or 1, "part")
+    key = f"{p.get('moId')}__{p.get('op')}" + (f"__{part}" if part > 1 else "")   # part 2 of a split is its own job
     jobs = dict(world["jobs"])
     if p.get("op") not in STAGE_ORDER:
         raise BadRequest("Unknown stage.")

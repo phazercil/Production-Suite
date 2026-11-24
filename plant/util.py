@@ -57,16 +57,25 @@ def at_local_minutes(day_ms, minutes):
     return ms(timezone.make_aware(d))
 
 
+def at_wall(day, minutes):
+    """The local wall-clock time `minutes` after midnight on `day` (a date), as an aware datetime. Adding the minutes
+    before making it aware keeps 6:00 at 6:00 across a daylight-saving change (after midnight + 6 h it would be 5:00
+    or 7:00 that day). Minutes past 24 h land on the next days, also by the clock."""
+    from datetime import datetime, timedelta
+
+    from django.utils import timezone
+    return timezone.make_aware(datetime(day.year, day.month, day.day) + timedelta(minutes=minutes))
+
+
 def iso_date(t_ms):
     return local(from_ms(t_ms)).date().isoformat()
 
 
 def extra_breaks(start, end):
     """Extra breaks (Admin-scheduled) between two aware datetimes: [{id, s, e, label, machines: set of ids or None}]."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     from django.db.models import Q
-    from django.utils import timezone
 
     from .models import ExtraBreak
     a, b = local(start).date(), local(end).date()
@@ -76,8 +85,8 @@ def extra_breaks(start, end):
         ids = {m.pk for m in x.machines.all()} or None
         d = max(x.day, a0)
         while d <= min(x.last_day, b):
-            s = timezone.make_aware(datetime(d.year, d.month, d.day)) + timedelta(minutes=hm(x.start))
-            e = s + timedelta(minutes=x.minutes)
+            s = at_wall(d, hm(x.start))
+            e = at_wall(d, hm(x.start) + x.minutes)
             if s < end and e > start and not (x.cancelled_at and s >= x.cancelled_at):   # (a cancelled break's earlier times stay)
                 out.append({"id": x.pk, "s": s, "e": e, "label": x.label or "Break", "machines": ids, "by": x.by})
             d += timedelta(days=1)

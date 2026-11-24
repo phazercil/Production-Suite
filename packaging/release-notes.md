@@ -10,6 +10,23 @@
   - Each tile says **LIVE** when it plays live video, or **PICTURES** and why it isn't live: the server isn't passing live video on yet, the screen can't play the camera's video, or no video came from the stream.
   - The **Live video** box on Admin › Cameras stays current while live video runs (it used to fall back to "STARTING" after a minute).
   - It now tells apart "Apache's rules aren't in place yet", "Apache refused them" and "the ticker hasn't checked in".
+- **Fixes from a code review:**
+  - Maintenance › Inventory: editing an item no longer changes its stock (stock only changes through Add stock, Count and Use, so every change is logged). After saving, the page keeps its tab and filters.
+  - Quality: approving a check that was first disapproved puts its scrapped pieces back on the count.
+  - Shift times, breaks, extra breaks and pallet numbering follow the wall clock on the days the clocks change.
+  - Planned time for Grafana is looked up again as soon as shifts, breaks or rules change, not up to 10 minutes later.
+  - Renaming a machine now renames it everywhere: PM tasks, roll tag photos, data sources, auto QC, inbound records, alerts, planned time, changeovers, supervisor history edits, inventory use, pallet tags and sensors.
+  - The minute ticker reads the machines outside the database transaction, so a slow PLC no longer holds the database.
+  - Sensors: each alarm rule is checked under its own lock; "not equal" rules use a tiny tolerance; `round(x, n)` and Modbus answers are checked, and "NaN"/"inf" text is no reading. Suite values for uptime and downtime are live during the shift.
+  - Data Viewer and saved queries: `:name` inside quotes, `::` casts and `--` comments are left alone, and filters only take real column names. SQL Server "DISTINCT" previews work. Database backups write binary columns correctly.
+  - Scheduler: dragging part 2 of a split job previews part 2; runs started before the MO on the same shift are shown; split markers line up.
+  - "Machine back up" alerts wait while the shift is paused and say so when the shift ends without the line running again.
+  - Inbound data: a part's specs come from its own key or the longest matching prefix; a dimension with no target isn't judged.
+  - PM schedule: a due date more than 10 years away isn't shown (it used to error).
+  - Cameras: a camera's redirect is only followed to another plant-network address; typing only a new password keeps the saved user name; a stream that hangs without closing is dropped after 20 seconds and reconnected.
+  - Supervisor › History: a log from the paper log can't end in the future, and changing a log's start or end recomputes its planned time.
+  - Updates: two uploads at once no longer share a file; a failed update keeps its "what was put back" details; a waiting "go back" isn't reported as a new update.
+  - The labor page's current-tab marker and the weekly report's day labels work on every server.
 
 ## What's new in 1.9.8
 
