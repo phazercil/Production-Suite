@@ -17,7 +17,7 @@
           {% for b in s.breaks.all %}<div class="row"><input name="bLabel" value="{{ b.label }}" aria-label="Break name" {% if not can %}disabled{% endif %}><input type="time" name="bStart" value="{{ b.start }}" aria-label="Break start" {% if not can %}disabled{% endif %}><input type="time" name="bEnd" value="{{ b.end }}" aria-label="Break end" {% if not can %}disabled{% endif %}></div>{% endfor %}
           {% if can %}<div class="row"><input name="bLabel" placeholder="Add a break" aria-label="New break name"><input type="time" name="bStart" aria-label="New break start"><input type="time" name="bEnd" aria-label="New break end"></div><p class="note">Clear a break's times to remove it.</p>{% endif %}</div>
         {% if can %}<div class="row" style="gap:8px;margin-top:8px"><button class="btn go">Save {{ s.name }}</button><span class="grow"></span>
-          <button class="btn ghost sm" formaction="/schedule/do/shiftRetire" onclick="return confirm('Remove {{ s.name|escapejs }} from today on? The days before keep it.')">Remove</button></div>{% endif %}
+          <button class="btn ghost sm" formaction="/schedule/do/shiftRetire" data-confirm="Remove {{ s.name }} from today on? The days before keep it.">Remove</button></div>{% endif %}
       </form>{% endfor %}
       <p class="note">Which lines run each shift is set in Scheduler › Lines &amp; Shifts. A change to a shift applies from today; the days before keep the times they were worked at.</p>
     </section>
