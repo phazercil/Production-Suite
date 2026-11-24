@@ -7,7 +7,7 @@
 #>
 
 $script:SuiteVersion = "1.9.10"
-$script:SuiteRevision = 30
+$script:SuiteRevision = 31
 $script:PyVersion = "3.12.7"
 $script:TaskWeb = "Production Suite Web"
 $script:TaskTicker = "Production Suite Ticker"
