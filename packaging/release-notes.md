@@ -1,3 +1,13 @@
+## What's new in 1.9.13
+
+- **S2K posting posts each entry to the S2K MO of its stage.** S2K keeps one MO per stage of an order.
+  - A pleater's MO runs go to the order's Stage 1 MO (1MG…).
+  - End Band and foam Glue Bead lines (John Sr, William, the glue beads) go to its Stage 2 MO (2MG…/2AQ…). Packaging lines go to the finished MG…/AQ… MO.
+  - Packed pallets go to the finished-part (packaging) MO, even when the tag carries another of the order's numbers.
+  - Each stage MO is checked against S2K's own quantity and "still to make" for that MO.
+  - Packaging is checked against what Stage 1 made good, allowing for products that use two stage units per finished filter.
+  - The CSV has a Stage column and the S2K MO number with its current revision.
+
 ## What's new in 1.9.12
 
 - **Every page and tab has its own address**, so it can be bookmarked or sent: /admin/backup/, /supervisor/down/, /quality/trace/, /maintenance/inventory/, /scheduler/orders/ and so on. Older links still work and switch to the new address.
