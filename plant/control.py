@@ -214,24 +214,36 @@ class Sessions:
 
     def __init__(self):
         self.s, self.fails = {}, []
+        self.lock = threading.Lock()   # the control service answers each request on its own thread
 
     def new(self, name, who):
         tok = secrets.token_urlsafe(24)
-        self.s[tok] = {"name": name, "who": who, "t": time.time()}
+        with self.lock:
+            self.s[tok] = {"name": name, "who": who, "t": time.time()}
         return tok
 
     def get(self, tok):
-        x = self.s.get(tok or "")
-        if not x or time.time() - x["t"] > SESSION_IDLE:
+        with self.lock:
+            x = self.s.get(tok or "")
+            if not x or time.time() - x["t"] > SESSION_IDLE:
+                self.s.pop(tok or "", None)
+                return None
+            x["t"] = time.time()
+            return dict(x)
+
+    def drop(self, tok):
+        with self.lock:
             self.s.pop(tok or "", None)
-            return None
-        x["t"] = time.time()
-        return x
+
+    def failed(self):
+        with self.lock:
+            self.fails.append(time.time())
 
     def limited(self):
         now = time.time()
-        self.fails = [t for t in self.fails if now - t < 60]
-        return len(self.fails) >= 5
+        with self.lock:
+            self.fails = [t for t in self.fails if now - t < 60]
+            return len(self.fails) >= 5
 
 
 def make_handler(suite, sessions):
@@ -294,12 +306,12 @@ def make_handler(suite, sessions):
                 code, lines = suite.manage(["suiteadmin", "pin-check"], {"pin": str(p.get("pin") or "")})
                 r = suite.result(code, lines)
                 if not r.get("ok"):
-                    sessions.fails.append(time.time())
+                    sessions.failed()
                     return {"ok": False, "error": r.get("error") or "That is not a shift lead PIN."}
                 self.note(f"{r['name']} on {who}", "logged in to Production Suite Admin")
                 return {"ok": True, "token": sessions.new(r["name"], who), "name": r["name"]}
             if path == "/logout":
-                sessions.s.pop(str(p.get("token") or ""), None)
+                sessions.drop(str(p.get("token") or ""))
                 return {"ok": True}
             if path in ("/start", "/restart"):
                 with suite.lock:

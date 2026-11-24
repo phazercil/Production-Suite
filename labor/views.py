@@ -36,11 +36,14 @@ def _json_for_html(obj):
     return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
+CURRENT = ' aria-current="page"'   # (no backslashes inside f-string braces: Python 3.10 and 3.11 can't read them)
+
+
 def _suitebar(me, only=False):
     """The suite's top bar. On the Labor Budget's own address (/budget/) it has no other sections."""
     from plant.context import MODES
     nav = "" if only else ('<nav class="suitetabs" aria-label="Modes">' + "".join(
-        f'<a href="{href}"{" aria-current=\"page\"" if k == "labor" else ""}>{_esc(label)}</a>' for k, href, label in MODES) + "</nav>")
+        f'<a href="{href}"{CURRENT if k == "labor" else ""}>{_esc(label)}</a>' for k, href, label in MODES) + "</nav>")
     return ('<header class="suitebar no-print"><a class="suitebrand" href="' + ("/budget/" if only else "/") + '" aria-label="Production Suite home">'
             '<svg viewBox="0 0 34 20" aria-hidden="true"><polyline points="1,17 5,3 9,17 13,3 17,17 21,3 25,17 29,3 33,17" fill="none" '
             'stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg><span>' + ("Labor Budget" if only else "Production Suite") + '</span></a>'

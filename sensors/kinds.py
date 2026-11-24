@@ -216,20 +216,31 @@ def modbus_request(host, port, unit, fn, addr, count, timeout=2.0, tid=1):
             s.sendall(adu)
             head = _recv(s, 7)
             _tid, _pid, length, _unit = struct.unpack(">HHHB", head)
+            if not 2 <= length <= 260:
+                raise ReadError(f"{host}:{port} sent a reply that isn't Modbus TCP (length {length}).")
             body = _recv(s, length - 1)
     except (socket.timeout, TimeoutError):
         raise ReadError(f"{host}:{port} didn't answer in {timeout:g} s.")
     except OSError as e:
         raise ReadError(f"Couldn't reach {host}:{port} ({e.strerror or e}).")
+    if not body:
+        raise ReadError("The device sent an empty reply.")
     if body[0] & 0x80:
         code = body[1] if len(body) > 1 else 0
         raise ReadError(f"The device refused the read: {EXC.get(code, f'error {code}')}.")
+    if len(body) < 2 or len(body) < 2 + body[1]:
+        raise ReadError("The device's reply was cut short.")
     data = body[2:2 + body[1]]
     if fn in (3, 4):
-        return list(struct.unpack(f">{len(data) // 2}H", data))[:count]
+        regs = list(struct.unpack(f">{len(data) // 2}H", data[:len(data) // 2 * 2]))[:count]
+        if len(regs) < count:
+            raise ReadError(f"The device sent {len(regs)} register{'s' if len(regs) != 1 else ''} of the {count} asked for.")
+        return regs
     bits = []
     for byte in data:
         bits += [(byte >> i) & 1 for i in range(8)]
+    if len(bits) < count:
+        raise ReadError("The device sent fewer coils than asked for.")
     return bits[:count]
 
 
@@ -257,7 +268,14 @@ def read_modbus(c):
 
 
 # ------------------------------------------------------------------ formulas
-FUNCS = {"min": min, "max": max, "abs": abs, "round": round, "sqrt": math.sqrt, "avg": lambda *a: sum(a) / len(a)}
+def _round(x, n=0):
+    """round(x) and round(x, 2): the formula's numbers are all floats, and round() wants a whole number of places."""
+    if n != int(n) or not 0 <= n <= 10:
+        raise ValueError("round(x, n) takes 0 to 10 places")
+    return round(x, int(n))
+
+
+FUNCS = {"min": min, "max": max, "abs": abs, "round": _round, "sqrt": math.sqrt, "avg": lambda *a: sum(a) / len(a)}
 _BIN = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b,
         ast.Pow: lambda a, b: a ** b, ast.Mod: lambda a, b: a % b}
 
@@ -301,7 +319,7 @@ def evaluate(expr, values):
         return ev(tree)
     except ZeroDivisionError:
         raise ReadError("The formula divides by zero right now.")
-    except (OverflowError, ValueError) as e:
+    except (OverflowError, ValueError, TypeError) as e:
         raise ReadError(f"The formula can't be worked out: {e}.")
 
 
@@ -318,7 +336,8 @@ def number(v):
     if isinstance(v, (bytes, bytearray)):
         v = v.decode("utf-8", "replace")
     try:
-        return float(str(v).strip().replace(",", ""))
+        f = float(str(v).strip().replace(",", ""))
+        return f if f == f and abs(f) != float("inf") else None   # "NaN", "inf" read as text are no reading
     except ValueError:
         s = machinedata.signal(v)
         return None if s is None else (1.0 if s else 0.0)
@@ -344,10 +363,10 @@ def suite_value(machine, what, t):
         if not sh.mo:
             raise ReadError(f"{machine} has no MO running.")
         return max(0, (sh.mo.qty or 0) - (sh.mo.produced or 0))
-    if what == "uptime":
-        return sh.uptime
-    if what == "down":
-        return sh.down_mins or 0
+    if what in ("uptime", "down"):   # the shift's figures are only saved when it ends: work them out while it runs
+        from hmi.engine import shift_stats
+        st = shift_stats(sh) if sh.active else {"uptime": sh.uptime, "down": sh.down_mins or 0}
+        return st["uptime"] if what == "uptime" else st["down"]
     if what == "stop":
         return (t - sh.stop_start).total_seconds() / 60 if sh.state == "stopped" and sh.stop_start else 0.0
     if what == "qc":

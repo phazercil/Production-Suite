@@ -249,6 +249,12 @@ def check(now=None):
             continue  # still down
         if AlertLog.objects.filter(stop_key=r["stop_key"], contact=r["contact"], kind="back").exists():
             continue
+        if sh is None:   # the shift ended while it was down: it didn't run again, so there's nothing to tell
+            AlertLog.objects.create(t=now, kind="back", line=r["line"], stop_key=r["stop_key"], contact=r["contact"], channel="none",
+                                    to="", ok=True, msg="not sent (the shift ended without the line running again)")
+            continue
+        if sh.state != "running":
+            continue     # the stop ended without the line running (changeover, no machine data): wait until it does
         c = next((x for x in contacts if x.name == r["contact"]), None)
         if not c or not c.notify_back:
             AlertLog.objects.create(t=now, kind="back", line=r["line"], stop_key=r["stop_key"], contact=r["contact"], channel="none",

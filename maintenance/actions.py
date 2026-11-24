@@ -85,8 +85,9 @@ def item_save(p, ctx):
     it.min_qty = _num(mn, "reorder level", allow_zero=True) if mn else None
     it.notes = str(p.get("notes") or "").strip()[:2000]
     it.updated, it.updated_by = ctx.now, ctx.by
-    start = str(p.get("qty") or "").strip() if new else ""
-    it.qty = _num(start, "quantity on hand", allow_zero=True) if start else 0
+    if new:   # an item's stock only changes through Add stock, Count and Use (so every change is logged)
+        start = str(p.get("qty") or "").strip()
+        it.qty = _num(start, "quantity on hand", allow_zero=True) if start else 0
     it.save()
     if new and it.qty:
         InventoryMove.objects.create(item=it, kind="count", qty=it.qty, note="Starting stock", t=ctx.now, by=ctx.by)

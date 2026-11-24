@@ -96,7 +96,7 @@ def info():
     v, r = current()
     st = state()
     ready = next(iter(sorted((root() / "ready").glob("*.zip"))), None)
-    if st.get("status") in ("ready", "scheduled") and not ready:
+    if st.get("status") in ("ready", "scheduled") and not ready and st.get("job") != "goback":   # going back needs no file
         st = set_state(status="idle", message="")
     return {"version": v, "revision": r, "state": st, "policy": policy(), "folder": str(root() / "inbox"),
             "backups": [{k: b[k] for k in ("version", "revision", "at")} for b in backups()][:5],

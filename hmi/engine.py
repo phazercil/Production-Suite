@@ -133,18 +133,14 @@ def _machine_day_shifts(machine, day, ids=None):
 def machine_window(machine, t):
     """The window t falls in for this machine: {"name", "s", "e"} (datetimes) for one of its shifts, or the gap
     between its shifts ({"name": "No shift", ...}, "noShift": True)."""
-    from datetime import datetime as _dt
-
-    from django.utils import timezone as _tz
-
-    from plant.util import hm, local
+    from plant.util import at_wall, hm, local
     occ = []
     ids = _machine_shift_ids(machine)
     for back in range(-2, 3):
         day = local(t).date() + timedelta(days=back)
         for x in _machine_day_shifts(machine, day, ids):
-            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x["start"]))
-            occ.append((s0, s0 + timedelta(minutes=(hm(x["end"]) - hm(x["start"])) % 1440 or 1440), x["name"]))
+            s0 = at_wall(day, hm(x["start"]))
+            occ.append((s0, at_wall(day, hm(x["start"]) + ((hm(x["end"]) - hm(x["start"])) % 1440 or 1440)), x["name"]))
     occ.sort()
     for s0, e0, name in occ:
         if s0 <= t < e0:
@@ -346,12 +342,8 @@ def planned_windows(sh, kinds=False):
       doesn't pile up downtime;
     - breaks an Admin or shift lead added for the day.
     Stops inside these are not downtime: they are not logged, need no reason and don't count against uptime."""
-    from datetime import datetime as _dt
-
-    from django.utils import timezone as _tz
-
     from plant.schedule import book
-    from plant.util import extra_breaks, hm, is_lunch, local
+    from plant.util import at_wall, extra_breaks, hm, is_lunch, local
     if not sh:
         return []
     ids = _machine_shift_ids(sh.machine) if sh.machine_id else set(book().shifts)
@@ -365,9 +357,9 @@ def planned_windows(sh, kinds=False):
     day = local(a).date() - timedelta(days=1)
     while day <= local(b).date():
         for x in _machine_day_shifts(sh.machine, day, ids):   # each shift as worked that day (variants, earlier versions)
-            s0 = _tz.make_aware(_dt(day.year, day.month, day.day)) + timedelta(minutes=hm(x["start"]))
+            s0 = at_wall(day, hm(x["start"]))
             length = (hm(x["end"]) - hm(x["start"])) % 1440 or 1440
-            e0 = s0 + timedelta(minutes=length)
+            e0 = at_wall(day, hm(x["start"]) + length)
             if e0 <= a or s0 >= b:
                 continue
             occ.append((s0, e0))
@@ -401,10 +393,12 @@ _planned_cache = {}
 
 
 def planned_for_tick(sh, t):
-    """Planned windows for a running shift, looked up at most every 10 minutes, and written to hmi_planned
-    (so Grafana can leave the same time out)."""
+    """Planned windows for a running shift, looked up at most every 10 minutes (and again as soon as anything is
+    changed: shifts, breaks, rules all bump the settings' version), and written to hmi_planned (so Grafana can leave
+    the same time out)."""
+    ver = PlantSettings.objects.filter(pk=1).values_list("version", flat=True).first()
     hit = _planned_cache.get(sh.id)
-    if hit and (t - hit[0]).total_seconds() < 600:
+    if hit and (t - hit[0]).total_seconds() < 600 and hit[2] == ver:
         return hit[1]
     win = planned_windows(sh, kinds=True)
     if not hit or hit[1] != win:
@@ -412,7 +406,7 @@ def planned_for_tick(sh, t):
         PlannedTime.objects.bulk_create([PlannedTime(shift=sh, line=sh.line, start=a, end=b, kind=k[:60]) for a, b, k in win])
     if len(_planned_cache) > 200:
         _planned_cache.clear()
-    _planned_cache[sh.id] = (t, win)
+    _planned_cache[sh.id] = (t, win, ver)
     return win
 
 
@@ -572,16 +566,26 @@ def rename_machine_records(old, new):
     """Carry a machine's records over to its new name. Used by the kiosk Admin page and the Scheduler."""
     if not old or old == new:
         return
-    for model in (ShiftRun, PpmReading, Downtime, QCCheck, RollTag, ShiftNote, MoRun, MachineError):
-        model.objects.filter(line=old).update(line=new)
-    Ticket.objects.filter(machine=old).update(machine=new)
-    Ticket.objects.filter(line=old).update(line=new)
-    for c in ChangeoverCache.objects.filter(machine=old):
-        if ChangeoverCache.objects.filter(part=c.part, machine=new).exists():
-            c.delete()
-        else:
-            c.machine = new
-            c.save(update_fields=["machine"])
+    from django.apps import apps
+    # every record that names the machine (its readings, shifts, QC, tickets, PM, sensors, pallet tags, parts used…)
+    for label, field in (("hmi.ShiftRun", "line"), ("hmi.PpmReading", "line"), ("hmi.Downtime", "line"), ("hmi.QCCheck", "line"),
+                         ("hmi.RollTag", "line"), ("hmi.ShiftNote", "line"), ("hmi.MoRun", "line"), ("hmi.MachineError", "line"),
+                         ("hmi.Ticket", "machine"), ("hmi.Ticket", "line"), ("hmi.PMTask", "machine"), ("hmi.RollTagPhoto", "line"),
+                         ("hmi.DataSource", "line"), ("hmi.AutoQC", "line"), ("hmi.InboundRecord", "line"), ("hmi.AlertLog", "line"),
+                         ("hmi.PlannedTime", "line"), ("hmi.ChangeoverPiece", "line"), ("supervisor.HistoryEdit", "line"),
+                         ("maintenance.InventoryMove", "machine"), ("packkiosk.PalletTag", "line"), ("sensors.Sensor", "machine"),
+                         ("sensors.SensorAlarm", "machine"), ("sensors.SensorValue", "machine")):
+        apps.get_model(label).objects.filter(**{field: old}).update(**{field: new})
+    # kept once per machine: a copy the new name already has wins (caches and read marks)
+    for label, field, key in (("hmi.ChangeoverCache", "machine", "part"), ("hmi.ToolingCache", "machine", "part"),
+                              ("hmi.NoticeRead", "line", "notice")):
+        model = apps.get_model(label)
+        for c in model.objects.filter(**{field: old}):
+            if model.objects.filter(**{key: getattr(c, key), field: new}).exists():
+                c.delete()
+            else:
+                setattr(c, field, new)
+                c.save(update_fields=[field])
     from labor.sync import rename_machine
     rename_machine(old, new)   # the Labor Budget's line keeps its crew
 
@@ -1226,6 +1230,8 @@ def qc_review(p, ctx):
         n = to_number(p.get("scrap"))
         need(n is not None and n >= 0 and n == int(n) and n <= 1_000_000, "How many filters to scrap? (a whole number, 0 for none)")
         n = int(n) - q.scrapped   # a second decision only scraps the difference
+    elif q.scrapped:
+        n = -q.scrapped           # disapproved before, approved now: the filters it scrapped go back on the count
     sh = q.shift
     if n:
         if sh:   # the shift's count is good filters
@@ -1954,10 +1960,8 @@ def extra_break_del(p, ctx):
     from datetime import datetime as _dt
     at = clock(_dt(2000, 1, 1, int(x.start[:2]), int(x.start[3:5])))
     notify(f"{x.label} at {at} on {x.day:%a} {x.day.month}/{x.day.day} was cancelled by {ctx.by}", "break", lines=names or None, go="schedule")
-    from datetime import datetime as _dtm
-
-    from django.utils import timezone as _tz
-    first = _tz.make_aware(_dtm(x.day.year, x.day.month, x.day.day)) + timedelta(minutes=int(x.start[:2]) * 60 + int(x.start[3:5]))
+    from plant.util import at_wall
+    first = at_wall(x.day, int(x.start[:2]) * 60 + int(x.start[3:5]))
     if first > ctx.now:
         x.delete()   # it never happened: nothing to keep
     else:            # some of its times are past: they stay on record (and stops then stay planned); the rest are off

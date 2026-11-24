@@ -98,8 +98,8 @@ def actual_runs(live, t):
     for sh in live:
         a = {"machineId": sh.machine_id, "made": int(sh.mo_count or 0), "spans": [(ms(sh.mo_start or sh.start), ms(t))]}
         for r in MoRun.objects.filter(mo=sh.mo.number, line=sh.machine.name, end_time__lte=t):
-            if r.shift_id == sh.pk:
-                continue   # this shift's own earlier piece is already in mo_count
+            if r.shift_id == sh.pk and r.start_time >= (sh.mo_start or sh.start):
+                continue   # the run going on now: already in mo_count (an earlier run of it this shift, switched away from and back, isn't)
             a["made"] += int(r.qty or 0)
             a["spans"].append((ms(r.start_time), ms(r.end_time)))
         out[sh.mo_id] = a
@@ -521,7 +521,9 @@ def _compute(world, jobs, cuts):
                     out["late"] = True
                 res[j["id"]] = out
                 by_m[m["id"]].append(j["id"])
-                prev_end, prev_part, prev_no = out["end"], pkey, mo["part"]
+                prev_end = out["end"]
+                if not rest:   # a waiting split marker hasn't run: the line is still set up for what ran before it
+                    prev_part, prev_no = pkey, mo["part"]
                 if st == "s1" and not rest:   # later stages pace against every part of Stage 1
                     u = s1_res.get(mo["id"])
                     s1_res[mo["id"]] = out if not u else {**u, "runSegs": sorted(u["runSegs"] + out["runSegs"]), "end": max(u["end"], out["end"])}

@@ -193,8 +193,7 @@ def _viewer_conn():
 
 def viewer_run(sql, params, limit=500):
     sql = check_select(sql.replace(VIEWER_TAG, "", 1), "the 3D viewer part library")
-    names = PARAM.findall(sql)
-    q = PARAM.sub("?", sql)
+    q, names = bind(sql, "?")
     t0 = time.time()
     with _vlock:
         c = _viewer_conn().execute(q, [str((params or {}).get(n, "")) for n in names])
@@ -284,6 +283,44 @@ def _assets_private():  # older name, kept for callers
 
 
 PARAM = re.compile(r"(?<!:):([A-Za-z_]\w*)")
+
+
+def bind(sql, mark):
+    """The query with each :name parameter replaced by the driver's placeholder, and the names in order. Text in
+    quotes ('…', "…", `…`, […]) and -- comments is left alone, so DATE_FORMAT(t, '%H:%i') or 'line:A' stay as written."""
+    out, names, i, n = [], [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c in "'\"`[":
+            close, j = ("]" if c == "[" else c), i + 1
+            while j < n:
+                if c == "'" and sql[j] == "\\":
+                    j += 2
+                    continue
+                if sql[j] == close:
+                    if close != "]" and j + 1 < n and sql[j + 1] == close:   # '' inside '…'
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(sql[i:j + 1])
+            i = j + 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            j = n if j < 0 else j
+            out.append(sql[i:j])
+            i = j
+        elif c == ":" and (i == 0 or sql[i - 1] != ":") and i + 1 < n and (sql[i + 1].isalpha() or sql[i + 1] == "_"):
+            j = i + 2
+            while j < n and (sql[j].isalnum() or sql[j] == "_"):
+                j += 1
+            names.append(sql[i + 1:j])
+            out.append(mark)
+            i = j
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out), names
 # Anything that could change data, lock rows in the other system, or write files is refused before it is sent.
 NOT_READ_ONLY = re.compile(r"(?is)\b(insert|update|delete|create|alter|drop|truncate|rename|grant|revoke|"
                            r"into\s+(outfile|dumpfile|@)|for\s+update|for\s+share|lock\s+in\s+share\s+mode|"
@@ -332,8 +369,7 @@ def run_saved(sql, params, limit=500, db="assets"):
         return viewer_run(sql, params, limit)
     sql = check_select(sql, DB_NAMES.get(db, "that database").replace("The ", "the "))
     conn = _db(db)
-    names = PARAM.findall(sql)
-    q = PARAM.sub("%s", sql.replace("%", "%%"))
+    q, names = bind(sql.replace("%", "%%"), "%s")
     t0 = time.time()
     with conn.cursor() as c:
         c.execute(q, [str((params or {}).get(n, "")) for n in names])
@@ -365,6 +401,10 @@ def preview(table, db="assets", where=None):
         raise ConnError("Unknown table.")
     from plant import dbkinds
     k = kind_of(db)
+    cols = {c["name"] for t in schema(db)["tables"] if t["name"] == table for c in t.get("columns", [])}
+    bad = [f["col"] for f in (where or []) if f.get("col") and cols and f["col"] not in cols]
+    if bad:
+        raise ConnError(f"{table} has no column {bad[0]}.")
     w = " AND ".join(f"{dbkinds.quote(k, f['col'])} = {dbkinds.literal(k, f.get('val', ''))}" for f in (where or []) if f.get("col"))
     return run_saved(dbkinds.top(k, f"* FROM {dbkinds.table(k, table)}" + (f" WHERE {w}" if w else ""), 20), {}, limit=20, db=db)
 

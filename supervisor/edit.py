@@ -116,6 +116,7 @@ def edit_log(x, p, ch):
     if not x.active:
         b = keep(p.get("end"), x.end, "end")
         need(b > a, "The end is before the start.")
+        need(b <= timezone.now(), "The end hasn't happened yet.")
         setf(x, ch, "end", "End", b)
     setf(x, ch, "issues", "Start-of-shift issue", str(p.get("issues") or "").strip())
     setf(x, ch, "end_issues", "End-of-shift issue", str(p.get("end_issues") or "").strip())
@@ -199,6 +200,9 @@ def hist_edit(p, ctx):
         return {"msg": "Nothing changed."}
     x.save()
     note(ctx, kind, x, ch, str(p.get("why") or "").strip())
+    if kind == "log" and any(c[0] in ("Start", "End") for c in ch):
+        from .build import planned_rebuild
+        planned_rebuild(x)          # its planned time (for Grafana) follows the new start and end
     restat(log_of(kind, x))
     return {"msg": f"{LABEL[kind]} corrected: {len(ch)} change{'s' if len(ch) != 1 else ''}."}
 

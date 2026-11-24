@@ -153,6 +153,14 @@ def split_log(sh, cuts):
     return pieces
 
 
+def planned_rebuild(sh):
+    """A finished log's planned time (breaks, lunches...) inside its start and end, for Grafana."""
+    PlannedTime.objects.filter(shift=sh).delete()
+    if sh.end:
+        PlannedTime.objects.bulk_create([PlannedTime(shift=sh, line=sh.line, start=max(a, sh.start), end=min(b, sh.end), kind=k[:60])
+                                         for a, b, k in engine.planned_windows(sh, kinds=True) if a < sh.end and b > sh.start])
+
+
 def refigure(sh, units=None):
     """A piece's units (what the machine counted in it, or `units` when it has no machine data), its planned time
     for Grafana, and its uptime and downtime figures."""
@@ -163,9 +171,7 @@ def refigure(sh, units=None):
         sh.count = units
     sh.mo_count = sh.count if sh.mo_id else 0
     sh.save(update_fields=["count", "mo_count"])
-    PlannedTime.objects.filter(shift=sh).delete()
-    PlannedTime.objects.bulk_create([PlannedTime(shift=sh, line=sh.line, start=max(a, sh.start), end=min(b, sh.end), kind=k[:60])
-                                     for a, b, k in engine.planned_windows(sh, kinds=True) if a < sh.end and b > sh.start])
+    planned_rebuild(sh)
     if PpmReading.objects.filter(shift=sh).exists():
         restat(sh)
     else:   # nothing recorded by the machine: no uptime figure can be worked out
@@ -244,7 +250,7 @@ def hist_add(p, ctx):
     if b <= a:
         b += timedelta(days=1)
     need(b - a <= timedelta(hours=24), "A log can be at most 24 hours long: add one for each shift.")
-    need(a < timezone.now(), "That time hasn't happened yet.")
+    need(b <= timezone.now(), "That time hasn't happened yet: a log from the paper log has to have ended.")
     from django.db.models import Q
     clash = ShiftRun.objects.filter(Q(end__gt=a) | Q(end__isnull=True), machine=m, start__lt=b).first()
     need(not clash, f"{m.name} already has a log {fmt_t(clash.start)} – {fmt_t(clash.end) if clash and clash.end else 'now'} in that time. "

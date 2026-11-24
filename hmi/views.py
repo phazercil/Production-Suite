@@ -295,6 +295,7 @@ def roll_photo(request, pk):
     return r
 
 
+@json_api
 @require_POST
 def update_upload(request):
     """A shift lead uploads an update file (Admin > Updates). It is checked, then waits in updates/ready."""
@@ -309,7 +310,9 @@ def update_upload(request):
         return JsonResponse({"ok": False, "error": "Choose the update file."}, status=400)
     if f.size > 300 * 1024 * 1024:
         return JsonResponse({"ok": False, "error": "That file is too large to be an update file."}, status=400)
-    tmp = updates.root() / "run" / "upload.tmp"
+    import uuid
+    tmp = updates.root() / "run" / f"upload-{uuid.uuid4().hex}.tmp"   # two uploads at once never share a file
+    tmp.parent.mkdir(parents=True, exist_ok=True)
     with open(tmp, "wb") as out:
         for chunk in f.chunks():
             out.write(chunk)

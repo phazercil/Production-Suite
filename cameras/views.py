@@ -85,6 +85,9 @@ def do(request, name):
             fps = max(0.2, min(grab.MAX_FPS.get(kind, 5.0), float(p.get("fps") or 1)))
         except ValueError:
             fps = 1.0
+        user, pw = (p.get("user") or "").strip(), p.get("password") or ""
+        if not err and any(ch in user + pw for ch in "\r\n\""):   # checked before anything is saved
+            err = "The user name and password can't contain quotes or line breaks."
         if err:
             return _back(err=err, edit=pk or "new")
         new = cam is None
@@ -97,16 +100,15 @@ def do(request, name):
         cam.updated, cam.updated_by = timezone.now(), me.name
         cam.save()
         cam.machines.set(Machine.objects.filter(pk__in=[x for x in p.getlist("machines") if x.isdigit()]))
-        user, pw = (p.get("user") or "").strip(), p.get("password") or ""
         login_msg = ""
         if p.get("clear_login") == "1":
             liveconfig.save({cam.env_user: None, cam.env_password: None})
             cam.has_login = False
             login_msg = " Login removed."
         elif user or pw:
-            if any(ch in user + pw for ch in "\r\n\""):
-                return _back(err="The user name and password can't contain quotes or line breaks.", edit=str(cam.pk))
-            changes = {cam.env_user: user}
+            changes = {}
+            if user:          # a blank user name box keeps the saved one (only the password typed in changes)
+                changes[cam.env_user] = user
             if pw:
                 changes[cam.env_password] = pw
             liveconfig.save(changes)

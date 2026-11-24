@@ -101,6 +101,9 @@ def top(kind, select_rest, n):
     """`SELECT <select_rest>` limited to n rows: SELECT TOP n … for SQL Server, … LIMIT n for the others."""
     n = int(n)
     if kind == "mssql":
+        rest = select_rest.lstrip()
+        if rest[:9].upper() == "DISTINCT ":   # T-SQL: SELECT DISTINCT TOP n …, never TOP n DISTINCT
+            return f"SELECT DISTINCT TOP {n} {rest[9:]}"
         return f"SELECT TOP {n} {select_rest}"
     return f"SELECT {select_rest} LIMIT {n}"
 
