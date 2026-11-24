@@ -126,6 +126,9 @@ class SchedulerLaborTests(Base):
         from labor.sync import budget_diff
         self.assertEqual(budget_diff()[bar.id], ["Labor Budget: 1st shift only"])   # and Lines & Shifts says it differs
         bar.shifts.set([s1])                                         # set to match in the suite
+        c = Client()
+        login(c, "9999")
+        self.assertEqual(c.post("/schedule/do/copyLabor", {}).status_code, 302)   # the plan's holidays, copied onto the plant calendar
         w = load_world()
         m = next(x for x in w["cfg"]["machines"] if x["name"] == "Barbara")
         cal = Calendar(w["cfg"], w["labor"], w["laborLines"])

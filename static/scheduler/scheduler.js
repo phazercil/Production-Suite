@@ -245,7 +245,7 @@ function renderSchedule(){
     axis+=`<div class="tick ${i===0?"major dstart":h%6===0?"major":""} ${td&&i===0?"today":""}" style="left:${X(t,a,px)}px;width:${X(e,a,px)-X(t,a,px)}px">${i===0?`<span class="dlab">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>`:""}<span class="big">${String(h).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}</span></div>`})}}
   else{for(let t=a;t<b;t=addDays(t,1)){const d=new Date(t),w=X(addDays(t,1),a,px)-X(t,a,px),we=d.getDay()===0||d.getDay()===6,td=sod(now)===t;
     if(dayClosed(t)){axis+=`<div class="tick closed ${td?"today":""}" style="left:${X(t,a,px)}px;width:${w}px" title="${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}: no shift on any line"><span class="big">${S.view.scale==="week"?DOW[d.getDay()].slice(0,2):""}</span>${S.view.scale==="week"?d.getDate():""}</div>`;continue}
-    const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Holiday":"Day off"} in the Labor Budget plan"`:"",spL=sp==="HOLIDAY"?"Holiday":sp==="OFF"?"Off":sp==="WORK"?"Work day":"";
+    const sp=(S.labor.days||{})[isoDay(t)],spT=sp?` title="${sp==="WORK"?"Extra work day":sp==="HOLIDAY"?"Plant closed":sp==="NOPROD"?"No production":"Day off"} on the plant calendar (Schedule)"`:"",spL=sp==="HOLIDAY"?"Closed":sp==="OFF"?"Off":sp==="NOPROD"?"No prod.":sp==="WORK"?"Work day":"";
     axis+=S.view.scale==="week"?`<div class="tick major ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${DOW[d.getDay()]} ${d.getMonth()+1}/${d.getDate()}</span>${spL||segLabel(TMAP.days.find(D=>D.d===t))}</div>`
       :`<div class="tick ${d.getDay()===1?"major":""} ${we?"wkend":""} ${td?"today":""} ${sp&&sp!=="WORK"?"hol":""}" style="left:${X(t,a,px)}px;width:${w}px"${spT}><span class="big">${d.getDate()}</span>${sp==="HOLIDAY"?"H":DOW[d.getDay()][0]}</div>`}}
   const bk=buckets(a,b);
@@ -618,7 +618,7 @@ function ordinal(n){return n+(n===1?"st":n===2?"nd":n===3?"rd":"th")}
 function fmtMoney(v,d=2){return "$"+Number(v||0).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d})}
 function laborSection(c){
   const L=S.labor||{lines:{}},lead=!!(S.me&&S.me.lead);
-  const head=`<label class="check"><input type="checkbox" id="uselabor" ${c.useLabor!==false?"checked":""}> Use the Labor Budget plan: no runs on its holidays and days off, and runs on its extra work days. Each line runs the shifts ticked for it above; the plan's crews are shown for cost and staffing only</label>`;
+  const head=`<label class="check"><input type="checkbox" id="uselabor" ${c.useLabor!==false?"checked":""}> Use the Labor Budget plan for crews and crew cost. Working days, holidays and changed shift times come from the plant calendar (Schedule); each line runs the shifts ticked for it above</label>`;
   let body;
   if(c.useLabor===false)body=`<p class="small muted">Turned off: every line runs all the shifts ticked above, on the shifts' own days.</p>`;
   else if(!L.on)body=`<p class="small muted">No Labor Budget plan is saved yet. A shift lead can build one in <a href="/labor/">Labor Budget</a>; lines with the same name there are linked automatically.</p>`;

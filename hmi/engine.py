@@ -167,7 +167,8 @@ def open_log(machine, t, start=None, mo=None, offer=None, co=None, force=False):
     if mo and mo.status != "OPEN":
         mo = None
     sh = ShiftRun.objects.create(machine=machine, line=machine.name, person=None, user_name="", shift_name=w["name"], start=start,
-                                 mo=mo, mo_start=start if mo else None, state="changeover" if co else "running", co=co, qc_last=start,
+                                 mo=mo, mo_start=start if mo else None, state="changeover" if co and not co.get("ranAt") else "running", co=co,
+                                 qc_last=start,
                                  offer=offer or "")
     event("shift_auto", {"line": machine.name, "shift": w["name"]})
     return ShiftRun.objects.select_for_update().select_related("mo").get(pk=sh.pk)
@@ -195,7 +196,24 @@ def co_piece(sh, end, ended, note=""):
     in which shift, for how long and which steps they checked off is kept (ChangeoverPiece, and in the changeover so
     the next operator sees it). The changeover goes on from `end`."""
     co = sh.co
+    if co and co.get("ranAt"):
+        # the machine already ran: the changeover's time ended then (kept in its piece "machine ran"); finishing it
+        # now only marks it finished, so its time stays the real one
+        if ended == "finished" and co.get("id"):
+            last = ChangeoverPiece.objects.filter(co_id=co["id"]).order_by("-end", "-id").first()
+            if last:
+                last.ended = "finished"
+                last.note = (last.note + " · " if last.note else "") + "finalized later; time ends when the machine ran"
+                last.save(update_fields=["ended", "note"])
+        return
     if not (sh.state == "changeover" and co and co.get("start")):
+        return
+    if sh.shift_name == NO_SHIFT and not sh.person_id:
+        # left open between shifts with nobody on it: no one is working it, so it's neither changeover time nor
+        # downtime; it goes on from the next shift
+        co["start"] = ms(end)
+        sh.co = co
+        sh.stop_start = None if ended == "finished" else end
         return
     s0 = from_ms(co["start"])
     if end > s0 and not PpmReading.objects.filter(shift=sh, t__gt=s0, t__lte=end).exists():
@@ -263,7 +281,7 @@ def roll_over(sh, t):
     if t <= w["e"]:
         return sh
     end = w["e"]
-    mo, who, was_co = sh.mo, sh.person_id, sh.state == "changeover" and bool(sh.co)
+    mo, who, was_co = sh.mo, sh.person_id, bool(sh.co) and (sh.state == "changeover" or bool(sh.co.get("ranAt")))
     close_log(sh, end)
     co = dict(sh.co) if was_co else None
     nxt = machine_window(sh.machine, t - timedelta(seconds=30))
@@ -432,7 +450,10 @@ def minus_planned(start, end, windows):
 def add_down(sh, start, end, reason=None):
     """Log a stop as downtime. Planned time (breaks, lunch, start-up) inside it is left out; what remains is
     logged only if it adds up to the Rules > minDown minutes (changeovers are always logged)."""
-    pieces = [(start, end)] if reason == "Changeover" else minus_planned(start, end, planned_windows(sh))
+    if reason == "Changeover":   # a changeover's time counts through breaks, but never when no shift is scheduled
+        pieces = minus_planned(start, end, [(a, b) for a, b, k in planned_windows(sh, kinds=True) if k == "No shift scheduled"])
+    else:
+        pieces = minus_planned(start, end, planned_windows(sh))
     total = sum((e - s).total_seconds() for s, e in pieces) / 60
     if not pieces or (reason != "Changeover" and total < rules()["minDown"]):
         return None
@@ -514,12 +535,24 @@ def tick(machine, sample, t):
         if sh.mo:
             MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + units)
             sh.mo_count += units
+        elif sh.co and sh.co.get("ranAt"):
+            if sh.co.get("newMo"):
+                MO.objects.filter(pk=sh.co["newMo"]).update(produced=F("produced") + units)
+                sh.co = {**sh.co, "made": int(sh.co.get("made") or 0) + units}
+            else:
+                sh.co = {**sh.co, "pending": int(sh.co.get("pending") or 0) + units}   # given to the MO picked at Finish
+        elif co and sh.co and not sh.co.get("inkjet") and sh.co.get("stopped"):
+            sh.co = {**sh.co, "runUnits": int(sh.co.get("runUnits") or 0) + units}   # if this run ends the changeover: the new MO's
         elif co and sh.co and sh.co.get("inkjet") and sh.co.get("newMo"):
             # an inkjet-only changeover: the line keeps running, already making the new MO
             MO.objects.filter(pk=sh.co["newMo"]).update(produced=F("produced") + units)
             sh.co = {**sh.co, "made": int(sh.co.get("made") or 0) + units}
             ShiftRun.objects.filter(pk=sh.pk).update(co=sh.co)
     if not running:
+        if co and sh.co and (sh.co.get("runSince") or not sh.co.get("stopped")):
+            sh.co = {**sh.co, "stopped": True}   # stopped to change over: from now on, running again means it's done
+            sh.co.pop("runSince", None)   # a short test run: the changeover goes on (its parts were test parts)
+            sh.co.pop("runUnits", None)
         if not sh.stop_start:
             sh.stop_start = t - timedelta(minutes=1)
             sh.stop_what = " and ".join(stopped)[:120]
@@ -536,11 +569,33 @@ def tick(machine, sample, t):
                 add_down(sh, sh.stop_start, end)
             sh.stop_start = None
             sh.stop_what = ""
+        if co and sh.co and not sh.co.get("inkjet") and sh.co.get("start") and sh.co.get("stopped"):
+            # (running before the first stop is running out the old MO's last parts: still a changeover)
+            since = int(sh.co.get("runSince") or ms(t - timedelta(minutes=1)))
+            sh.co = {**sh.co, "runSince": since}
+            if (ms(t) - since) / 60000 >= float(r.get("coRunMin", 3) or 3):
+                # it has been running: the changeover is done on the machine. Its time ends when it started running
+                # (not when someone gets to Finish), and stops from here on are ordinary downtime with a reason.
+                ran = from_ms(since)
+                co_piece(sh, ran, "machine ran")
+                run_units = int(sh.co.pop("runUnits", 0) or 0)   # made since it started running: the new MO's
+                sh.co = {**sh.co, "ranAt": since}
+                if run_units:
+                    if sh.co.get("newMo"):
+                        MO.objects.filter(pk=sh.co["newMo"]).update(produced=F("produced") + run_units)
+                        sh.co["made"] = int(sh.co.get("made") or 0) + run_units
+                    else:
+                        sh.co["pending"] = int(sh.co.get("pending") or 0) + run_units
+                sh.state, co = "running", False
+                sh.qc_after_co, sh.qc_due_at = True, ran
+                event("co_ran", {"line": sh.line, "at": since})
+                notify(f"{sh.line} is running: the changeover's time ended at {fmt_t(ran)}. "
+                       "Finish the changeover (steps and next MO) on the kiosk.", "co", lines=[sh.line])
         if not co:
             sh.state = "running"
             if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
                 sh.qc_due_at = t - timedelta(minutes=1)
-    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at", "stop_what"])
+    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at", "qc_after_co", "stop_what", "co"])
 
 
 def close_stop(sh, t):
@@ -706,11 +761,12 @@ def change_operator(p, ctx):
         take_log(sh, ctx.user, ctx, "took over")
         return {"msg": f"{ctx.user.name} is on {m.name} now"}
     need(sh.person_id != ctx.user.pk, f"{ctx.user.name} is already the operator on {m.name}.")
-    before, mo, was_co = sh.user_name, sh.mo, sh.state == "changeover" and bool(sh.co)
+    before, mo, was_co = sh.user_name, sh.mo, bool(sh.co) and (sh.state == "changeover" or bool(sh.co.get("ranAt")))
     close_log(sh, ctx.now, why="operator change")
     co = dict(sh.co) if was_co else None
     new = ShiftRun.objects.create(machine=m, line=m.name, person=ctx.user, user_name=ctx.user.name, shift_name=sh.shift_name, start=ctx.now,
-                                  mo=mo if mo and mo.status == "OPEN" else None, mo_start=ctx.now, state="changeover" if co else "running",
+                                  mo=mo if mo and mo.status == "OPEN" else None, mo_start=ctx.now,
+                                  state="changeover" if co and not co.get("ranAt") else "running",
                                   co=co, qc_last=ctx.now, safety=sh.safety, pm=sh.pm)
     audit(ctx, f"Operator change on {m.name}: {before} → {ctx.user.name}")
     event("shift_start", {"line": m.name, "mo": new.mo.number if new.mo else None, "user": ctx.user.name, "change": before})
@@ -1094,7 +1150,10 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     co_piece(sh, ctx.now, "finished")
-    made = int(co.get("made") or 0)   # filters made during an inkjet-only changeover are already this MO's
+    pending = int(co.get("pending") or 0)   # made after the machine ran, before an MO was picked: this MO's
+    if pending:
+        MO.objects.filter(pk=m.pk).update(produced=F("produced") + pending)
+    made = int(co.get("made") or 0) + pending   # filters made during an inkjet-only changeover are already this MO's
     sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, made, "running", None
     sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()
@@ -1116,7 +1175,7 @@ def co_force_end(p, ctx):
     need(why, "Say why it's being ended (e.g. operator left without finishing it).")
     co = sh.co
     note = f"Force-ended by {ctx.by}: {why}"
-    if co.get("step", 1) < 2 or sh.state != "changeover":   # only opened: the order wasn't ended, nothing to keep
+    if co.get("step", 1) < 2 or (sh.state != "changeover" and not co.get("ranAt")):   # only opened: the order wasn't ended, nothing to keep
         sh.co = None
         sh.save(update_fields=["co"])
         audit(ctx, f"{sh.line}: changeover closed before it started (order not ended). {why}")
@@ -1310,7 +1369,7 @@ def roll_add(p, ctx):
                                lot=str(p.get("lot") or "").strip()[:80], feet=feet, mo=sh.mo.number if sh.mo else "", count_at=sh.count, by=ctx.by)
     if p.get("photo"):   # the picture of the tag the fields were read from (Roll tags › Take a picture)
         from .models import RollTagPhoto
-        RollTagPhoto.objects.filter(pk=p.get("photo"), roll__isnull=True, line=sh.line, t__gte=ctx.now - timedelta(hours=12)).update(roll=r)
+        RollTagPhoto.objects.filter(pk=p.get("photo"), roll__isnull=True, kind="", line=sh.line, t__gte=ctx.now - timedelta(hours=12)).update(roll=r)
     event("roll", {"line": sh.line, "roll": rid, "lot": r.lot, "material": r.material, "mo": r.mo})
     return {"msg": f"Roll {rid} added"}
 

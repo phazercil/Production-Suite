@@ -86,6 +86,28 @@ class ShiftVariant(models.Model):
         db_table = "plant_shift_variant"
 
 
+class PlantDay(models.Model):
+    """The plant calendar (Schedule › Calendar): a day that isn't as the shifts' weekdays say. One place the whole
+    suite asks (kiosk shift windows and planned time, the Scheduler, Reports' targets), so a change on the fly (a day
+    closed for weather, a Saturday added, a shift starting late) is known everywhere at once.
+    kind: work (an extra working day: every shift with any weekday ticked runs), off (no shifts), closed (holiday,
+    plant closed), noprod (staff in, lines don't run: training, inventory, cleaning).
+    shifts: per shift id, what's different that day: {"off": true} or {"on": true} and/or {"start": "HH:MM", "end": "HH:MM"}."""
+    KINDS = [("work", "Working day"), ("off", "Off"), ("closed", "Plant closed (holiday)"), ("noprod", "No production")]
+    day = models.DateField(unique=True)
+    kind = models.CharField(max_length=8, blank=True, choices=KINDS, help_text="Blank: as the shifts' weekdays say (only shift changes)")
+    note = models.CharField(max_length=120, blank=True)
+    shifts = models.JSONField(default=dict, blank=True)
+    updated = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ["day"]
+
+    def __str__(self):
+        return f"{self.day} {self.kind or 'shift changes'}"
+
+
 class ShiftBreak(models.Model):
     shift = models.ForeignKey(Shift, related_name="breaks", on_delete=models.CASCADE)
     label = models.CharField(max_length=60, default="Break")
@@ -377,7 +399,7 @@ DEFAULT_CONFIG = {
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
     "qualityIssues": ["Out of dimension", "Glue skip / poor bond", "Torn or damaged media", "Bad cut", "Side band defect", "Wrong pleat count",
                       "Pleats uneven or collapsed", "Contamination / dirt", "Wrong media or material", "Other"],
-    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
+    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "coRunMin": 3, "rollPhotos": 2, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
               "photoDays": 365, "qcLate": 10},
 }
 DEFAULT_SETTINGS = {

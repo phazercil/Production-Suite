@@ -77,8 +77,10 @@ def logs(f):
         qs = qs.filter(user_name__icontains=f["who"])
     if f["mo"]:
         qs = qs.filter(Q(mo__number__icontains=f["mo"]) | Q(morun__mo__icontains=f["mo"])).distinct()
-    if not f["empty"]:   # the logs kept with nobody logged in and nothing made (nights, weekends) are left out
-        qs = qs.exclude(Q(person__isnull=True) & Q(count=0))
+    if not f["empty"]:   # left out: time between shifts with nobody logged in and nothing made (nights, weekends);
+        # every scheduled shift's log shows, with or without an operator, so it can be looked at and corrected
+        from hmi.engine import NO_SHIFT
+        qs = qs.exclude(Q(person__isnull=True) & Q(count=0) & Q(shift_name__in=[NO_SHIFT, ""]))
     qs = qs.annotate(qc_n=Count("qccheck", distinct=True), qc_fail=Count("qccheck", filter=Q(qccheck__passed=False), distinct=True))
     tot = qs.aggregate(units=Sum("count"))
     return qs.order_by("-start"), {"Logs": None, "Units": tot["units"] or 0}
@@ -368,7 +370,7 @@ def page(request):
         co_rep = cohist.report(f["A"], f["B"], f["line"])
     return render(request, "supervisor/page.html", {
         "mode": "supervisor", "me": me, "f": f, "tabs": TABS, "rows": rows, "n": n, "totals": totals, "lines": lines, "openCo": open_changeovers(),
-        "coRep": co_rep,
+        "coRep": co_rep, "reasons": _reasons() if f["tab"] == "down" else [],
         "first": first + 1 if n else 0, "last": min(n, first + PER_PAGE),
         "prev": _query(f, page=f["page"] - 1) if f["page"] > 1 else None,
         "next": _query(f, page=f["page"] + 1) if first + PER_PAGE < n else None,
@@ -693,3 +695,24 @@ def s2k_mark(request):
     n = s2k.mark(s2k.rows(f["A"], f["B"], f["line"]), me.name, timezone.now())
     audit(Ctx(user=me), f"S2K posting: marked {n} rows as posted ({f['from']} – {f['to']}{', ' + f['line'] if f['line'] else ''})")
     return HttpResponseRedirect("/supervisor/?" + _query({**f, "tab": "s2k"}, msg=f"{n} rows marked as posted in S2K."))
+
+
+def _reasons():
+    from hmi import engine
+    return list(engine.config().get("reasons") or [])
+
+
+@require_http_methods(["POST"])
+def down_batch(request):
+    """Supervisor › Downtime: the ticked stops get one reason (supervisor/edit.py down_batch)."""
+    me, denied = _gate(request)
+    if denied:
+        return denied
+    back = request.POST.get("back") or "tab=down"
+    if not back.startswith("tab="):
+        back = "tab=down"
+    from hmi import engine
+    name = "downBatchDelete" if request.POST.get("action") == "delete" else "downBatch"
+    r = engine.execute(name, {"ids": request.POST.getlist("ids"), "reason": request.POST.get("reason"),
+                              "why": request.POST.get("why")}, engine.Ctx(user=me))
+    return HttpResponseRedirect("/supervisor/?" + back + "&" + urlencode({"msg": r.get("msg") if r["ok"] else r["error"]}))

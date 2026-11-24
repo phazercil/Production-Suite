@@ -9,6 +9,7 @@
 The browser only shows what comes back (static/suite/thin.js + htmx). See hmi/kscreen.py for what each page shows.
 """
 import json
+from datetime import timedelta
 import re
 
 from django.http import Http404, HttpResponse
@@ -23,6 +24,7 @@ from plant.util import ms, now
 from suite import thin
 
 from . import engine, kscreen
+from .models import ShiftRun
 from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
@@ -305,7 +307,8 @@ def m_start(request, s):
     pick = request.GET.get("mo") or (str(q[0].number) if q else "")
     return modal_response(request, "hmi/k/m_start.html", **ctx_for(s, lines=lines, line=want, queue=q, trained=bool(trained), mo_pick=pick,
                                                                    safety=s.cfg.get("safety", []), pm=s.cfg.get("pm", []),
-                                                                   handoffs=engine.handoffs(want, s.t) if want else []))
+                                                                   handoffs=engine.handoffs(want, s.t) if want else [],
+                                                                   rollPics=int(engine.rules().get("rollPhotos", 2) or 0), pics=PIC_FIELDS, left=last_left(want, s.t)))
 
 
 @modal("changeover", login=True)
@@ -530,7 +533,8 @@ def m_end(request, s):
     if not s.me:
         return modal_response(request, "hmi/k/m_login.html", **ctx_for(s, people=kscreen.people_for_login(), next="end"))
     from .engine import shift_stats
-    return modal_response(request, "hmi/k/m_end.html", **ctx_for(s, stats=shift_stats(s.shift), mo=s.cur_mo, need=len(s.need_reason())))
+    return modal_response(request, "hmi/k/m_end.html", **ctx_for(s, stats=shift_stats(s.shift), mo=s.cur_mo, need=len(s.need_reason()),
+                                                                 rollPics=int(engine.rules().get("rollPhotos", 2) or 0), pics=PIC_FIELDS))
 
 
 @modal("errlog")
@@ -749,6 +753,48 @@ def a_station(request, s, p):
     return thin.done()
 
 
+ROLL_PICS = (("rollPic", "roll", "the roll"), ("rollTag", "tag", "the roll's tag"))
+PIC_FIELDS = [("rollPic", "Roll"), ("rollTag", "Tag")]
+
+
+def _roll_pics(request, when):
+    """The start/end-of-shift pictures of the roll and its tag sent with the form, processed (not saved yet).
+    Raises PhotoError when one is missing and Admin › Rules requires them, or a picture can't be read."""
+    from . import photos
+    need = int(engine.rules().get("rollPhotos", 2) or 0)
+    if not need:
+        return []
+    out, missing = [], []
+    for field, what, label in ROLL_PICS:
+        f = request.FILES.get(field)
+        if not f:
+            missing.append(label)
+            continue
+        if f.size > photos.MAX_BYTES:
+            raise photos.PhotoError("That picture is too large (over 25 MB).")
+        out.append((what, *photos.process(f.read())))
+    if missing and need >= 2:
+        left = "you're starting with" if when == "start" else "you're leaving for the next shift"
+        raise photos.PhotoError(f"Take a picture of {' and '.join(missing)} {left}.")
+    return out
+
+
+def _keep_roll_pics(pics, sh, when, who, t):
+    from .models import RollTagPhoto
+    for what, jpeg, thumb, w, h in pics:
+        RollTagPhoto.objects.create(shift=sh, kind=when, what=what, t=t, by=who, line=sh.line if sh else "", data=jpeg, thumb=thumb,
+                                    size=len(jpeg), width=w, height=h)
+
+
+def last_left(line, t):
+    """The roll and tag pictures the last shift on this line left for the next one (shown at Start of shift)."""
+    from .models import RollTagPhoto
+    last = RollTagPhoto.objects.filter(line=line, kind="end", t__gte=t - timedelta(days=4)).order_by("-t").first() if line else None
+    if not last:
+        return []
+    return list(RollTagPhoto.objects.filter(shift_id=last.shift_id, kind="end").defer("data", "thumb").order_by("what"))
+
+
 @action("startShift")
 def a_start(request, s, p):
     n_safety, n_pm = len(s.cfg.get("safety", [])), len(s.cfg.get("pm", []))
@@ -756,9 +802,17 @@ def a_start(request, s, p):
     p = {"line": p.get("line", ""), "mo": (p.get("mo") or "").strip(), "issues": p.get("issues", ""),
          "safety": [f"s{i}" in on for i in range(n_safety)], "pm": [f"p{i}" in on for i in range(n_pm)],
          "acks": request.POST.getlist("ack")}
+    from . import photos
+    try:
+        pics = _roll_pics(request, "start")
+    except photos.PhotoError as e:
+        return err_in_modal(str(e))
     r = run(request, s, "startShift", p)
     if not r["ok"]:
         return err_in_modal(r["error"])
+    if pics:
+        sh = ShiftRun.objects.filter(machine__name=p["line"], active=True).first()
+        _keep_roll_pics(pics, sh, "start", s.me.name if s.me else "", now())
     if not s.lock:
         request.session["station"] = p["line"]
     return go("controls", toast=r.get("msg"), s=s)
@@ -1084,9 +1138,17 @@ def a_drawing(request, s, p):
 
 @action("endShift")
 def a_end(request, s, p):
+    from . import photos
+    try:
+        pics = _roll_pics(request, "end")
+    except photos.PhotoError as e:
+        return err_in_modal(str(e))
+    sh = s.shift
     r = run(request, s, "endShift", {"issues": p.get("issues", "")})
     if not r["ok"]:
         return err_in_modal(r["error"])
+    if pics and sh:
+        _keep_roll_pics(pics, sh, "end", s.me.name if s.me else "", now())
     return go("end-of-shift", toast=r.get("msg"), s=s)
 
 

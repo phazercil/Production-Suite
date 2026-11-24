@@ -70,7 +70,14 @@ def labor_json(world, lead, a=None, b=None):
                                                         for sid, sh in info["shifts"].items()}}
     from labor.sync import budget_diff
     return {"on": bool(plan), "diff": {str(k): v for k, v in budget_diff().items()}, "enabled": world["cfg"].get("useLabor", True), "version": plan.version if plan else 0,
-            "lines": lines, "days": plan.special_days(a, b) if plan and a and b else {}}
+            "lines": lines, "days": _cal_days(a, b) if a and b else {}}
+
+
+def _cal_days(a, b):
+    """The plant calendar's special days (Schedule › Calendar) between two times."""
+    from plant.schedule import special_days
+    from plant.util import from_ms, local
+    return special_days(local(from_ms(a)).date(), local(from_ms(b)).date())
 
 
 def mo_json(mo, cat):

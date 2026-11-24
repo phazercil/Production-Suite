@@ -862,6 +862,8 @@ def report_for(sh, need_reason=0):
     downs = list(Downtime.objects.filter(shift=sh).order_by("start_time"))
     qc = list(QCCheck.objects.filter(shift=sh))
     rolls = list(RollTag.objects.filter(shift=sh).order_by("t"))
+    from .models import RollTagPhoto
+    rpics = list(RollTagPhoto.objects.filter(shift=sh).exclude(kind="").defer("data", "thumb").order_by("t", "what"))
     tickets = list(Ticket.objects.filter(shift=sh).order_by("t"))
     npics = {}
     for p in TicketPhoto.objects.filter(ticket__in=tickets).values("ticket_id"):
@@ -897,7 +899,9 @@ def report_for(sh, need_reason=0):
         a0, b0 = max(a0, sh.start), min(b0, end_t)
         breaks.append({"label": kind, "s": a0, "e": b0, "mins": round((b0 - a0).total_seconds() / 60),
                        "src": f"Scheduled by {x['by']}" if x and x.get("by") else "Scheduled" if x else "Shift schedule"})
-    r = {"sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "breaks": breaks, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
+    r = {"rollPicSets": [("Roll started with", [x for x in rpics if x.kind == "start"]),
+                         ("Roll left for the next shift", [x for x in rpics if x.kind == "end"])],
+         "sh": sh, "who": person.name if person else sh.user_name, "st": st, "changeovers": cos, "breaks": breaks, "qc": len(qc), "qcFail": sum(1 for q in qc if not q.passed),
          "scrap": sum(q.scrap for q in qc) + sum(m["scrap"] or 0 for m in mos), "rolls": rolls, "mos": mos,
          "byReason": [{"k": k, "v": v, "pct": v / top * 100} for k, v in by.most_common()],
          "tickets": [{"t": t, "pics": npics.get(t.id, 0)} for t in tickets], "notes": notes, "needReason": need_reason, "downs": downs, "qcList": sorted(qc, key=lambda q: q.t)}

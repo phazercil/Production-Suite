@@ -19,7 +19,7 @@
   <nav class="suitetabs" aria-label="Modes">
     {% for k, href, label in suite_main %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %} title="{{ label }}"><span class="full">{{ label }}</span><span class="short">{{ label|cut:" Kiosk" }}</span></a>
     {% endfor %}
-    {% if suite_more %}<details class="suitemore"><summary {% for k, h, l in suite_more %}{% if mode == k %}aria-current="page"{% endif %}{% endfor %}>{% for k, h, l in suite_more %}{% if mode == k %}{{ l }}{% endif %}{% endfor %}{% if not mode in "reports labor admin" or not mode %}More{% endif %} ▾</summary>
+    {% if suite_more %}<details class="suitemore"><summary {% for k, h, l in suite_more %}{% if mode == k %}aria-current="page"{% endif %}{% endfor %}>{% for k, h, l in suite_more %}{% if mode == k %}{{ l }}{% endif %}{% endfor %}{% if not mode in "schedule reports labor admin" or not mode %}More{% endif %} ▾</summary>
       <div class="suitemenu">{% for k, href, label in suite_more %}<a href="{{ href }}" {% if mode == k %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</div></details>{% endif %}
   </nav>
   <span class="suitegrow"></span>

@@ -207,6 +207,53 @@ def hist_edit(p, ctx):
     return {"msg": f"{LABEL[kind]} corrected: {len(ch)} change{'s' if len(ch) != 1 else ''}."}
 
 
+BATCH_MAX = 500
+
+
+@cmd("downBatch", PERM)
+def down_batch(p, ctx):
+    """Supervisor › Downtime › Set the reason of every ticked stop at once. Each stop's change is kept in its history
+    (who, when, the old and new reason, why), the same as editing them one by one."""
+    ids = [int(x) for x in (p.get("ids") or []) if str(x).isdigit()][:BATCH_MAX]
+    need(ids, "Tick the stops to change first.")
+    reason = str(p.get("reason") or "").strip()[:120]
+    need(reason, "Pick the reason to give them.")
+    why = str(p.get("why") or "").strip()
+    changed, logs = 0, set()
+    for x in Downtime.objects.select_for_update().filter(pk__in=ids):
+        ch = []
+        setf(x, ch, "reason", "Reason", reason)
+        if ch:
+            x.save(update_fields=["reason"])
+            note(ctx, "downtime", x, ch, why)
+            changed += 1
+            logs.add(x.shift_id)
+    for sh in ShiftRun.objects.filter(pk__in=[i for i in logs if i]):
+        restat(sh)
+    return {"msg": f"{changed} stop{'s' if changed != 1 else ''} set to {reason}." + (f" ({len(ids) - changed} already had it.)" if changed < len(ids) else "")}
+
+
+@cmd("downBatchDelete", PERM)
+def down_batch_delete(p, ctx):
+    """Delete the ticked stops (e.g. time logged as downtime when no shift was scheduled); each one is kept in the
+    history with why."""
+    ids = [int(x) for x in (p.get("ids") or []) if str(x).isdigit()][:BATCH_MAX]
+    need(ids, "Tick the stops to delete first.")
+    why = str(p.get("why") or "").strip()
+    need(why, "Say why they're being deleted (kept in the history).")
+    logs, n = set(), 0
+    for x in Downtime.objects.select_for_update().filter(pk__in=ids):
+        HistoryEdit.objects.create(t=ctx.now, by=ctx.by, kind="downtime", obj_id=x.pk, line=x.line or "", field="Deleted",
+                                   old=summary("downtime", x), new="", why=why)
+        logs.add(x.shift_id)
+        x.delete()
+        n += 1
+    audit(ctx, f"Deleted {n} downtime entries ({why})")
+    for sh in ShiftRun.objects.filter(pk__in=[i for i in logs if i]):
+        restat(sh)
+    return {"msg": f"{n} stop{'s' if n != 1 else ''} deleted."}
+
+
 @cmd("histDelete", PERM)
 def hist_delete(p, ctx):
     kind = p.get("kind")
@@ -217,10 +264,21 @@ def hist_delete(p, ctx):
     HistoryEdit.objects.create(t=ctx.now, by=ctx.by, kind=kind, obj_id=x.pk, line=getattr(x, "line", "") or "", field="Deleted",
                                old=summary(kind, x), new="", why=why)
     audit(ctx, f"Deleted {LABEL[kind].lower()} #{x.pk} on {getattr(x, 'line', '')}: {summary(kind, x)}" + (f" ({why})" if why else ""))
+    cleared = 0
+    if kind == "co":
+        # the line really was stopped then, so the stops stay; they just weren't a changeover: their reason is
+        # cleared for someone to give the right one (each change kept in that stop's history)
+        for d in Downtime.objects.filter(line=x.line, reason="Changeover", start_time__lt=x.end, end_time__gt=x.start):
+            HistoryEdit.objects.create(t=ctx.now, by=ctx.by, kind="downtime", obj_id=d.pk, line=d.line, field="Reason", old="Changeover", new="",
+                                       why=f"changeover #{x.pk} deleted" + (f": {why}" if why else ""))
+            d.reason = None
+            d.save(update_fields=["reason"])
+            cleared += 1
     x.delete()
     if kind != "log":
         restat(sh)
-    return {"msg": f"{LABEL[kind]} deleted."}
+    return {"msg": f"{LABEL[kind]} deleted." + (f" {cleared} stop{'s' if cleared != 1 else ''} in its time had Changeover as the reason: "
+                                                 "cleared, so the right reason can be given (Downtime › Not entered)." if cleared else "")}
 
 
 @cmd("downSplit", PERM)
