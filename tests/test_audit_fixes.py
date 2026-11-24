@@ -202,3 +202,45 @@ class Reporting(TestCase):
         h = health.build() if hasattr(health, "build") else health.status()
         self.assertIn("A data source is failing", h["problems"])
         self.assertEqual(h["summary"], "warn")
+
+
+class CountFromSpeed(TestCase):
+    def setUp(self):
+        no_planned_time(self)
+        seed_demo(reset=True)
+        self.m = Machine.objects.get(name="Barbara")
+        Machine.objects.filter(pk=self.m.pk).update(feed_count_field="")
+
+    def run_minutes(self):
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        before = sh.count
+        t = timezone.now().replace(second=0, microsecond=0)
+        m = Machine.objects.get(pk=self.m.pk)
+        for i in range(1, 4):
+            engine.tick(m, {"ppm": 400}, t + timedelta(minutes=i))
+        return ShiftRun.objects.get(pk=sh.pk).count - before
+
+    def test_toggle(self):
+        self.assertGreater(self.run_minutes(), 0)               # on (the default): counted from the speed
+        ctx = engine.Ctx(user=Person.objects.get(pin="9999"))
+        self.assertTrue(engine.execute("lineSet", {"id": "Barbara", "f": "countFromSpeed", "v": False}, ctx)["ok"])
+        self.assertFalse(Machine.objects.get(pk=self.m.pk).count_from_speed)
+        self.assertEqual(self.run_minutes(), 0)                 # off: nothing until a counter is hooked up
+        Machine.objects.filter(pk=self.m.pk).update(feed_count_field="count")
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        t = timezone.now().replace(second=0, microsecond=0) + timedelta(minutes=10)
+        m = Machine.objects.get(pk=self.m.pk)
+        engine.tick(m, {"ppm": 400, "count": 100}, t)
+        engine.tick(m, {"ppm": 400, "count": 130}, t + timedelta(minutes=1))
+        self.assertEqual(ShiftRun.objects.get(pk=sh.pk).count - sh.count, 30)   # a counter counts either way
+
+    def test_counter_that_gives_filters_per_minute(self):
+        Machine.objects.filter(pk=self.m.pk).update(feed_count_field="count")
+        ctx = engine.Ctx(user=Person.objects.get(pin="9999"))
+        self.assertTrue(engine.execute("lineSet", {"id": "Barbara", "f": "countKind", "v": "minute"}, ctx)["ok"])
+        sh = ShiftRun.objects.get(machine=self.m, active=True)
+        t = timezone.now().replace(second=0, microsecond=0) + timedelta(minutes=20)
+        m = Machine.objects.get(pk=self.m.pk)
+        for i, v in enumerate((7, 7, 7.5, 7.5, 0)):
+            engine.tick(m, {"ppm": 170, "count": v}, t + timedelta(minutes=i))
+        self.assertEqual(ShiftRun.objects.get(pk=sh.pk).count - sh.count, 29)   # 7 + 7 + 7.5 + 7.5 (halves carry)

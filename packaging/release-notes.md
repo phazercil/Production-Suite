@@ -9,6 +9,14 @@
   - The CSV has a Stage column and the S2K MO number with its current revision.
   - **Postings are kept as a record that's never edited.** If a station job, pallet or MO run changes after it was marked as posted (a new quantity, a completion undone, a pallet voided, a run deleted), the difference shows as a **correction** or **reversal** to post, even outside the dates shown.
   - When an order has stage MOs but not the one a line posts to (no 2MG… MO yet, say), its entries are flagged and held back, never posted to another stage's MO.
+- **Counting without a counter is a per-machine switch** (Admin › Connections › Machine data): "Count filters from the speed when no counter is hooked up".
+  - On (as before): filters = pleats ÷ pleats per filter.
+  - Off: nothing is counted until a counter is connected, and the operator enters the count at End order.
+  - A machine with a counter always uses its counter.
+- **Counters that give filters per minute.** Machine data has a new setting, "The counter value is":
+  - **A running total**, as before: each minute counts what the counter went up by.
+  - **Filters made per minute**: each minute's reading is that minute's filters.
+  - A per-minute value read as a total only counted when the rate went up (Salvatore showed 50 instead of ~860).
 - **A changeover done with nobody logged in.** When Start of shift finds the line ran another MO with nobody on it, it asks when it changed over:
   - **One of this shift's stops:** that stop becomes the changeover. What was made before it stays on the old MO, and what was made after goes to the new one.
   - **Now:** the line is still stopped for the changeover.

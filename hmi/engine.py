@@ -537,11 +537,19 @@ def tick(machine, sample, t):
     counted = has_counter(machine, sample)
     if counted and (cnt is None or cnt < 0):
         pass   # no counter value this minute: nothing counted, never a guess from speed
+    elif cnt is not None and cnt >= 0 and machine.count_kind == "minute":
+        # the value is filters made per minute (a rate, not a total): each minute's reading is that minute's filters;
+        # fractions carry over to the next minute
+        sh.acc += float(cnt)
+        units = int(sh.acc)
+        sh.acc -= units
     elif cnt is not None and cnt >= 0:
         c = int(cnt)
         if sh.last_count is not None and c >= sh.last_count:
             units = c - sh.last_count
         sh.last_count = c
+    elif not machine.count_from_speed:
+        pass   # no counter, and counting from the speed is off for this machine (Admin › Machines)
     else:
         sh.acc += ppm
         per = pleats_for(sh)
@@ -2462,6 +2470,14 @@ def line_set(p, ctx):
         m.feed_ppm_field = str(v or "ppm").strip() or "ppm"
     elif f == "feed.countField":
         m.feed_count_field = str(v or "").strip()[:80]
+        ShiftRun.objects.filter(machine=m, active=True).update(acc=0.0, last_count=None)
+    elif f == "countKind":
+        need(v in ("total", "minute"), "Pick what the counter value is.")
+        m.count_kind = v
+        # the running log starts its counting afresh (its carried fraction was pleats, or a total's last value)
+        ShiftRun.objects.filter(machine=m, active=True).update(acc=0.0, last_count=None)
+    elif f == "countFromSpeed":
+        m.count_from_speed = bool(v) and str(v).lower() not in ("0", "false", "off")
     elif f == "feed.recipeField":
         m.feed_recipe_field = str(v or "").strip()[:80]
     elif f.startswith(("feed.src.", "uptime.", "err.")):
