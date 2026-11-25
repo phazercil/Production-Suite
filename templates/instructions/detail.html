@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% load static suite %}
 {% block title %}{{ x.doc_no }} · Work instructions{% endblock %}
 {% block body_class %}scroll{% endblock %}
-{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}"><script src="{% static 'instructions/wi.js' %}" defer></script>{% endblock %}
 {% block content %}<div class="sv">
 {% include "instructions/_head.html" %}
   <p><a href="/instructions/">← All work instructions</a></p>
@@ -14,28 +14,31 @@
 
     {% if edit %}
       <div class="flash warn">You're changing the draft (rev {{ draft.rev }}). The kiosks keep showing {% if cur %}rev {{ cur.rev }}{% else %}nothing{% endif %} until it's approved. <a href="?view=1">See {% if cur %}rev {{ cur.rev }}{% else %}it as it reads{% endif %}</a></div>
-      <form method="post" action="/instructions/do/wiSave">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
+      <form method="post" action="/instructions/do/wiSave" enctype="multipart/form-data" data-wi-form>{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
         <h3>Steps</h3>
-        {% for s in steps %}<div class="wi-edit-step"><span class="wi-n">{{ forloop.counter }}</span>
-          <div class="wi-edit-body"><textarea name="s_text" rows="3" maxlength="4000" placeholder="{% if forloop.last or forloop.revcounter == 2 %}Another step (leave blank if not needed){% else %}What to do{% endif %}">{{ s.text }}</textarea>
-            <input name="s_caution" maxlength="500" value="{{ s.caution }}" placeholder="Caution (optional): shown in red above the step">
-            {% if media %}<div class="wi-pick">{% for m in media %}<label class="wi-pm" title="{{ m.name }}"><input type="checkbox" name="s_media_{{ forloop.parentloop.counter0 }}" value="{{ m.pk }}" {% if m.pk in s.media %}checked{% endif %}>
-              {% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}?size=thumb" alt="">{% else %}<span class="wi-vid">▶ {{ m.name|truncatechars:18 }}</span>{% endif %}</label>{% endfor %}</div>{% endif %}
-          </div></div>{% endfor %}
+        <div class="wi-step-list" data-wi-list="step">{% for s in steps %}{% include "instructions/_edit_step.html" with s=s i=forloop.counter0 %}{% endfor %}</div>
+        <div class="wi-actions"><button type="button" class="btn" data-wi-add="step">+ Add step</button></div>
+        <template id="wi-tpl-step">{% include "instructions/_edit_step.html" with s=None i=0 %}</template>
         <h3>Approved process parameters</h3>
-        <table class="st wi-params"><thead><tr><th>Parameter</th><th>Target</th><th>Min</th><th>Max</th><th>Unit</th></tr></thead><tbody>
-          {% for p in params %}<tr><td><input name="p_name" maxlength="80" value="{{ p.name|default:'' }}" placeholder="e.g. Pleat height"></td><td><input name="p_target" value="{{ p.target|default:'' }}" inputmode="decimal"></td>
-            <td><input name="p_min" value="{{ p.min|default:'' }}" inputmode="decimal"></td><td><input name="p_max" value="{{ p.max|default:'' }}" inputmode="decimal"></td><td><input name="p_unit" maxlength="20" value="{{ p.unit|default:'' }}" placeholder="mm"></td></tr>{% endfor %}</tbody></table>
+        <p class="note">{% if x.kind == "changeover" or x.kind == "inkjet" %}Shown above the steps as the settings to set during a changeover.{% else %}Shown with the steps.{% endif %}</p>
+        <div class="wi-vars"><label>Insert variable <small>(into the Target, Min or Max box you were last in)</small><select data-wi-var><option value="">Pick the filter's data…</option>{% regroup fvars by group as groups %}{% for g in groups %}<optgroup label="{{ g.grouper }}">{% for v in g.list %}<option value="{{ v.name }}">{{ v.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></label>
+          <span class="note">Target, Min and Max take a number or a formula worked out for the filter being run: <code>[Pleat height (mm)] + 1</code>, <code>round([Length (in)] * 25.4, 1)</code>. + − * / ^, brackets, round, min, max, abs, ceil, floor. 3D viewer values are in mm; Parts &amp; specs values in inches.</span></div>
+        <table class="st wi-params"><thead><tr><th>Parameter</th><th>Description</th><th>Target</th><th>Min</th><th>Max</th><th>Unit</th><th></th></tr></thead><tbody data-wi-list="param">
+          {% for p in params %}{% include "instructions/_edit_param.html" with p=p %}{% endfor %}</tbody></table>
+        <template id="wi-tpl-param">{% include "instructions/_edit_param.html" with p=None %}</template>
+        <div class="wi-actions"><button type="button" class="btn" data-wi-add="param">+ Add parameter</button></div>
         <label class="wi-note">What changed and why <small>(needed to approve)</small><textarea name="change_note" rows="2" maxlength="4000">{{ draft.change_note }}</textarea></label>
         <div class="wi-actions"><button class="btn go">Save the draft</button></div></form>
+      {% include "instructions/_try.html" %}
       <form method="post" action="/instructions/{{ x.pk }}/upload" enctype="multipart/form-data" class="wi-up">{% csrf_token %}
-        <label>Add photos or videos <small>(then tick them on their steps; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
+        <label>Add photos or videos to the library <small>(to tick on steps; or use 📷 Add photo / video on a step; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
       <div class="wi-actions">
         {% if canApprove %}{% if mine and me.role != "admin" %}<span class="note">Someone other than its author approves it.</span>{% else %}<form method="post" action="/instructions/do/wiApprove">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn go" data-confirm="Approve rev {{ draft.rev }}? The kiosks show it from now on{% if cur %} and rev {{ cur.rev }} becomes obsolete{% endif %}. Save the draft first if you changed it.">Approve rev {{ draft.rev }}</button></form>{% endif %}{% else %}<span class="note">Approving needs <b>Approve work instructions</b>.</span>{% endif %}
         {% if revs|length > 1 %}<form method="post" action="/instructions/do/wiDiscard">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn bad po" data-confirm="Discard draft rev {{ draft.rev }}?">Discard the draft</button></form>{% endif %}
       </div>
     {% elif r %}
       {% include "instructions/_steps.html" with steps=steps params=params %}
+      {% if hasFormula %}{% include "instructions/_try.html" %}{% endif %}
       {% if canEdit and not draft and r.status == "approved" %}<form method="post" action="/instructions/do/wiDraft" class="wi-actions">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn">New revision</button><span class="note">Starts rev {{ revs.0.rev|add:1 }} as a draft from this one; this stays in effect until it's approved.</span></form>{% endif %}
       {% if draft and canEdit %}<p><a class="btn" href="/instructions/{{ x.pk }}/">Back to the draft (rev {{ draft.rev }})</a></p>{% endif %}
     {% endif %}

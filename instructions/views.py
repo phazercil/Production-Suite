@@ -19,18 +19,27 @@ from plant import perms
 from plant.models import Machine
 
 from .cmds import for_station
+from .formula import resolve_params, variables
 from .models import Ack, Instruction, Media, Revision
 
 PERM = "section.quality"
 VIDEO_MAX = 300 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/ogg"}
-POSTS = {"wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
+POSTS = {"wiImportSaved", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
 
 
 def media_dir():
     d = Path(settings.BASE_DIR) / "media" / "instructions"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _isnum(v):
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def _gate(request, need_section=True):
@@ -40,7 +49,7 @@ def _gate(request, need_section=True):
         return me, None
     return None, render(request, "supervisor/login.html", {"mode": "quality", "note": note or (f"{me.name} can't open Quality." if me else None),
                                                            "perm": PERM, "title": "Work instructions",
-                                                           "blurb": "Setup, changeover and operating instructions, revision-controlled."})
+                                                           "blurb": "Changeover and operating instructions, revision-controlled."})
 
 
 def _ctx(me, **kw):
@@ -68,7 +77,9 @@ def index(request):
         cur = next((r for r in revs if r.status == "approved"), None)
         rows.append({"x": x, "cur": cur, "draft": next((r for r in revs if r.status == "draft"), None),
                      "acks": cur.acks.count() if cur else 0})
-    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", "")))
+    from hmi.models import ChangeoverCache
+    saved = ChangeoverCache.objects.count() if perms.can(me, "wi.edit") else 0
+    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
 
 
 def detail(request, pk, rev=None):
@@ -88,13 +99,16 @@ def detail(request, pk, rev=None):
     edit = draft and perms.can(me, "wi.edit") and not rev and request.GET.get("view") != "1"
     r = shown or (draft if edit else cur or draft)
     steps = [{**s, "m": [media[i] for i in s.get("media", []) if i in media]} for s in (r.steps if r else [])]
-    if edit:   # room to add: two blank steps and three blank parameters
-        steps += [{"text": "", "caution": "", "media": [], "m": []} for _ in range(2)]
-    params = list(r.params if r else []) + ([{} for _ in range(3)] if edit else [])
+    if edit and not steps:   # an empty draft: one step and one parameter to type into (Add step / Add parameter for more)
+        steps = [{"text": "", "caution": "", "media": [], "m": []}]
+    params = list(r.params if r else []) + ([{}] if edit and not (r and r.params) else [])
     acks = list(cur.acks.all()[:200]) if cur else []
+    try_part = " ".join(str(request.GET.get("part") or "").split()).upper()[:40]
+    preview = resolve_params(r.params, try_part) if (try_part and r and r.params) else None
     return render(request, "instructions/detail.html", _ctx(
         me, x=x, revs=revs, r=r, cur=cur, draft=draft, edit=edit, steps=steps, params=params, media=list(media.values()),
-        acks=acks, mids=[m.pk for m in x.machines.all()], msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
+        acks=acks, mids=[m.pk for m in x.machines.all()], tryPart=try_part, preview=preview,
+        fvars=variables() if edit else [], hasFormula=any(not _isnum(p.get(k)) for p in (r.params if r else []) for k in ("target", "min", "max") if p.get(k)), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
         mine=bool(draft and me and me.name in [a.strip() for a in draft.author.split(",")])))
 
 
@@ -108,17 +122,59 @@ def do(request, name):
     P = request.POST
     p = {k: P.get(k) for k in P if k not in ("csrfmiddlewaretoken",)}
     p["machines"] = P.getlist("machines")
+    skipped = 0
     if name == "wiSave":   # the editor: one list per field, in row order
         texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
         p["steps"] = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "",
                        "media": P.getlist(f"s_media_{i}")} for i in range(len(texts))]
-        cols = {k: P.getlist(f"p_{k}") for k in ("name", "target", "min", "max", "unit")}
+        # photos and videos picked on a step (Add photo / video): kept with the instruction and put on that step
+        x = Instruction.objects.filter(pk=p.get("id") or 0).first()
+        added = 0
+        if x and x.draft() and perms.can(me, "wi.edit"):
+            for i, st in enumerate(p["steps"]):
+                for f in request.FILES.getlist(f"s_files_{i}")[:20]:
+                    m = store_media(x, f, me)
+                    if m:
+                        st["media"] = list(st["media"]) + [str(m.pk)]
+                        added += 1
+                    else:
+                        skipped += 1
+            if added:
+                engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {added} photo(s)/video(s) added on steps")
+        cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
         p["params"] = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
     r = engine.execute(name, p, engine.Ctx(user=me))
+    if name == "wiSave" and r.get("ok") and skipped:
+        r["msg"] = f"{r.get('msg') or 'Saved.'} {skipped} file{'s' if skipped != 1 else ''} not added: photos (JPEG, PNG…) up to 25 MB, videos (MP4, WebM, MOV) up to 300 MB."
     pk = (r.get("data") or {}).get("id") or p.get("id")
     base = f"/instructions/{pk}/" if pk else "/instructions/"
     from urllib.parse import urlencode
     return HttpResponseRedirect(base + "?" + urlencode({"msg": r.get("msg") or "Saved."} if r.get("ok") else {"err": r.get("error") or "That didn't save."}))
+
+
+def store_media(x, f, me):
+    """Keep one uploaded photo (as a JPEG, in the database) or video (a file under media/instructions/) with an
+    instruction. None if it isn't a photo or a video the suite takes, or is too big."""
+    ctype = (f.content_type or mimetypes.guess_type(f.name)[0] or "").lower()
+    if ctype.startswith("image/"):
+        from hmi import photos
+        if f.size > photos.MAX_BYTES:
+            return None
+        try:
+            jpeg, thumb, w, h = photos.process(f.read())
+        except photos.PhotoError:
+            return None
+        return Media.objects.create(instruction=x, kind="image", content_type="image/jpeg", data=jpeg, thumb=thumb, size=len(jpeg),
+                                    name=f.name[:200], t=timezone.now(), by=me.name)
+    if ctype in VIDEO_TYPES and f.size <= VIDEO_MAX:
+        ext = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov", "video/ogg": ".ogv"}[ctype]
+        fn = f"{x.pk}-{uuid.uuid4().hex}{ext}"
+        with open(media_dir() / fn, "wb") as out:
+            for chunk in f.chunks():
+                out.write(chunk)
+        return Media.objects.create(instruction=x, kind="video", content_type=ctype, file=fn, size=f.size, name=f.name[:200],
+                                    t=timezone.now(), by=me.name)
+    return None
 
 
 @require_POST
@@ -133,29 +189,7 @@ def upload(request, pk):
     back = f"/instructions/{pk}/"
     if not perms.can(me, "wi.edit"):
         return HttpResponseRedirect(back + "?err=Adding+photos+and+videos+needs+Write+work+instructions.")
-    n = 0
-    for f in request.FILES.getlist("files")[:20]:
-        ctype = (f.content_type or mimetypes.guess_type(f.name)[0] or "").lower()
-        if ctype.startswith("image/"):
-            from hmi import photos
-            if f.size > photos.MAX_BYTES:
-                continue
-            try:
-                jpeg, thumb, w, h = photos.process(f.read())
-            except photos.PhotoError:
-                continue
-            Media.objects.create(instruction=x, kind="image", content_type="image/jpeg", data=jpeg, thumb=thumb, size=len(jpeg),
-                                 name=f.name[:200], t=timezone.now(), by=me.name)
-            n += 1
-        elif ctype in VIDEO_TYPES and f.size <= VIDEO_MAX:
-            ext = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov", "video/ogg": ".ogv"}[ctype]
-            fn = f"{x.pk}-{uuid.uuid4().hex}{ext}"
-            with open(media_dir() / fn, "wb") as out:
-                for chunk in f.chunks():
-                    out.write(chunk)
-            Media.objects.create(instruction=x, kind="video", content_type=ctype, file=fn, size=f.size, name=f.name[:200],
-                                 t=timezone.now(), by=me.name)
-            n += 1
+    n = sum(1 for f in request.FILES.getlist("files")[:20] if store_media(x, f, me))
     engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {n} photo(s)/video(s) added")
     msg = f"{n} added: pick them on the steps they belong to." if n else "Nothing added: photos (JPEG, PNG…) and videos (MP4, WebM, MOV, 300 MB at most)."
     return HttpResponseRedirect(back + "?" + ("msg=" if n else "err=") + msg.replace(" ", "+"))
@@ -196,6 +230,7 @@ def kiosk_data(s):
     for d in items:
         media = {m.pk: m for m in Media.objects.filter(instruction=d["x"]).defer("data", "thumb")}
         d["steps"] = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in d["r"].steps]
+        d["params"] = resolve_params(d["r"].params, nxt or part)
     return {"wi": items, "wiPart": nxt or part, "wiNext": bool(nxt), "wiJson": json.dumps([d["r"].pk for d in items])}
 
 

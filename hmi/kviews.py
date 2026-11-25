@@ -367,18 +367,22 @@ def changeover_modal(request, s):
         nmo = s.mo(co.get("newMo"))
         p = s.fresh_part(nmo.part if nmo else "")
         steps = engine.co_steps(co, sh.line)
+        from instructions.models import Media
+        ids = {k for st in steps for k in st.get("media") or []}
+        media = {m.pk: m for m in Media.objects.filter(pk__in=ids).defer("data", "thumb")} if ids else {}
         def step(i, st):
             st = dict(st)
             setting, value, unit = str(st.get("setting") or ""), str(st.get("value") if st.get("value") is not None else ""), str(st.get("unit") or "")
             who = (co.get("doneBy") or {}).get(str(i)) if i in (co.get("done") or []) else None
             st.update(whoDone=f"{who.get('by') or 'Nobody logged in'} · {engine.fmt_t(from_ms(who['t']))}" if who and who.get("t") else "",
                       i=i, done=i in (co.get("done") or []), tag=f"{setting} {value}{unit}".strip() if (setting or value) else "",
-                      imageOk=str(st.get("image") or "").lower().startswith(("http://", "https://")))
+                      imageOk=str(st.get("image") or "").lower().startswith(("http://", "https://")),
+                      m=[media[k] for k in st.get("media") or [] if k in media])
             return st
         c.update(nmo=nmo, p=p, steps=[step(i, st) for i, st in enumerate(steps)], inkjet=co.get("inkjet"), ovr=co.get("override"),
                  oldMo=s.mo(co.get("oldMo")) if co.get("oldMo") else None,
                  settingsRows=co.get("settings") or [], src=co.get("src"), cacheT=co.get("cacheT"),
-                 canReload=bool(s.settings.get("useDb")) and engine.integrations.assets_ready(),
+                 wi=co.get("wi"), canReload=True,
                  override=" · ".join(f"{k} {v}" for k, v in (sh.override or {}).items()))
     return modal_response(request, "hmi/k/m_changeover.html", **ctx_for(s, **c))
 

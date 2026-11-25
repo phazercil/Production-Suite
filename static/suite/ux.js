@@ -187,3 +187,69 @@ document.addEventListener("htmx:afterSettle", function () {
   var el = document.querySelector("[data-scroll-here]");
   if (el) { el.removeAttribute("data-scroll-here"); el.scrollIntoView({ block: "center" }); }
 });
+// Admin › Connections: show one section (Status, Machine data, S2K…) and one machine's data at a time, and find /
+// sort the status table. The choice is kept in the address (?sec=machines&mach=Salvatore) and for the session.
+(function () {
+  "use strict";
+  function store(k, v) { try { if (v === undefined) return sessionStorage.getItem(k) || ""; sessionStorage.setItem(k, v); } catch (e) { return ""; } }
+  function want(key, sk) {
+    var u = new URL(location.href);
+    return u.searchParams.has(key) ? u.searchParams.get(key) || "" : store(sk);
+  }
+  function remember(key, sk, v) {
+    store(sk, v);
+    var u = new URL(location.href);
+    if (v) u.searchParams.set(key, v); else u.searchParams.delete(key);
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+  }
+  function apply() {
+    var nav = document.querySelector("[data-csecnav]");
+    if (!nav) return;
+    var sec = want("sec", "csec"), have = nav.querySelector('[data-csec-go="' + sec + '"]');
+    if (!have) sec = "";
+    nav.querySelectorAll("[data-csec-go]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-csec-go") === sec)); });
+    document.querySelectorAll("[data-csec]").forEach(function (el) { el.hidden = !!sec && el.getAttribute("data-csec") !== sec; });
+    var mach = want("mach", "cmach"), mnav = document.querySelector("[data-cmachnav]");
+    if (mnav && !mnav.querySelector('[data-cmach-go="' + CSS.escape(mach) + '"]')) mach = "";
+    if (mnav) mnav.querySelectorAll("[data-cmach-go]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-cmach-go") === mach)); });
+    document.querySelectorAll("[data-cmach]").forEach(function (el) { el.hidden = !!mach && el.getAttribute("data-cmach") !== mach; });
+    table();
+  }
+  function table() {
+    var t = document.querySelector("[data-ctable]");
+    if (!t) return;
+    var q = ((document.querySelector("[data-cfind]") || {}).value || "").trim().toLowerCase();
+    var kind = (document.querySelector("[data-ckind]") || {}).value || "";
+    var sort = (document.querySelector("[data-csort]") || {}).value || "";
+    var body = t.tBodies[0], rows = Array.prototype.slice.call(body.querySelectorAll("[data-crow]"));
+    var by = {
+      "": function (a, b) { return a.dataset.i - b.dataset.i; },
+      name: function (a, b) { return a.dataset.name.localeCompare(b.dataset.name); },
+      problem: function (a, b) { return (a.dataset.state - b.dataset.state) || (a.dataset.i - b.dataset.i); },
+      kind: function (a, b) { return a.dataset.kind.localeCompare(b.dataset.kind) || (a.dataset.i - b.dataset.i); }
+    }[sort] || function (a, b) { return a.dataset.i - b.dataset.i; };
+    rows.sort(by).forEach(function (r) {
+      body.appendChild(r);
+      r.hidden = (kind && r.dataset.kind !== kind) || (q && r.textContent.toLowerCase().indexOf(q) < 0);
+    });
+  }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-csec-go], [data-cmach-go], [data-cmach-open]");
+    if (!b) return;
+    if (b.hasAttribute("data-csec-go")) remember("sec", "csec", b.getAttribute("data-csec-go"));
+    if (b.hasAttribute("data-cmach-go")) remember("mach", "cmach", b.getAttribute("data-cmach-go"));
+    if (b.hasAttribute("data-cmach-open")) {   // a machine's row in Connection status: open its machine data
+      remember("sec", "csec", "machines");
+      remember("mach", "cmach", b.getAttribute("data-cmach-open"));
+      apply();
+      var nav = document.querySelector("[data-csecnav]");
+      if (nav) nav.scrollIntoView({ block: "start" });
+      return;
+    }
+    apply();
+  });
+  document.addEventListener("input", function (e) { if (e.target.matches && e.target.matches("[data-cfind]")) table(); });
+  document.addEventListener("change", function (e) { if (e.target.matches && e.target.matches("[data-ckind], [data-csort]")) table(); });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
+  document.addEventListener("htmx:afterSettle", apply);
+})();

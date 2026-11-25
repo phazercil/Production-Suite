@@ -17,11 +17,6 @@ from .models import (AuditLog, Downtime, LineState, MachineError, MoRun, Notice,
                      TicketPhoto)
 
 QDEF = {
-    "changeover_steps": {"title": "Changeover steps", "help": "One row per step, in the order operators do them.", "order": True,
-                         "roles": [["step", "Step text", 1], ["seq", "Step order"], ["detail", "Detail / note"], ["setting", "Setting name"],
-                                   ["value", "Setting value"], ["unit", "Unit"], ["asset", "Asset / tool"], ["image", "Photo URL"]]},
-    "asset_settings": {"title": "Machine settings for the part", "help": "One row per setting, shown above the steps (pleat height, glue temperature, blade, dies…).",
-                       "roles": [["name", "Setting", 1], ["value", "Value", 1], ["unit", "Unit"], ["asset", "Asset"]]},
     "part_spec": {"title": "Part specs (drawing)", "help": "One row for the part. \"Get updated drawing\" copies these into Parts & specs, so QC checks use them.",
                   "perPart": True,
                   "roles": [["rev", "Drawing rev"], ["pleats", "Pleats per unit"], ["len", "Length"], ["wid", "Width"], ["ph", "Pleat height"],

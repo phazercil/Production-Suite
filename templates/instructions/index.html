@@ -17,9 +17,11 @@
     <td class="nw">{% if r.draft %}<span class="pill idle">rev {{ r.draft.rev }} draft</span>{% else %}—{% endif %}</td>
     <td class="n">{{ r.acks }}</td></tr>
   {% empty %}<tr><td colspan="6" class="empty">No work instructions yet.{% if canEdit %} Add the first one below.{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+  {% if savedCo %}<div class="card"><h2>Changeover steps saved from the asset database</h2><p class="note">Changeovers now take their steps and settings from approved Changeover instructions here, not the asset database. {{ savedCo }} set{{ savedCo|pluralize }} of steps the suite last read from it {{ savedCo|pluralize:"is,are" }} still kept: make them draft instructions to check and approve.</p>
+    <form method="post" action="/instructions/do/wiImportSaved">{% csrf_token %}<button class="btn" data-confirm="Make a draft Changeover instruction for each machine and part with saved steps?">Make them drafts</button></form></div>{% endif %}
   {% if canEdit %}<div class="card"><h2>New work instruction</h2>
     <form method="post" action="/instructions/do/wiCreate" class="wi-grid">{% csrf_token %}
-      <label class="wide">Title<input name="title" required maxlength="160" placeholder="e.g. Pleater setup: MG cabin filters"></label>
+      <label class="wide">Title<input name="title" required maxlength="160" placeholder="e.g. P7 pleaters changeover: MG cabin filters"></label>
       <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
       <label>Parts <small>(comma-separated, * for any; blank: every part)</small><input name="parts" maxlength="400" placeholder="MG4062*, AQ12*"></label>
       <fieldset class="wide"><legend>Machines <small>(none ticked: every machine)</small></legend>{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}"> {{ m.name }}</label>{% endfor %}</fieldset>

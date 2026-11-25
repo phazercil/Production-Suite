@@ -86,9 +86,9 @@ def _slots(defs, current):
 
 
 # The builder's pages: each data need is on one
-PAGES = [("machines", "Machines"), ("mos", "MOs & schedule"), ("filters", "Filter dimensions"), ("changeover", "Changeover & tooling")]
+PAGES = [("machines", "Machines"), ("mos", "MOs & schedule"), ("filters", "Filter dimensions"), ("changeover", "Tooling")]
 QUERY_PAGE = {"part_spec": "filters", "part_drawing": "filters", "filter_3d": "filters",
-              "changeover_steps": "changeover", "asset_settings": "changeover", "part_tooling": "changeover"}
+              "part_tooling": "changeover"}
 
 
 def page_of(g):
@@ -140,8 +140,6 @@ def groups():
         defs = [("f_part", "Part number (to look the part up)", True, "")]
         if not D.get("perPart"):
             defs.append(("f_machine", "Machine (blank rows = every machine)", False, ""))
-        if name == "changeover_steps":
-            defs.append(("f_from", "Part changing from", False, ""))
         defs += [(r[0], r[1], bool(len(r) > 2 and r[2]), "") for r in D["roles"]]
         out.append({"key": f"q:{name}", "kind": "query", "title": D["title"], "sub": D["help"], "color": "",
                     "dbs": ["assets"] if name == "filter_3d" else ["assets", "viewer"], "db": "viewer" if sv and integrations.is_viewer_sql(sv.sql) else "assets",

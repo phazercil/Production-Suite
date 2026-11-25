@@ -12,7 +12,7 @@ from hmi.models import AuditLog, AutoQC, Downtime, QCCheck, ShiftRun
 from plant.demo import seed_demo
 from plant.models import MO, Person, PlantSettings
 
-from .test_suite import no_planned_time
+from .test_suite import no_planned_time, specs_from_asset_db
 
 
 def set_tols(t):
@@ -308,6 +308,7 @@ class FreshDimensionTests(TestCase):
     """A QC check is judged against the asset database's drawing as it is now, and never against made-up numbers."""
 
     def setUp(self):
+        specs_from_asset_db(self)
         from hmi.models import SavedQuery
         no_planned_time(self)
         cache.clear()
@@ -369,6 +370,7 @@ class PartsTabTests(TestCase):
     """Quality › Parts & specs: the table, importing pasted part numbers from the asset database, and units."""
 
     def setUp(self):
+        specs_from_asset_db(self)
         from hmi.models import SavedQuery
         seed_demo(reset=True)
         cache.clear()
@@ -577,6 +579,7 @@ class NoGuessedSpecsTests(TestCase):
     re-reads every part."""
 
     def setUp(self):
+        specs_from_asset_db(self)
         from hmi.models import SavedQuery
         cache.clear()
         seed_demo(reset=True)
@@ -627,6 +630,7 @@ class AddedMeasurementTests(TestCase):
     QC item, and the page says when the asset database doesn't read it yet."""
 
     def setUp(self):
+        specs_from_asset_db(self)
         cache.clear()
         seed_demo(reset=True)
         self.lead = engine.Ctx(user=Person.objects.get(pin="4444"))

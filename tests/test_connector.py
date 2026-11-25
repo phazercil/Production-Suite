@@ -10,6 +10,8 @@ from hmi.models import SavedQuery, SourceCard
 from plant.demo import seed_demo
 from plant.models import Machine, Person
 
+from .test_suite import specs_from_asset_db
+
 SCHEMA = {"database": "dashboard", "tables": [
     {"name": "pleater_log", "columns": [{"name": n, "type": "int"} for n in ("id", "logged_at", "machine", "ppm", "cut_count", "run_bit")]},
     {"name": "open_orders", "columns": [{"name": n, "type": "varchar"} for n in ("mo_number", "item_number", "qty_open", "status")]},
@@ -43,8 +45,10 @@ class ConnectorTests(Base):
         keys = [g["key"] for g in connector.groups()]
         self.assertIn(f"m:{Machine.objects.get(name='Barbara').pk}", keys)
         self.assertIn("s2k", keys)
-        for q in ("changeover_steps", "asset_settings", "part_spec", "part_tooling"):
+        for q in ("part_spec", "part_tooling"):
             self.assertIn(f"q:{q}", keys)
+        for q in ("changeover_steps", "asset_settings"):   # written as work instructions in the suite now
+            self.assertNotIn(f"q:{q}", keys)
         s = connector.summary(connector.groups())
         self.assertIn("Open MOs", [x["title"] for x in s["missing"]])
 
@@ -148,7 +152,7 @@ class ConnectorTests(Base):
         with mock.patch.object(connector.integrations, "preview", return_value={"rows": [{"ppm": 180, "machine": "Barbara"}]}), \
                 mock.patch.object(kadmin, "tables", return_value={"err": "", "ready": True, "tables": SCHEMA["tables"]}):
             r = cl.get("/kiosk/v/admin?tab=connector&cpage=machines").content.decode()
-            for label in ("Machines", "MOs &amp; schedule", "Filter dimensions", "Changeover &amp; tooling"):
+            for label in ("Machines", "MOs &amp; schedule", "Filter dimensions", "Tooling"):
                 self.assertIn(label, r)
             self.assertIn(f'data-group="m:{bar.pk}"', r)
             self.assertNotIn('data-group="q:filter_3d"', r)
@@ -166,8 +170,8 @@ class ConnectorTests(Base):
             self.assertIn("cgroup st-", r)
             self.assertNotIn('data-group="q:filter_3d"', r)
             r = cl.get("/kiosk/v/admin?tab=connector&cpage=changeover").content.decode()
-            for k in ("q:changeover_steps", "q:asset_settings", "q:part_tooling"):
-                self.assertIn(f'data-group="{k}"', r)
+            self.assertIn('data-group="q:part_tooling"', r)
+            self.assertNotIn('data-group="q:changeover_steps"', r)
 
     def test_hand_written_sql_is_marked_custom(self):
         SavedQuery.objects.create(name="part_spec", sql="select a.x as rev from (select 1) a", saved_by="x")
@@ -395,12 +399,12 @@ class AttributeTableTests(Base):
         from django.template.loader import render_to_string
         gs = {g["key"]: g for g in connector.groups()}
         self.assertEqual(set(gs["q:part_spec"]["filterable"]), {"rev", "pleats", "len", "wid", "ph", "sb", "tol", "media"})
-        self.assertEqual(gs["q:asset_settings"]["filterable"], [])
+        self.assertEqual(gs["q:part_tooling"]["filterable"], [])
         html = render_to_string("hmi/k/admin/_cgroup.html", {"g": gs["q:part_spec"], "C": {"groups": list(gs.values())}, "tabCan": True})
         self.assertIn('data-for="len"', html)
         self.assertNotIn('data-for="f_part"', html)
         self.assertIn("PAID = the code for length", html)
-        self.assertNotIn('class="sfil"', render_to_string("hmi/k/admin/_cgroup.html", {"g": gs["q:asset_settings"], "C": {}, "tabCan": True}))
+        self.assertNotIn('class="sfil"', render_to_string("hmi/k/admin/_cgroup.html", {"g": gs["q:part_tooling"], "C": {}, "tabCan": True}))
 
     def test_test_data_runs_the_folded_query(self):
         c = SourceCard.objects.get(pk=self.card("assets", "part_attribute"))
@@ -426,6 +430,7 @@ class DrawingFileTests(Base):
 
     def setUp(self):
         super().setUp()
+        specs_from_asset_db(self)
         sch = {**SCHEMA, "tables": SCHEMA["tables"] + [
             {"name": "part_attribute", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "PAID", "value")]},
             {"name": "part_drawing", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "revision", "s3_url", "updated")]}]}

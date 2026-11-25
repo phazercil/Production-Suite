@@ -242,6 +242,9 @@ class PartSpec(models.Model):
     rev = models.CharField(max_length=20, default="A")
     media = models.CharField(max_length=80, blank=True)
     drawing_url = models.URLField(max_length=2048, blank=True, default="")   # the drawing file (Admin › Connector builder › Drawing file)
+    # the filter's own tolerances from its information sheet in the 3D viewer's library: {spec: {"minus", "plus"}} in
+    # inches. They come before Quality › Tolerances (every filter) and Tol ± (hmi/qc.py tol_for).
+    sheet_tol = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["key"]
@@ -250,7 +253,7 @@ class PartSpec(models.Model):
     def as_dict(self):
         return {**{k: v for k, v in (self.extra or {}).items() if isinstance(k, str) and k.startswith("x")},
                 "key": self.key, "pleats": self.pleats, "len": self.len, "wid": self.wid, "ph": self.ph, "sb": self.sb,
-                "tol": self.tol, "rev": self.rev, "media": self.media, "url": self.drawing_url}
+                "tol": self.tol, "rev": self.rev, "media": self.media, "url": self.drawing_url, "sheetTol": self.sheet_tol or {}}
 
 
 class CostItem(models.Model):
@@ -414,7 +417,7 @@ DEFAULT_CONFIG = {
               "photoDays": 365, "qcLate": 10},
 }
 DEFAULT_SETTINGS = {
-    "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "assetsEvery": 1, "influxEvery": 1, "webhook": "", "useDb": False,
+    "autoQC": True, "qcEvery": 30, "s2kUrl": "", "s2kSource": "url", "s2kEvery": 0, "peopleUrl": "", "peopleEvery": 0, "assetsEvery": 1, "influxEvery": 1, "webhook": "", "useDb": False, "specsFrom": "3d",
     "grafana": {"on": False, "url": "", "uid": "", "slug": "pleat-lines", "org": 1, "ppm": 2, "uptime": 4, "count": 6, "refresh": "10s",
                 "lineVar": "line"},
     "paycom": {"auto": False, "every": 60, "dept": "", "position": "", "pinFrom": "code", "last": None, "msg": ""},

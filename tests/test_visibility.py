@@ -17,10 +17,12 @@ from plant.models import Machine, Person, PlantSettings
 from reports import engine as rep
 
 from .test_quality import sup_login
+from .test_suite import no_planned_time
 
 
 class OeeAndDowntime(TestCase):
     def setUp(self):
+        no_planned_time(self)   # the window is two days ago at this time of day: it can fall on a planned break
         seed_demo(reset=True)
         self.bar = Machine.objects.get(name="Barbara")
         self.bar.ppm = 200

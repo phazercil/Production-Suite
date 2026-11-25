@@ -22,3 +22,23 @@
 .wi-actions{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
 .wi-up{display:flex;gap:10px;align-items:end;margin-top:14px;flex-wrap:wrap}
 .wi-up label{display:flex;flex-direction:column;gap:4px}
+.wi-step-list{display:flex;flex-direction:column}
+.wi-row-tools{display:flex;gap:4px;align-items:flex-start;padding-top:2px}
+.wi-edit-step .wi-row-tools{display:grid;grid-template-columns:repeat(2,34px);gap:4px;align-content:start}
+.wi-row-tools .btn{min-width:34px;justify-content:center}
+td.wi-row-tools{width:1%;white-space:nowrap}
+.wi-vars{display:flex;flex-direction:column;gap:6px;margin:6px 0 4px}
+.wi-vars label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--s-muted);max-width:420px}
+.wi-vars select,.wi-try input{font:500 14px var(--s-body);color:var(--s-ink);background:var(--s-ground,#111);border:1px solid var(--s-rule);border-radius:8px;padding:7px 9px}
+.wi-vars code{font-size:12px}
+.wi-params input[data-wi-formula]{font-family:var(--s-mono,monospace);font-size:13px}
+.wi-try{display:flex;gap:10px;align-items:end;margin-top:14px;flex-wrap:wrap}
+.wi-try label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--s-muted)}
+form[data-wi-form] .wi-params{table-layout:fixed;width:100%}
+form[data-wi-form] .wi-params th:nth-child(1){width:15%}form[data-wi-form] .wi-params th:nth-child(2){width:17%}
+form[data-wi-form] .wi-params th:nth-child(6){width:80px}form[data-wi-form] .wi-params th:nth-child(7){width:48px}
+.wi-addpic{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.wi-addpic label.btn{cursor:pointer}
+.wi-picked{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wi-new{display:inline-flex;align-items:center;border:1px dashed var(--s-rule);border-radius:6px;padding:3px;font-size:12px}
+.wi-new img{height:44px;border-radius:4px}

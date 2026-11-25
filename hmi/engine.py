@@ -1035,71 +1035,22 @@ def run_scrap(sh, mo):
 
 
 def load_changeover_steps(sh, co):
-    """Steps and settings for the new part: asset database, else the last saved copy, else the standard checklist."""
-    st = settings_obj()
-    params = co_params(sh, co)
+    """Steps and settings for the new part: its approved changeover work instruction (Quality › Work instructions),
+    else the standard checklist (Admin › Checklists). Kept in the suite: no outside database."""
+    from instructions.cmds import changeover_checklist, changeover_for
     old = MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None
     new = MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None
     co["inkjet"] = inkjet_change(old, new)
-    if co["inkjet"]:   # same base part: only the inkjet branding changes
+    co.pop("cacheT", None)
+    co.pop("wi", None)
+    x, r = changeover_for(sh.machine, new.part if new else "", co["inkjet"])
+    if r:
+        steps, sets, wi = changeover_checklist(x, r, new.part if new else "")
+        co.update({"steps": steps, "settings": sets, "src": "wi", "wi": wi, "err": ""})
+    elif co["inkjet"]:   # same base part: only the inkjet branding changes
         co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
-        return
-    co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
-    if not (st.settings.get("useDb") and integrations.query_ready("changeover_steps")):
-        return
-    q = SavedQuery.objects.filter(name="changeover_steps").first()
-    qs = SavedQuery.objects.filter(name="asset_settings").first()
-    if not q:
-        return
-    try:
-        rows = integrations.run_saved(q.sql, params)["rows"]
-        steps = norm_steps(rows)
-        sets = norm_settings(integrations.run_saved(qs.sql, params)["rows"]) if qs else []
-        if steps:
-            co.update({"steps": steps, "settings": sets, "src": "db"})
-            ChangeoverCache.objects.update_or_create(part=params["part"], machine=sh.line,
-                                                     defaults={"steps": steps, "settings": sets, "t": now()})
-        else:
-            co["src"] = "admin-empty"
-    except Exception as e:  # database unreachable or query failed
-        log.warning("changeover lookup failed: %s", e)
-        cache = ChangeoverCache.objects.filter(part=params["part"], machine=sh.line).first()
-        if cache:
-            co.update({"steps": cache.steps, "settings": cache.settings, "src": "cache", "cacheT": ms(cache.t)})
-        else:
-            co["src"] = "admin-offline"
-
-
-def co_params(sh, co):
-    m = MO.objects.filter(pk=co.get("newMo")).first() if co and co.get("newMo") else sh.mo
-    old = MO.objects.filter(pk=co.get("oldMo")).first() if co and co.get("oldMo") else None
-    return {"part": part_key(m.part) if m else "", "machine": sh.line, "from_part": part_key(old.part) if old else "",
-            "mo": m.number if m else "", **machine_params(sh.machine)}
-
-
-def norm_steps(rows):
-    out = []
-    lc = [({str(k).lower(): v for k, v in r.items()}, i) for i, r in enumerate(rows or [])]
-    if all(o.get("seq") is not None for o, _ in lc):
-        lc.sort(key=lambda x: (float(x[0]["seq"]) if str(x[0]["seq"]).replace(".", "", 1).isdigit() else 0, x[1]))
-    for o, _ in lc:
-        text = str(o.get("step") or o.get("instruction") or o.get("text") or "").strip()
-        if text:
-            out.append({"text": text, "detail": str(o.get("detail") or ""), "setting": str(o.get("setting") or ""),
-                        "value": "" if o.get("value") is None else str(o["value"]), "unit": str(o.get("unit") or ""),
-                        "asset": str(o.get("asset") or ""), "image": str(o.get("image") or "")})
-    return out
-
-
-def norm_settings(rows):
-    out = []
-    for r in rows or []:
-        o = {str(k).lower(): v for k, v in r.items()}
-        name = str(o.get("name") or o.get("setting") or "").strip()
-        if name:
-            out.append({"name": name, "value": "" if o.get("value") is None else str(o["value"]), "unit": str(o.get("unit") or ""),
-                        "asset": str(o.get("asset") or "")})
-    return out
+    else:
+        co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
 
 
 @cmd("coPick")
@@ -1172,7 +1123,7 @@ def known_part(part):
     """True when the suite knows this filter: the cost sheet, Parts & specs, or the asset database has it."""
     if (Catalog().matches(part) or [None])[0] or PartSpec.objects.filter(key=part_key(part)).exists():
         return True
-    if integrations.query_ready("part_spec", "part_drawing"):
+    if specs_from_library() or integrations.query_ready("part_spec", "part_drawing"):
         try:
             pull_drawing(part_key(part))
         except Exception as e:  # noqa: BLE001
@@ -1304,6 +1255,8 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     co_piece(sh, ctx.now, "finished")
+    from instructions.cmds import ack_from_changeover
+    ack_from_changeover(co, ctx.user, sh.line, ctx.now)   # finishing it from a work instruction counts as reading it
     pending = int(co.get("pending") or 0)   # made after the machine ran, before an MO was picked: this MO's
     if pending:
         MO.objects.filter(pk=m.pk).update(produced=F("produced") + pending)
@@ -1789,10 +1742,58 @@ def _first_row(name, key, ctx):
 SPEC_NUMS = ("pleats", "len", "wid", "ph", "sb", "tol")
 
 
+def specs_from_library():
+    """Filter dimensions come from the 3D filter library (in the suite), not the asset database (Admin › Part data)."""
+    return (settings_obj().settings.get("specsFrom") or "3d") == "3d"
+
+
+def pull_specs_3d(key, ctx=None):
+    """Parts & specs from the 3D filter library (Quality › 3D viewer): pleats, overall length, width, pleat height and
+    side band height, in inches, worked out as the viewer does. A value the library doesn't have (or still flags as
+    needing review) stays as typed in Parts & specs, else blank: never a guess. Tolerance, drawing rev, media and the
+    measurements added in Quality › Tolerances stay as they are on file; the drawing file's link and rev still come
+    from the asset database when Drawing file is wired there. Returns what happened in a sentence."""
+    from quality import viewer
+    ctx = ctx or Ctx()
+    x = viewer.find(key)
+    if not x:
+        return f"{key} isn't in the 3D filter library. Showing the dimensions on file."
+    d = viewer.dims(x)
+    lib = {"pleats": d["pleats"], "len": d["olen"], "wid": d["wid"], "ph": d["ph"], "sb": d["sb"]}
+    vals = {f: (round(v, 0) if f == "pleats" else round(v / 25.4, 4)) for f, v in lib.items() if v is not None}
+    ps = PartSpec.objects.filter(key=key).first()
+    hand = set(ps.hand or []) if ps else set()
+    keep = {f: (vals[f] if f in vals else getattr(ps, f) if ps and f in hand else None) for f in lib}
+    keep["tol"] = ps.tol if ps else None
+    defaults = {**keep, "rev": ps.rev if ps else "", "sheet_tol": viewer.sheet_tols(x)}
+    if not (ps and "media" in hand):
+        mtype = str(((x.data or {}).get("info") or {}).get("mtype") or "").strip()[:80]
+        if mtype:
+            defaults["media"] = mtype
+    if integrations.query_ready("part_drawing"):   # the drawing file itself (a link to the PDF) when wired
+        try:
+            dr = _first_row("part_drawing", key, ctx) or {}
+        except Exception as e:  # noqa: BLE001 - the dimensions still load
+            log.warning("drawing file lookup for %s failed: %s", key, e)
+            dr = {}
+        url = _drawing_link(dr.get("url"))
+        if url:
+            defaults["drawing_url"] = url
+        if str(dr.get("rev") or "").strip():
+            defaults["rev"] = str(dr["rev"]).strip()[:20]
+    PartSpec.objects.update_or_create(key=key, defaults=defaults)
+    missing = [SPEC_LABEL[f] for f in lib if keep[f] is None and not (f == "sb" and not d["side_on"])]
+    return f"{key}: dimensions loaded from the 3D filter library ({fmt_t(ctx.now)})." + (
+        f" Not in the library (left blank): {', '.join(missing)}." if missing else "")
+
+
 def pull_drawing(key, ctx=None):
-    """The part's drawing from the asset database into Parts & specs: Part specs (dimensions, rev) and Drawing file
-    (rev, link). The drawing file's rev wins: it comes with the file operators open. Returns what happened in a
-    sentence, or None when no drawing queries are set up. Raises when the database can't be read."""
+    """The part's drawing into Parts & specs: from the 3D filter library (specs_from_library), else from the asset
+    database: Part specs (dimensions, rev) and Drawing file (rev, link). The drawing file's rev wins: it comes with
+    the file operators open. Returns what happened in a sentence, or None when no drawing queries are set up. Raises
+    when the database can't be read."""
+    if specs_from_library():
+        return pull_specs_3d(key, ctx)
     if not integrations.query_ready("part_spec", "part_drawing"):
         return None
     ctx = ctx or Ctx()
@@ -2942,9 +2943,12 @@ def parts_import(p, ctx):
     keys = list(dict.fromkeys(k for k in (part_key(w) for w in words) if k))
     need(keys, "Paste the part numbers to import.")
     need(len(keys) <= 500, f"That's {len(keys)} parts: import 500 or fewer at a time.")
-    need(SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
-         "Wire Part specs (and Drawing file) to the asset database or the 3D viewer part library first (Admin › Connector builder).")
-    need(integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
+    lib = specs_from_library()
+    if not lib:
+        need(SavedQuery.objects.filter(name__in=("part_spec", "part_drawing")).exists(),
+             "Wire Part specs (and Drawing file) to the asset database or the 3D viewer part library first (Admin › Connector builder).")
+        need(integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
+    src = "the 3D filter library" if lib else "the asset database"
     done, missing, failed = [], [], []
     for k in keys:
         try:
@@ -2952,11 +2956,12 @@ def parts_import(p, ctx):
         except Exception as e:  # noqa: BLE001 - one part's trouble doesn't stop the rest
             failed.append(f"{k} ({str(e)[:80]})")
             continue
-        (done if msg.startswith("Drawing rev") and "loaded" in msg else missing).append(k)
-    audit(ctx, f"Parts imported from the asset database: {len(done)} of {len(keys)}" + (f"; not found: {', '.join(missing)[:400]}" if missing else ""))
+        loaded = "loaded from the 3D filter library" in msg if lib else (msg.startswith("Drawing rev") and "loaded" in msg)
+        (done if loaded else missing).append(k)
+    audit(ctx, f"Parts imported from {src}: {len(done)} of {len(keys)}" + (f"; not found: {', '.join(missing)[:400]}" if missing else ""))
     out = f"Imported {len(done)} of {len(keys)} part{'s' if len(keys) != 1 else ''}."
     if missing:
-        out += f" No dimensions in the asset database for: {', '.join(missing[:30])}{'…' if len(missing) > 30 else ''}."
+        out += f" No dimensions in {src} for: {', '.join(missing[:30])}{'…' if len(missing) > 30 else ''}."
     if failed:
         out += f" Couldn't read: {', '.join(failed[:5])}."
     return {"msg": out, "data": {"done": done, "missing": missing, "failed": failed}}
@@ -2966,7 +2971,8 @@ def parts_import(p, ctx):
 def parts_refresh(p, ctx):
     """Quality › Parts & specs › Refresh: connect to the asset database again and re-read every part listed (and every
     part an open MO runs), so the dimensions, rev and drawing link are the database's latest."""
-    need(integrations.assets_ready() or integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
+    lib = specs_from_library()
+    need(lib or integrations.assets_ready() or integrations.query_ready("part_spec", "part_drawing"), "The asset database isn't set up yet (Admin › Connections).")
     from django.core.cache import cache
     from django.db import connections
     for alias in ("assets",):   # a fresh connection: settings or the server may have changed
@@ -2981,8 +2987,9 @@ def parts_refresh(p, ctx):
     r = parts_import({"parts": keys}, ctx) if keys else {"msg": "No parts to refresh.", "data": {}}
     for k in keys:
         cache.delete("spec-fresh:" + k)
-    integrations.set_conn("assets", not (r.get("data") or {}).get("failed"), f"Refreshed {len(keys)} parts")
-    return {"msg": "Refreshed from the asset database. " + r["msg"], "data": r.get("data")}
+    if not lib:
+        integrations.set_conn("assets", not (r.get("data") or {}).get("failed"), f"Refreshed {len(keys)} parts")
+    return {"msg": ("Refreshed from the 3D filter library. " if lib else "Refreshed from the asset database. ") + r["msg"], "data": r.get("data")}
 
 
 @cmd("assetUnitsSet", "quality.tolerances")
@@ -3019,7 +3026,7 @@ def rule_set(p, ctx):
     audit(ctx, f"Rule {p['k']} set to {v:g}")
 
 
-SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2kEvery": "n", "peopleUrl": "s", "peopleEvery": "n", "assetsEvery": "n", "influxEvery": "n", "webhook": "s", "useDb": "b",
+SETTINGS = {"autoQC": "b", "qcEvery": "n", "s2kUrl": "s", "s2kSource": "s", "s2kEvery": "n", "peopleUrl": "s", "peopleEvery": "n", "assetsEvery": "n", "influxEvery": "n", "webhook": "s", "useDb": "b", "specsFrom": "s",
             "grafana.on": "b", "grafana.url": "s", "grafana.uid": "s", "grafana.slug": "s", "grafana.org": "n", "grafana.ppm": "n",
             "grafana.uptime": "n", "grafana.count": "n", "grafana.refresh": "s", "grafana.lineVar": "s",
             "paycom.auto": "b", "paycom.every": "n", "paycom.dept": "s", "paycom.position": "s", "paycom.positionExact": "b", "paycom.pinFrom": "s",
@@ -3050,6 +3057,8 @@ def setting_set(p, ctx):
         need(isinstance(v, list), "Expected a list.")
     else:
         v = str("" if v is None else v).strip()
+    if k == "specsFrom":
+        need(v in ("3d", "db"), "Filter dimensions come from the 3D filter library or the asset database.")
     if k == "qcEvery":
         v = max(5, v or 30)
         if v != settings_obj().settings.get("qcEvery"):
@@ -3855,7 +3864,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "filter_3d": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "filter_3d": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):

@@ -20,7 +20,7 @@ from suite import thin
 from . import engine, integrations
 
 LEAD_TABS = {"shifts", "reasons", "checklists", "maintenance", "parts", "rules"}   # a shift lead can change these; the rest need an Admin
-TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Changeover data"), ("shifts", "Machine schedule"),
+TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", "Connector builder"), ("codata", "Part data"), ("shifts", "Machine schedule"),
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
         ("rules", "Rules"), ("health", "Health"), ("alerts", "Alerts"), ("sensors", "Sensors & alarms"), ("cameras", "Cameras"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
@@ -31,10 +31,11 @@ LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick fr
          "checklists": [("safety", "QC and safety checklist", "Every item must be checked before the line can start."),
                         ("pm", "Shift PM checklist", "Recorded at start of shift; not required to start."),
                         ("endSteps", "End-of-order checklist", "Checked off with the final count when an order ends (End order), before the changeover starts."),
-                        ("coSteps", "Changeover steps", "Shown in order during a changeover. All must be checked before running. Steps from the "
-                                                        "asset database (Changeover data) come first when it has them for the part."),
+                        ("coSteps", "Changeover steps", "Shown in order during a changeover. All must be checked before running. An approved "
+                                                        "changeover work instruction for the machine and part (Quality › Work instructions) is used instead when there is one."),
                         ("inkjetSteps", "Inkjet-only changeover", "Used instead of the changeover steps when the next filter has the same base "
-                                                                  "part (AQ1278 → AQ1278C; set in Scheduler › Lines & Shifts): only the inkjet branding changes.")],
+                                                                  "part (AQ1278 → AQ1278C; set in Scheduler › Lines & Shifts): only the inkjet branding changes. An approved "
+                                                                  "Inkjet change work instruction for the machine is used instead when there is one.")],
          "maintenance": [("issueTypes", "Issue types", "Choices on a maintenance ticket."),
                          ("equipment", "Other equipment", "Listed after the machines when someone opens a ticket."),
                          ("failureCodes", "Failure codes", "What failed, picked when a repair is worked (Maintenance › request › Work order). Repeats of the same failure on a machine lead to a corrective action."),
@@ -268,7 +269,9 @@ def connections_data(s, request):
             "assetsEvery": st.get("assetsEvery", 1), "influxEvery": st.get("influxEvery", 1)}
     status = [{"k": k, "label": lbl, "addr": addr, "c": conn.get(k),
                "every": {"key": every[k][0], "min": every[k][1], "help": every[k][2], "v": vals[every[k][0]]} if k in every else None,
-               "fixed": fixed.get(k) or ("every minute (each minute is counted)" if k.startswith("feed:") else "")}
+               "fixed": fixed.get(k) or ("every minute (each minute is counted)" if k.startswith("feed:") else ""),
+               "kind": kind_of(k), "kindLabel": {"machine": "Machine", "database": "Database", "service": "Connection"}[kind_of(k)],
+               "machine": k[5:] if k.startswith("feed:") else ""}
               for k, lbl, addr in rows]
     out = {"status": status, "srv": srv, "g": g, "kiosk": st.get("kiosk") or {}, "pc": pc, "st": st,
            "panelsText": "\n".join(f"{x.get('title')} = {x.get('panel')}" for x in (st.get("kiosk") or {}).get("panels", [])),
@@ -278,7 +281,7 @@ def connections_data(s, request):
         out["I"] = info
         out["dbBoxes"] = [db_box(info, "s2k", "S2K database (read-only)", "Open MOs for the Scheduler. After saving, set up the query under S2K schedule below."),
                           db_box(info, "machines", "Machine data database (read-only)", "The database the machines (PLCs, data loggers) write their readings to. Pick each machine's table under Machine data below."),
-                          db_box(info, "assets", "Asset database (read-only)", "Changeover steps, machine settings and drawing specs. Queries are set up on the Changeover data tab.")]
+                          db_box(info, "assets", "Asset database (read-only)", "Part specs, drawings, tooling and 3D filter data. Queries are set up on the Part data tab.")]
         out["influxBox"] = influx_box(info)
         out["sources"] = sources_data(s, request)
         out["s2k"] = s2k_data(s, request)
@@ -414,7 +417,7 @@ def guess_columns(qname, cols):
     low = [c.lower() for c in cols]
     out = {}
     for k, names in GUESS.items():
-        if k == "f_from" and qname != "changeover_steps":
+        if k == "f_from":
             continue
         if k == "f_machine" and QDEF[qname].get("perPart"):
             continue
@@ -500,12 +503,20 @@ def norm_settings(rows):
     return out
 
 
+def kind_of(k):
+    """What a Connection status row is, for its Show filter: a machine's data, a database, or another connection."""
+    if k.startswith("feed:"):
+        return "machine"
+    return "database" if k in ("store", "machines", "assets", "s2kdb", "influx", "influxOut") else "service"
+
+
 def codata_data(s, request, states=None):
     from .models import SavedQuery
     from .snapshot import qdef
     QDEF = qdef()
     srv_assets = integrations.assets_ready()
-    out = {"assets": srv_assets, "useDb": s.settings.get("useDb")}
+    out = {"assets": srv_assets, "useDb": s.settings.get("useDb"), "specsFrom": s.settings.get("specsFrom") or "3d",
+           "specsChoices": [("3d", "3D filter library (in the suite)"), ("db", "Asset database (Part specs in the Connector builder)")]}
     if not srv_assets or not s.can("connections.edit"):
         return out
     T = tables("assets")
@@ -532,7 +543,7 @@ def codata_data(s, request, states=None):
             if name == "part_tooling":
                 from .runinfo import norm_tooling
                 q_["tooling"] = [g for g in norm_tooling(res["rows"]) if g["items"]]
-            q_["preview"] = norm_steps(res["rows"]) if name == "changeover_steps" else norm_settings(res["rows"]) if name == "asset_settings" else res["rows"]
+            q_["preview"] = res["rows"]
         qs.append(q_)
     out["queries"] = qs
     out["browse"] = (states or {}).get("_browse")
@@ -706,7 +717,7 @@ def accounts_panel(request, s, g=None, form=None, msg=None, key=None):
     boxes = []
     for k, t, h in (("s2k", "S2K database (read-only)", "Open MOs for the Scheduler. After saving, set up the query under S2K schedule below."),
                     ("machines", "Machine data database (read-only)", "The database the machines (PLCs, data loggers) write their readings to. Pick each machine's table under Machine data below."),
-                    ("assets", "Asset database (read-only)", "Changeover steps, machine settings and drawing specs. Queries are set up on the Changeover data tab.")):
+                    ("assets", "Asset database (read-only)", "Part specs, drawings, tooling and 3D filter data. Queries are set up on the Part data tab.")):
         boxes.append(db_box(info, k, t, h, form if g == k else None, msg if g == k else None))
     ctx = {"S": s, "I": info, "dbBoxes": boxes, "influxBox": influx_box(info, form if g == "influx" else None, msg if g == "influx" else None),
            "msgs": {g: msg} if g and msg else {}, "hold": bool(msg or key or form), "pcForm": form if g == "paycom" else None, "newKey": key}

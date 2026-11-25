@@ -1,5 +1,8 @@
-"""Digital work instructions (Quality › Work instructions): machine- and part-specific setup, changeover and
+"""Digital work instructions (Quality › Work instructions): machine- and part-specific changeover and
 operating instructions with photos, videos and approved process parameters, under revision control.
+
+Changeover and Inkjet change instructions are also the kiosk's changeover checklist: the approved one for the machine and
+the part being changed to gives the steps operators tick off and the settings shown above them.
 
 An Instruction is the document (WI-001 …). Each change is a Revision: written as a draft, approved by someone with
 "Approve work instructions", and then it is the one the kiosks show; the revision it replaces becomes obsolete
@@ -8,11 +11,11 @@ from django.db import models
 
 
 class Instruction(models.Model):
-    KINDS = [("setup", "Setup"), ("changeover", "Changeover"), ("operation", "Operation"), ("quality", "Quality check"), ("safety", "Safety"),
+    KINDS = [("changeover", "Changeover"), ("inkjet", "Inkjet change"), ("operation", "Operation"), ("quality", "Quality check"), ("safety", "Safety"),
              ("maintenance", "Maintenance")]
     doc_no = models.CharField(max_length=20, unique=True)
     title = models.CharField(max_length=160)
-    kind = models.CharField(max_length=12, choices=KINDS, default="setup")
+    kind = models.CharField(max_length=12, choices=KINDS, default="changeover")
     machines = models.ManyToManyField("plant.Machine", blank=True, related_name="instructions", help_text="None: every machine")
     parts = models.CharField(max_length=400, blank=True, help_text="Part numbers it's for, comma-separated; * matches anything (MG4062*, AQ12*). Blank: every part")
     active = models.BooleanField(default=True)
