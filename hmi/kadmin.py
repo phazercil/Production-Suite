@@ -36,7 +36,10 @@ LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick fr
                         ("inkjetSteps", "Inkjet-only changeover", "Used instead of the changeover steps when the next filter has the same base "
                                                                   "part (AQ1278 → AQ1278C; set in Scheduler › Lines & Shifts): only the inkjet branding changes.")],
          "maintenance": [("issueTypes", "Issue types", "Choices on a maintenance ticket."),
-                         ("equipment", "Other equipment", "Listed after the machines when someone opens a ticket.")]}
+                         ("equipment", "Other equipment", "Listed after the machines when someone opens a ticket."),
+                         ("failureCodes", "Failure codes", "What failed, picked when a repair is worked (Maintenance › request › Work order). Repeats of the same failure on a machine lead to a corrective action."),
+                         ("causeCodes", "Root causes", "Why it failed."),
+                         ("remedyCodes", "Remedies", "What fixed it.")]}
 FEED_LABEL = [("db", "Database table"), ("http", "Read from URL"), ("push", "Pushed to server"), ("influx", "InfluxDB query"),
               ("demo", "Demo replay"), ("none", "Not connected")]
 TABLE_DBS = [("machines", "Machine data database"), ("assets", "Asset database")]
@@ -149,6 +152,10 @@ def tab_data(s, tab, request):
                 ("startGrace", "Start-up time at the start of each shift (min)", "Stops in this many minutes after the shift's scheduled start are not downtime. Breaks and lunches from the Scheduler's shifts never count as downtime.", 0),
                 ("coMins", "Changeover allowance (min)", "Time reserved on the schedule between different parts.", 0),
                 ("coRunMin", "A changeover is done once the machine runs for (min)", "Running this many minutes in a row during a changeover ends its time at the minute it started running; stops after that are ordinary downtime. Shorter test runs don't end it. The operator still finishes the changeover (steps, next MO) on the kiosk.", 1),
+                ("maintRate", "Maintenance labor rate ($ an hour)", "What an hour of maintenance labor costs on a request's repair cost. One plant rate (no one's own wage). 0 leaves labor out of the costs.", 0),
+                ("caCount", "Same failure this many times", "…on one machine within the days below: Maintenance suggests a corrective action (fix the cause) instead of more repairs.", 2),
+                ("caDays", "…within this many days", "The window for repeat failures.", 7),
+                ("failRequired", "Failure code needed to complete a repair (1 yes · 0 no)", "A repair request (not a PM) can't be completed without its failure code.", 0),
                 ("rollPhotos", "Roll pictures at start and end of shift (0 off · 1 ask · 2 require)", "At Start of shift the operator takes a picture of the roll they start with and its tag; at End shift, of the roll and tag they leave for the next shift. 2 won't start or end the shift without them; 1 asks but lets them skip.", 0),
                 ("adminTimeout", "Log out shift lead after idle (min)", "0 keeps admin mode on until someone logs out.", 0),
                 ("photoDays", "Keep pictures on closed maintenance tickets (days)", "Pictures are kept in the records database. 0 keeps them for good.", 0),

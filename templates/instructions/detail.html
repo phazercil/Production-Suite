@@ -1,0 +1,56 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}{{ x.doc_no }} · Work instructions{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+{% include "instructions/_head.html" %}
+  <p><a href="/instructions/">← All work instructions</a></p>
+  <div class="card wi-doc">
+    <div class="wi-title"><h2>{{ x.doc_no }} · {{ x.title }}</h2><span class="grow"></span>
+      {% if r %}{% if r.status == "approved" %}<span class="pill ok">REV {{ r.rev }} · IN EFFECT</span>{% elif r.status == "draft" %}<span class="pill warn">REV {{ r.rev }} · DRAFT</span>{% else %}<span class="pill bad">REV {{ r.rev }} · OBSOLETE</span>{% endif %}{% endif %}</div>
+    <p class="note">{{ x.get_kind_display }} · {% for m in x.machines.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% empty %}every machine{% endfor %} · {{ x.parts|default:"every part" }}{% if not x.active %} · <b>withdrawn</b>{% endif %}</p>
+    {% if r %}<p class="note">Rev {{ r.rev }} by {{ r.author }}{% if r.approved_by %} · approved by {{ r.approved_by }} {{ r.approved_at|day }}{% endif %}{% if r.obsolete_at %} · obsolete since {{ r.obsolete_at|day }}{% endif %}{% if r.change_note %} · <i>{{ r.change_note }}</i>{% endif %}</p>{% endif %}
+    {% if r and r.status == "obsolete" %}<div class="flash bad">Obsolete: not to be used. {% if cur %}<a href="/instructions/{{ x.pk }}/">Rev {{ cur.rev }} is in effect.</a>{% endif %}</div>{% endif %}
+
+    {% if edit %}
+      <div class="flash warn">You're changing the draft (rev {{ draft.rev }}). The kiosks keep showing {% if cur %}rev {{ cur.rev }}{% else %}nothing{% endif %} until it's approved. <a href="?view=1">See {% if cur %}rev {{ cur.rev }}{% else %}it as it reads{% endif %}</a></div>
+      <form method="post" action="/instructions/do/wiSave">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
+        <h3>Steps</h3>
+        {% for s in steps %}<div class="wi-edit-step"><span class="wi-n">{{ forloop.counter }}</span>
+          <div class="wi-edit-body"><textarea name="s_text" rows="3" maxlength="4000" placeholder="{% if forloop.last or forloop.revcounter == 2 %}Another step (leave blank if not needed){% else %}What to do{% endif %}">{{ s.text }}</textarea>
+            <input name="s_caution" maxlength="500" value="{{ s.caution }}" placeholder="Caution (optional): shown in red above the step">
+            {% if media %}<div class="wi-pick">{% for m in media %}<label class="wi-pm" title="{{ m.name }}"><input type="checkbox" name="s_media_{{ forloop.parentloop.counter0 }}" value="{{ m.pk }}" {% if m.pk in s.media %}checked{% endif %}>
+              {% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}?size=thumb" alt="">{% else %}<span class="wi-vid">▶ {{ m.name|truncatechars:18 }}</span>{% endif %}</label>{% endfor %}</div>{% endif %}
+          </div></div>{% endfor %}
+        <h3>Approved process parameters</h3>
+        <table class="st wi-params"><thead><tr><th>Parameter</th><th>Target</th><th>Min</th><th>Max</th><th>Unit</th></tr></thead><tbody>
+          {% for p in params %}<tr><td><input name="p_name" maxlength="80" value="{{ p.name|default:'' }}" placeholder="e.g. Pleat height"></td><td><input name="p_target" value="{{ p.target|default:'' }}" inputmode="decimal"></td>
+            <td><input name="p_min" value="{{ p.min|default:'' }}" inputmode="decimal"></td><td><input name="p_max" value="{{ p.max|default:'' }}" inputmode="decimal"></td><td><input name="p_unit" maxlength="20" value="{{ p.unit|default:'' }}" placeholder="mm"></td></tr>{% endfor %}</tbody></table>
+        <label class="wi-note">What changed and why <small>(needed to approve)</small><textarea name="change_note" rows="2" maxlength="4000">{{ draft.change_note }}</textarea></label>
+        <div class="wi-actions"><button class="btn go">Save the draft</button></div></form>
+      <form method="post" action="/instructions/{{ x.pk }}/upload" enctype="multipart/form-data" class="wi-up">{% csrf_token %}
+        <label>Add photos or videos <small>(then tick them on their steps; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
+      <div class="wi-actions">
+        {% if canApprove %}{% if mine and me.role != "admin" %}<span class="note">Someone other than its author approves it.</span>{% else %}<form method="post" action="/instructions/do/wiApprove">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn go" data-confirm="Approve rev {{ draft.rev }}? The kiosks show it from now on{% if cur %} and rev {{ cur.rev }} becomes obsolete{% endif %}. Save the draft first if you changed it.">Approve rev {{ draft.rev }}</button></form>{% endif %}{% else %}<span class="note">Approving needs <b>Approve work instructions</b>.</span>{% endif %}
+        {% if revs|length > 1 %}<form method="post" action="/instructions/do/wiDiscard">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn bad po" data-confirm="Discard draft rev {{ draft.rev }}?">Discard the draft</button></form>{% endif %}
+      </div>
+    {% elif r %}
+      {% include "instructions/_steps.html" with steps=steps params=params %}
+      {% if canEdit and not draft and r.status == "approved" %}<form method="post" action="/instructions/do/wiDraft" class="wi-actions">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn">New revision</button><span class="note">Starts rev {{ revs.0.rev|add:1 }} as a draft from this one; this stays in effect until it's approved.</span></form>{% endif %}
+      {% if draft and canEdit %}<p><a class="btn" href="/instructions/{{ x.pk }}/">Back to the draft (rev {{ draft.rev }})</a></p>{% endif %}
+    {% endif %}
+  </div>
+  <div class="grid2">
+    <div class="card"><h2>Revisions</h2><table class="st"><tbody>{% for v in revs %}<tr><td><a href="/instructions/{{ x.pk }}/rev/{{ v.rev }}/">Rev {{ v.rev }}</a></td><td>{{ v.get_status_display }}</td><td class="note">{{ v.author }}{% if v.approved_by %} · approved {{ v.approved_by }} {{ v.approved_at|day }}{% endif %}</td><td class="note">{{ v.change_note|truncatechars:90 }}</td></tr>{% endfor %}</tbody></table></div>
+    <div class="card"><h2>Read by {% if cur %}(rev {{ cur.rev }}){% endif %}</h2>{% for a in acks %}<div class="mt-urow"><span>{{ a.who }}</span><span class="note">{{ a.machine }} · {{ a.t|day }} {{ a.t|clock }}</span></div>{% empty %}<p class="note">Nobody yet.</p>{% endfor %}
+      <a class="btn ghost po" href="/instructions/{{ x.pk }}/read-by.csv">Download who read each revision</a></div>
+  </div>
+  {% if canEdit %}<details class="card"><summary><b>Details</b>: title, kind, machines and parts</summary>
+    <form method="post" action="/instructions/do/wiMeta" class="wi-grid">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
+      <label class="wide">Title<input name="title" required maxlength="160" value="{{ x.title }}"></label>
+      <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}" {% if k == x.kind %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label>Parts<input name="parts" maxlength="400" value="{{ x.parts }}"></label>
+      <fieldset class="wide"><legend>Machines <small>(none: every machine)</small></legend>{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}" {% if m.pk in mids %}checked{% endif %}> {{ m.name }}</label>{% endfor %}</fieldset>
+      <label class="chk"><input type="hidden" name="active" value="0"><input type="checkbox" name="active" value="1" {% if x.active %}checked{% endif %}> In use (untick to withdraw it from the kiosks)</label>
+      <button class="btn">Save details</button></form></details>{% endif %}
+</div>{% endblock %}

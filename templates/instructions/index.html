@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% load static suite %}
+{% block title %}Quality · Work instructions{% endblock %}
+{% block body_class %}scroll{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}">{% endblock %}
+{% block content %}<div class="sv">
+{% include "instructions/_head.html" %}
+  <form class="sv-filter" method="get">
+    <label>Find<input type="search" name="q" value="{{ f.q|default:'' }}" placeholder="Title, WI number or part"></label>
+    <label>Machine<select name="machine"><option value="">All</option>{% for m in machines %}<option value="{{ m.pk }}" {% if f.machine == m.pk|stringformat:"s" %}selected{% endif %}>{{ m.name }}</option>{% endfor %}</select></label>
+    <label>Kind<select name="kind"><option value="">All</option>{% for k, l in kinds %}<option value="{{ k }}" {% if f.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+    <button class="btn go">Show</button></form>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Document</th><th>Kind</th><th>For</th><th>In effect</th><th>Draft</th><th class="n">Read by</th></tr></thead><tbody>
+  {% for r in rows %}<tr class="{% if not r.x.active %}muted{% endif %}"><td><a href="/instructions/{{ r.x.pk }}/"><b>{{ r.x.doc_no }}</b> {{ r.x.title }}</a>{% if not r.x.active %} <span class="pill idle">WITHDRAWN</span>{% endif %}</td>
+    <td>{{ r.x.get_kind_display }}</td>
+    <td class="note">{% for m in r.x.machines.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% empty %}Every machine{% endfor %} · {{ r.x.parts|default:"every part" }}</td>
+    <td class="nw">{% if r.cur %}rev {{ r.cur.rev }} <span class="note">{{ r.cur.approved_at|day }}</span>{% else %}<span class="pill warn">NOT APPROVED YET</span>{% endif %}</td>
+    <td class="nw">{% if r.draft %}<span class="pill idle">rev {{ r.draft.rev }} draft</span>{% else %}—{% endif %}</td>
+    <td class="n">{{ r.acks }}</td></tr>
+  {% empty %}<tr><td colspan="6" class="empty">No work instructions yet.{% if canEdit %} Add the first one below.{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+  {% if canEdit %}<div class="card"><h2>New work instruction</h2>
+    <form method="post" action="/instructions/do/wiCreate" class="wi-grid">{% csrf_token %}
+      <label class="wide">Title<input name="title" required maxlength="160" placeholder="e.g. Pleater setup: MG cabin filters"></label>
+      <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+      <label>Parts <small>(comma-separated, * for any; blank: every part)</small><input name="parts" maxlength="400" placeholder="MG4062*, AQ12*"></label>
+      <fieldset class="wide"><legend>Machines <small>(none ticked: every machine)</small></legend>{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}"> {{ m.name }}</label>{% endfor %}</fieldset>
+      <button class="btn go">Create the draft</button></form></div>{% endif %}
+  <p class="note">A new instruction (and each change after) is a draft until someone with <b>Approve work instructions</b> approves it, someone other than who wrote it. Then the kiosks show it on the Instructions page for its machines and parts, and the revision before becomes obsolete (kept, read-only). Operators tap <b>Read and understood</b> for each revision.</p>
+</div>{% endblock %}

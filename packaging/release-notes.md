@@ -1,3 +1,48 @@
+## What's new in 1.9.14
+
+**Maintenance is now a full work-order system (CMMS).**
+- **Assets** (Maintenance › Assets):
+  - Each machine's assemblies and components as a tree, plus gauges and instruments.
+  - Each asset has its history: the requests on it, parts used, replacements, rebuilds and calibrations.
+- **Work orders:**
+  - **Planning:** each request can be assigned to a technician, with a due date and estimated hours.
+  - **Workload** shows each person's open work, what's late and the hours they logged.
+  - **Recording the work:**
+    - Hours worked are logged on the request.
+    - Failure code, root cause and remedy are picked from lists (Admin › Maintenance lists).
+    - Outside (contractor) costs can be added.
+  - **Cost:** each request shows parts at their cost when used, labor at one plant maintenance rate (Admin › Rules; no one's wage is used) and outside costs.
+  - **Downtime:** each request shows how long the machine was down while it was open.
+- **Checklists:** a PM's steps become the request's checklist, ticked off as they're done. The request can't be completed until every step is ticked.
+- **Meter PMs:** a PM can fall due on a meter (knife cycles, glue-gun hours…), read by hand or from a machine data field. This is besides days, run hours and filters.
+- **Calibration** (Maintenance › Calibration):
+  - Each instrument's interval, as found and as left, result, the standard used and the certificate number.
+  - A failed instrument is taken out of use until it passes again.
+- **Spare-part reservations:**
+  - Parts can be set aside for a request, and a PM's parts list reserves itself when its request opens.
+  - Inventory shows what's reserved and what's free.
+  - Using the parts on the request uses the reservation; completing the request releases what's left.
+- **Maintenance windows** (Maintenance › Windows): planned maintenance time on a machine. The Scheduler plans no production in it, and the kiosk counts it as planned time, not downtime.
+- **Repeat failures:**
+  - When a machine fails the same way 3 times in 90 days (Admin › Rules), Maintenance suggests a **corrective action**: one request to fix the cause.
+  - Once it's open, new requests for that failure are attached to it instead of standing alone.
+- **Reliability** adds downtime, hours and cost by machine and asset, with each one's top failures.
+
+**Digital work instructions** (Quality › Work instructions).
+- **Documents:**
+  - Numbered (WI-001…), for chosen machines and parts (`MG40*`, `AQ12*`…).
+  - Kinds: setup, changeover, operation, quality check, safety or maintenance.
+- **Contents:** steps with cautions, photos and videos, and the approved process parameters (target, min, max, unit).
+- **Revision control:**
+  - Every change is a draft with a note on what changed and why.
+  - Someone other than its author approves it (an Admin may approve their own). The revision before then becomes obsolete, kept read-only.
+  - Every revision stays viewable.
+- **On the kiosk:**
+  - A new **Instructions** page shows the approved instructions for the machine and the part it runs (or is changing over to).
+  - The banner says when there's one to read, and operators tap **Read and understood** for each revision.
+  - Who read which revision can be downloaded.
+- **Storage:** photos are kept in the database. Videos are saved as files in `media/instructions` in the suite's folder, so include that folder in your backups.
+
 ## What's new in 1.9.13
 
 - **S2K posting posts each entry to the S2K MO of its stage.** S2K keeps one MO per stage of an order.

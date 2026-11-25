@@ -1,10 +1,11 @@
 {% load suite %}<article class="card mt-req {% if x.t.priority == 'High' and x.t.status != 'Closed' %}high{% endif %}" id="r{{ x.t.id }}">
-  <div class="mt-rh"><h2>{{ x.t.machine }} <span class="muted">· {{ x.t.type|default:"Request" }}</span>{% if x.t.pm_id %} <a class="pill idle" href="?tab=pm#edit" title="Opened by the PM schedule">PM</a>{% endif %}</h2><span class="grow"></span>
+  <div class="mt-rh"><h2>{{ x.t.machine }} <span class="muted">· {{ x.t.type|default:"Request" }}</span>{% if x.t.pm_id %} <a class="pill idle" href="?tab=pm#edit" title="Opened by the PM schedule">PM</a>{% endif %}{% if x.t.corrective %} <span class="pill bad" title="Fixes the cause of a failure that keeps coming back">CORRECTIVE ACTION</span>{% endif %}</h2><span class="grow"></span>
     {% if x.t.priority == "High" %}<span class="pill bad">High · line down</span>{% elif x.t.priority == "Low" %}<span class="pill idle">Low</span>{% endif %}
     {% include "maintenance/_status.html" with st=x.t.status %}</div>
   <p class="note">#{{ x.t.id }} · requested by {{ x.t.by }} · {{ x.t.t|day }} {{ x.t.t|clock }}{% if x.t.line and x.t.line != x.t.machine %} · from {{ x.t.line }}{% endif %}
     {% if x.t.status == "Closed" %} · completed {{ x.t.updated|day }} {{ x.t.updated|clock }} by {{ x.t.updated_by }}{% if x.took is not None %} · took {{ x.took|dur }}{% endif %}{% else %} · open {{ x.age|dur }}{% endif %}</p>
   {% if x.t.notes %}<p class="mt-text">{{ x.t.notes|linebreaksbr }}</p>{% endif %}
+  {% include "maintenance/_wo.html" %}
   {% if x.t.lockout_t and not x.t.returned_t %}<div class="mt-lock"><b>LOCKED OUT</b> since {{ x.t.lockout_t|day }} {{ x.t.lockout_t|clock }} by {{ x.t.lockout_by }}: no shift can start on {{ x.t.machine }}.
     {% if canWork %}<form method="post" action="/maintenance/do/returnService" class="mt-inline">{% csrf_token %}<input type="hidden" name="id" value="{{ x.t.id }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}">
       <input type="text" name="note" maxlength="2000" required minlength="5" placeholder="What was checked before it runs again (guards on, tested, area clear…)" aria-label="Return to service note"><button class="btn go">Return to service</button></form>{% endif %}</div>

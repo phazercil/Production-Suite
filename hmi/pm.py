@@ -37,6 +37,15 @@ def used(task, now, start=None):
     a = start or start_of(task)
     if task.unit == "days":
         return max(0.0, (now - a).total_seconds() / 86400)
+    if task.unit == "meter":   # a meter (Maintenance › Assets): how far it moved since the task was last done
+        m = task.meter
+        if not m:
+            return 0.0
+        if start is not None:   # (for the rate: the readings since then)
+            from maintenance.models import MeterReading
+            first = MeterReading.objects.filter(meter=m, t__gte=start).order_by("t").first()
+            return max(0.0, m.value - first.value) if first else 0.0
+        return max(0.0, m.value - (task.meter_at if task.meter_at is not None else m.value))
     qs = PpmReading.objects.filter(line=task.machine, t__gte=a, t__lt=now)
     if task.unit == "hours":
         return (qs.filter(run=True).aggregate(n=Count("id"))["n"] or 0) / 60   # one reading per minute
@@ -76,7 +85,9 @@ def status(task, now, open_ticket=None):
     return {"used": u, "left": left, "pct": pct, "state": state, "eta": eta, "ticket": open_ticket}
 
 
-def fmt_amount(v, unit):
+def fmt_amount(v, unit, meter=None):
+    if unit == "meter":
+        return f"{v:,.0f} {meter.unit if meter else 'on the meter'}"
     if unit == "days":
         return f"{v:.1f} days" if abs(v) < 10 and v != int(v) else f"{round(v)} days"
     if unit == "hours":
@@ -92,8 +103,11 @@ def open_request(task, now, by="PM schedule"):
     """Open the maintenance request for a task that has fallen due."""
     from .engine import event, notify
     t = Ticket.objects.create(t=now, line=task.machine if is_machine(task.machine) else "", by=by, machine=task.machine,
-                              type=f"PM · {task.title}"[:80], priority=task.priority, pm=task,
-                              notes=(f"Planned maintenance, every {fmt_amount(task.every, task.unit)}.\n" + (task.steps or "")).strip())
+                              type=f"PM · {task.title}"[:80], priority=task.priority, pm=task, asset=task.asset, est_hours=task.est_hours,
+                              checklist=[{"text": s.strip(), "done": False} for s in (task.steps or "").splitlines() if s.strip()],
+                              notes=(f"Planned maintenance, every {fmt_amount(task.every, task.unit, task.meter)}.\n" + (task.steps or "")).strip())
+    from maintenance.cmms import reserve_pm_parts
+    reserve_pm_parts(t, task, now, by)
     event("maintenance", {"id": t.id, "machine": t.machine, "type": t.type, "priority": t.priority, "pm": task.id})
     notify(f"Planned maintenance due on {task.machine}: {task.title}", "maint", lines=[task.machine], go="maintenance")
     return t
@@ -118,6 +132,9 @@ def completed(ticket, now, by):
     """A PM request was completed: the task's count starts again."""
     if ticket.pm_id:
         PMTask.objects.filter(pk=ticket.pm_id).update(last_done=now, last_by=str(by)[:120])
+        task = PMTask.objects.filter(pk=ticket.pm_id).select_related("meter").first()
+        if task and task.meter:   # a meter PM counts again from the meter's value now
+            PMTask.objects.filter(pk=task.pk).update(meter_at=task.meter.value)
 
 
 def log_done(task, now, by, note=""):

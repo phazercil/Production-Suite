@@ -90,6 +90,11 @@ def extra_breaks(start, end):
             if s < end and e > start and not (x.cancelled_at and s >= x.cancelled_at):   # (a cancelled break's earlier times stay)
                 out.append({"id": x.pk, "s": s, "e": e, "label": x.label or "Break", "machines": ids, "by": x.by})
             d += timedelta(days=1)
+    try:   # maintenance windows (Maintenance › Windows): planned time on their machine, like a break
+        from maintenance.cmms import windows
+        out += windows(start, end)
+    except Exception:  # noqa: BLE001 - (before the maintenance tables exist)
+        pass
     return sorted(out, key=lambda w: w["s"])
 
 

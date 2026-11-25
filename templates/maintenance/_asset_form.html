@@ -1,0 +1,13 @@
+<form method="post" action="/maintenance/do/assetSave" class="mt-grid">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">{% if a %}<input type="hidden" name="id" value="{{ a.pk }}">{% endif %}
+  <label>Name<input name="name" required maxlength="120" value="{{ a.name|default:'' }}"></label>
+  <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}" {% if a and a.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Under<select name="parent"><option value="">— (top: a machine or equipment)</option>{% for id, name, m in assetList %}{% if not a or id != a.pk %}<option value="{{ id }}" {% if a and a.parent_id == id %}selected{% endif %}>{{ m }} · {{ name }}</option>{% endif %}{% endfor %}</select></label>
+  <label>Machine / equipment<select name="machine">{% for m in machines %}<option {% if a and a.machine == m %}selected{% elif not a and m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+  <label>Tag<input name="tag" maxlength="40" value="{{ a.tag|default:'' }}"></label><label>Make<input name="make" maxlength="80" value="{{ a.make|default:'' }}"></label>
+  <label>Model<input name="model" maxlength="80" value="{{ a.model|default:'' }}"></label><label>Serial<input name="serial" maxlength="80" value="{{ a.serial|default:'' }}"></label>
+  <label>Installed<input type="date" name="installed" value="{{ a.installed|date:'Y-m-d' }}"></label>
+  <label>Calibrate every (days)<input type="number" name="cal_every" min="1" value="{{ a.cal_every|default_if_none:'' }}" placeholder="instruments"></label>
+  <label>Range and tolerance<input name="cal_spec" maxlength="160" value="{{ a.cal_spec|default:'' }}" placeholder="0–300 mm ± 0.05"></label>
+  <label class="wide">Notes<textarea name="notes" rows="2" maxlength="4000">{{ a.notes|default:'' }}</textarea></label>
+  {% if a %}<label class="chk"><input type="hidden" name="active" value="0"><input type="checkbox" name="active" value="1" {% if a.active %}checked{% endif %}> In use</label>{% endif %}
+  <button class="btn go">{% if a %}Save{% else %}Add asset{% endif %}</button></form>

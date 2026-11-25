@@ -159,7 +159,8 @@ class ScheduleTimelineTests(TestCase):
     def test_lunch_and_finish_flag_on_the_timeline(self):
         r = self.c.get("/kiosk/v/schedule?view=timeline")
         body = r.content.decode()
-        self.assertIn('class="fin"', body)                                # checkered flag at the MO's end
+        # the checkered flag at the MO's end, or (late in the day, when it ends after the timeline) its "finishes" marker
+        self.assertTrue('class="fin"' in body or 'title="Finishes' in body)
         self.assertIn("Barbara runs through lunch", body)                 # the demo's Barbara has relief cover
         self.assertNotIn("Salvatore", body)                               # only this screen's line
         self.c.post("/kiosk/do/station", {"line": "Salvatore"})

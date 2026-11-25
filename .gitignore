@@ -17,3 +17,6 @@ backups/
 dist/
 # written by the control service on the server
 desktop/control.port
+
+# work-instruction videos (kept on the server, not in the repository)
+media/

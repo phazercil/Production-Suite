@@ -45,6 +45,10 @@ def ticket_set(p, ctx):
     note = str(p.get("note") or "").strip()
     need(len(note) <= 4000, "Keep the note under 4,000 characters.")
     need(st != t.status or note, f"It is already {STATUS[st]}.")
+    if st == "Closed" and t.status != "Closed":
+        from .cmms import completion_problem
+        why = completion_problem(t)
+        need(not why, why or "")
     old = t.status
     if st != old:
         t.status = st
@@ -57,6 +61,9 @@ def ticket_set(p, ctx):
     if kind == "closed" and t.pm_id:   # planned maintenance done: its count starts again
         from hmi import pm
         pm.completed(t, ctx.now, ctx.by)
+    if kind == "closed":
+        from .cmms import on_completed
+        on_completed(t, ctx)
     event("maintenance_status", {"id": t.id, "status": t.status})
     if st != old:
         notify(f"Maintenance on {t.machine} · {t.type}: {STATUS[st]} ({ctx.by})" + (f": {note}" if note else ""), "maint",
@@ -85,6 +92,9 @@ def item_save(p, ctx):
     it.location = str(p.get("location") or "").strip()[:80]
     it.unit = str(p.get("unit") or "").strip()[:20] or "each"
     it.min_qty = _num(mn, "reorder level", allow_zero=True) if mn else None
+    if "unit_cost" in p:
+        uc = str(p.get("unit_cost") or "").strip().lstrip("$")
+        it.unit_cost = _num(uc, "cost", allow_zero=True) if uc else None
     it.notes = str(p.get("notes") or "").strip()[:2000]
     it.updated, it.updated_by = ctx.now, ctx.by
     if new:   # an item's stock only changes through Add stock, Count and Use (so every change is logged)
@@ -170,8 +180,11 @@ def item_use(p, ctx):
     it.qty = round(it.qty - n, 3)
     it.updated, it.updated_by = ctx.now, ctx.by
     it.save(update_fields=["qty", "updated", "updated_by"])
-    InventoryMove.objects.create(item=it, kind="used", qty=n, machine=machine, ticket=t, note=note, t=ctx.now, by=ctx.by)
+    InventoryMove.objects.create(item=it, kind="used", qty=n, machine=machine, ticket=t, note=note, t=ctx.now, by=ctx.by,
+                                 unit_cost=it.unit_cost, asset=t.asset if t else None)
     if t:
+        from .cmms import used_reserved
+        used_reserved(t, it, n)   # what was reserved for this request is used now
         TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="note",
                                   text=f"Used {_qty(n, it)}" + (f": {note}" if note else ""))
     audit(ctx, f"Inventory: {_qty(n, it)} used on {machine}" + (f" (request #{t.id})" if t else ""))

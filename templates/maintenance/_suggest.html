@@ -1,0 +1,8 @@
+{% load suite %}{% if suggest %}<div class="card mt-suggest"><h2>Keeps failing: fix the cause?</h2>
+  <p class="note">The same failure on the same machine again and again. A corrective action is one request to find and fix the cause; once it's open, new requests for the same failure are attached to it.</p>
+  {% for s in suggest %}<div class="mt-sg"><div><b>{{ s.machine }}</b> · {{ s.key }} <span class="pill bad">{{ s.n }}× in {{ s.days }} days</span>{% if s.down %} <span class="note">{{ s.down|dur }} down</span>{% endif %}
+      <div class="note">{% for t in s.tickets %}<a href="?tab={% if t.status == 'Closed' %}done{% else %}requests{% endif %}#r{{ t.id }}">#{{ t.id }}</a> {{ t.t|day }}{% if not forloop.last %} · {% endif %}{% endfor %}</div></div>
+    {% if canPlan %}<form method="post" action="/maintenance/do/caOpen" class="mt-inline">{% csrf_token %}<input type="hidden" name="machine" value="{{ s.machine }}"><input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ here }}">
+      <select name="assigned" aria-label="Assign to"><option value="">Assign later</option>{% for n in techs %}<option>{{ n }}</option>{% endfor %}</select>
+      <button class="btn go">Open a corrective action</button></form>{% endif %}</div>{% endfor %}
+</div>{% endif %}

@@ -233,6 +233,19 @@ class Ticket(models.Model):
     pm_parts_used = models.DateTimeField(null=True, blank=True, help_text="When the PM's parts list was recorded as used (once per request)")
     pm = models.ForeignKey("PMTask", null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets",
                            help_text="The planned maintenance task this request is for (opened by the PM schedule)")
+    # work order
+    asset = models.ForeignKey("maintenance.Asset", null=True, blank=True, related_name="tickets", on_delete=models.SET_NULL)
+    assigned = models.CharField(max_length=120, blank=True, db_index=True, help_text="The technician it's assigned to")
+    due = models.DateField(null=True, blank=True)
+    est_hours = models.FloatField(null=True, blank=True, help_text="Estimated hours (for workload)")
+    checklist = models.JSONField(default=list, blank=True, help_text="[{text, done, by, t}]: a PM's steps, ticked off as they're done")
+    failure = models.CharField(max_length=80, blank=True, help_text="Failure code (what failed)")
+    cause = models.CharField(max_length=80, blank=True, help_text="Root cause")
+    remedy = models.CharField(max_length=80, blank=True, help_text="What fixed it")
+    outside_cost = models.FloatField(null=True, blank=True, help_text="Contractor or other costs ($)")
+    corrective = models.BooleanField(default=False, help_text="A corrective action for a repeating failure")
+    ca = models.ForeignKey("self", null=True, blank=True, related_name="occurrences", on_delete=models.SET_NULL,
+                           help_text="The corrective action this failure was attached to (the same failure again on this machine)")
     # lockout: Maintenance took the machine out of service from this request (Maintenance › request › Lock out), and
     # put it back with a note on what was checked (Return to service)
     lockout_t = models.DateTimeField(null=True, blank=True)
@@ -294,8 +307,14 @@ class PMTask(models.Model):
     """Planned (preventive) maintenance, Maintenance › PM schedule: a job done every so many days, run hours or
     filters made. When it falls due the server opens a maintenance request for it; completing that request
     (or logging the job done) starts the count again. See hmi/pm.py."""
-    UNITS = (("days", "days"), ("hours", "run hours"), ("units", "filters made"))
+    UNITS = (("days", "days"), ("hours", "run hours"), ("units", "filters made"), ("meter", "on a meter"))
+    KINDS = (("pm", "Preventive maintenance"), ("calibration", "Calibration"))
     machine = models.CharField(max_length=60, help_text="A machine, or other equipment from Admin › Maintenance lists")
+    asset = models.ForeignKey("maintenance.Asset", null=True, blank=True, related_name="pm_tasks", on_delete=models.SET_NULL)
+    meter = models.ForeignKey("maintenance.Meter", null=True, blank=True, related_name="pm_tasks", on_delete=models.SET_NULL,
+                              help_text="Unit 'on a meter': due every so many of this meter's units")
+    meter_at = models.FloatField(null=True, blank=True, help_text="The meter's value when it was last done")
+    est_hours = models.FloatField(null=True, blank=True)
     title = models.CharField(max_length=120)
     steps = models.TextField(blank=True, help_text="What to do, one step per line")
     every = models.FloatField(default=30)

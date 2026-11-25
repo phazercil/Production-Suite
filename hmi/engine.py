@@ -1554,7 +1554,10 @@ def ticket_add(p, ctx):
                               priority=p.get("priority") if p.get("priority") in ("Low", "Medium", "High") else "Medium",
                               notes=str(p.get("notes") or "").strip())
     event("maintenance", {"id": t.id, "machine": machine, "type": t.type, "priority": t.priority})
-    return {"msg": "Maintenance ticket sent", "data": {"id": t.id}}
+    from maintenance.cmms import link_to_ca
+    ca = link_to_ca(t)   # the same failure with a corrective action open: attached to it
+    return {"msg": "Maintenance ticket sent" + (f" (it's happened before: corrective action #{ca.id} is open for it)" if ca else ""),
+            "data": {"id": t.id}}
 
 
 @cmd("ticketStatus", "tickets.work")
@@ -1619,12 +1622,23 @@ def pm_save(p, ctx):
     title = re.sub(r"\s+", " ", str(p.get("title") or "")).strip()[:120]
     need(title, "Say what the job is, e.g. Grease the pleater chain.")
     unit = p.get("unit") if p.get("unit") in pm.UNITS else "days"
-    need(unit == "days" or pm.is_machine(machine), f"{machine} has no machine readings, so it can only go by days.")
+    meter = None
+    if unit == "meter":
+        from maintenance.models import Meter
+        meter = Meter.objects.filter(pk=p.get("meter") or 0, active=True).first()
+        need(meter, "Pick the meter it goes by (meters are added in Maintenance › Assets).")
+    need(unit in ("days", "meter") or pm.is_machine(machine), f"{machine} has no machine readings, so it can only go by days or a meter.")
     every = _pm_number(p.get("every"), "How often? Enter a number above 0.")
     if unit == "days":
         need(every <= 3660, "Every how many days? (10 years at most)")
     changed = t.pk and (t.unit != unit)
-    t.machine, t.title, t.unit, t.every = machine, title, unit, every
+    if unit == "meter" and (t.meter_id != meter.pk or t.meter_at is None):
+        t.meter_at = meter.value   # counts from the meter's value now
+    t.machine, t.title, t.unit, t.every, t.meter = machine, title, unit, every, meter
+    from maintenance.models import Asset
+    t.asset = Asset.objects.filter(pk=p.get("asset") or 0).first() if str(p.get("asset") or "").isdigit() else None
+    eh = str(p.get("est_hours") or "").strip()
+    t.est_hours = _pm_number(eh, "Estimated hours: a number above 0.") if eh else None
     t.steps = str(p.get("steps") or "").strip()[:4000]
     t.priority = p.get("priority") if p.get("priority") in ("Low", "Medium", "High") else "Medium"
     if "active" in p:
@@ -1642,7 +1656,7 @@ def pm_save(p, ctx):
         t.last_done = ctx.now
     t.updated_by = ctx.by
     t.save()
-    audit(ctx, f"PM schedule: saved {machine} · {title} (every {pm.fmt_amount(every, unit)})")
+    audit(ctx, f"PM schedule: saved {machine} · {title} (every {pm.fmt_amount(every, unit, meter)})")
     return {"msg": f"{title} saved.", "data": {"id": t.id}}
 
 
