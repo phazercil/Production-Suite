@@ -7,7 +7,7 @@
 <main class="wrap s2k-page">
   {% if msg %}<div class="flash ok" role="status">{{ msg }}</div>{% endif %}
   <h1 style="margin:14px 0 4px">S2K posting</h1>
-  <p class="note" style="margin:0 0 10px">S2K is read-only to the suite: nothing is sent to it. Download the rows not posted yet, key them in or import them in S2K, then mark them as posted so they don't go in twice.</p>
+  <p class="note" style="margin:0 0 10px">Each entry goes to the S2K MO of its own stage: a pleater's runs to the order's 1MG… MO, End Band and Glue Bead work to its 2MG… MO, pallets to the finished-part MO. S2K is read-only to the suite: nothing is sent to it. Download the rows not posted yet, key them in or import them in S2K, then mark them as posted so they don't go in twice.</p>
   <form class="sv-filter" method="get" action="/scheduler/s2k/">
     <label>Line<select name="line"><option value="">All lines</option>{% for l in lines %}<option {% if l == f.line %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
     <label>From<input type="date" name="from" value="{{ f.from|date:'Y-m-d' }}"></label>
@@ -19,9 +19,12 @@
   <div class="sv-kpis">{% for k, v in totals.items %}<div class="kpi"><span>{{ k }}</span><b>{{ v|num }}</b></div>{% endfor %}<div class="kpi"><span>Dates</span><b class="sm">{{ f.from|date:"M j" }} – {{ f.to|date:"M j, Y" }}</b></div></div>
   {% if canPost %}<form method="post" action="/scheduler/s2k/mark" class="row" style="margin:8px 0">{% csrf_token %}<input type="hidden" name="line" value="{{ f.line }}"><input type="hidden" name="from" value="{{ f.from|date:'Y-m-d' }}"><input type="hidden" name="to" value="{{ f.to|date:'Y-m-d' }}">
     <button class="btn" type="submit">Mark these as posted</button><span class="note">after they're in S2K</span></form>{% endif %}
-  <table class="st"><thead><tr><th>MO</th><th>Part</th><th class="n">S2K qty</th><th class="n">S2K still to make</th><th class="n">Floor good</th><th class="n">Good in dates</th><th class="n">Packed in dates</th><th class="n">To post</th><th>Doesn't agree</th></tr></thead><tbody>
-  {% for x in S2K %}<tr><td class="nw"><b>{{ x.mo }}</b>{% if x.m %} <span class="note">{{ x.m.status }}</span>{% endif %}</td><td>{{ x.part }}</td><td class="n">{% if x.m %}{{ x.m.qty|num }}{% else %}—{% endif %}</td><td class="n">{% if x.m.remaining is not None %}{{ x.m.remaining|num }}{% else %}—{% endif %}</td>
-    <td class="n">{% if x.m %}{{ x.m.produced|num }}{% if x.m.scrap %} <span class="note">− {{ x.m.scrap|num }} scrap</span>{% endif %}{% endif %}</td><td class="n">{{ x.good|num }}</td><td class="n">{{ x.packed|num }}</td><td class="n">{% if x.unposted %}<b>{{ x.unposted }}</b>{% else %}<span class="pill ok">POSTED</span>{% endif %}</td>
+  <table class="st"><thead><tr><th>S2K MO</th><th>Part</th><th>Stage</th><th class="n">S2K qty</th><th class="n">S2K still to make</th><th class="n">Floor so far</th><th class="n">In these dates</th><th class="n">To post</th><th>Doesn't agree</th></tr></thead><tbody>
+  {% for x in S2K %}<tr><td class="nw"><b>{{ x.mo }}</b>{% if x.m %} <span class="note">{{ x.m.status }}</span>{% endif %}</td><td>{{ x.part }}</td><td>{{ x.stageLabel|default:"—" }}</td>
+    <td class="n">{% if x.m %}{{ x.own|num }}{% else %}—{% endif %}</td><td class="n">{% if x.m.remaining is not None %}{{ x.m.remaining|num }}{% else %}—{% endif %}</td>
+    <td class="n">{% if x.floor is not None %}{{ x.floor|num }}{% else %}—{% endif %}</td>
+    <td class="n">{{ x.inDates|num }}{% if x.scrapSum %} <span class="s2k-sub">+ {{ x.scrapSum|num }} scrap</span>{% endif %}<div class="s2k-sub">{% for e in x.entries %}{{ e.label }}{% if e.no %} #{{ e.no }}{% endif %} {{ e.qty|num }}{% if e.posted %} ✓{% endif %}{% if e.note and not e.posted %} ({{ e.note }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}</div></td>
+    <td class="n">{% if x.unposted %}<b>{{ x.unposted }}</b>{% else %}<span class="pill ok">POSTED</span>{% endif %}</td>
     <td>{% for fl in x.flags %}<div class="note bad">{{ fl }}</div>{% empty %}<span class="muted">—</span>{% endfor %}</td></tr>
-  {% empty %}<tr><td colspan="9" class="empty">No MO runs finished and no pallets packed in these dates.</td></tr>{% endfor %}</tbody></table>
+  {% empty %}<tr><td colspan="9" class="empty">No MO runs finished, end bands completed or pallets packed in these dates.</td></tr>{% endfor %}</tbody></table>
 </main></div>{% endblock %}

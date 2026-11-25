@@ -1,3 +1,71 @@
+## What's new in 1.9.13
+
+- **S2K posting posts each entry to the S2K MO of its stage.** S2K keeps one MO per stage of an order.
+  - A pleater's MO runs go to the order's Stage 1 MO (1MG…).
+  - End Band and foam Glue Bead lines (John Sr, William, the glue beads) go to its Stage 2 MO (2MG…/2AQ…). Packaging lines go to the finished MG…/AQ… MO.
+  - Packed pallets go to the finished-part (packaging) MO, even when the tag carries another of the order's numbers.
+  - Each stage MO is checked against S2K's own quantity and "still to make" for that MO.
+  - Packaging is checked against what Stage 1 made good, allowing for products that use two stage units per finished filter.
+  - The CSV has a Stage column and the S2K MO number with its current revision.
+  - **Postings are kept as a record that's never edited.** If a station job, pallet or MO run changes after it was marked as posted (a new quantity, a completion undone, a pallet voided, a run deleted), the difference shows as a **correction** or **reversal** to post, even outside the dates shown.
+  - When an order has stage MOs but not the one a line posts to (no 2MG… MO yet, say), its entries are flagged and held back, never posted to another stage's MO.
+- **Counting without a counter is a per-machine switch** (Admin › Connections › Machine data): "Count filters from the speed when no counter is hooked up".
+  - On (as before): filters = pleats ÷ pleats per filter.
+  - Off: nothing is counted until a counter is connected, and the operator enters the count at End order.
+  - A machine with a counter always uses its counter.
+- **Counters that give filters per minute.** Machine data has a new setting, "The counter value is":
+  - **A running total**, as before: each minute counts what the counter went up by.
+  - **Filters made per minute**: each minute's reading is that minute's filters.
+  - A per-minute value read as a total only counted when the rate went up (Salvatore showed 50 instead of ~860).
+- **The machine's recipe times the MOs.** With the recipe coming from the machine's telemetry, an MO's run is tied to the recipe the machine was on when it began.
+  - If the machine runs another recipe for 2 minutes in a row, the old filter can't still be running. The MO's time ends at the change, and what's made from then on is held for the next MO.
+  - The kiosk shows "Recipe changed" until End order. The next MO gets the held filters and starts at the change.
+  - At Start of shift on a line nobody was logged in to, the recipe change answers "when did it change over?" by itself.
+  - An inkjet-only change keeps the same recipe, so it's timed as before (by the operator). A glance at another recipe (one minute) doesn't count.
+- **A changeover done with nobody logged in.** When Start of shift finds the line ran another MO with nobody on it, it asks when it changed over:
+  - **One of this shift's stops:** that stop becomes the changeover. What was made before it stays on the old MO, and what was made after goes to the new one.
+  - **Now:** the line is still stopped for the changeover.
+  - **Before this shift:** a supervisor is told to sort out the earlier logs.
+- **Stations:** two screens starting work on one station at the same moment can't both start; the database allows one MO under way per station. Quantity updates no longer overwrite each other.
+- **Maintenance inventory:**
+  - A take-back pressed twice at once only credits the stock once.
+  - A PM's parts list is only used once per request.
+  - Requests now keep when they were completed. MTTR, PM on-time and "completed this week" use it, so a note added later no longer moves them.
+- **Reports, OEE:**
+  - Availability is now running time against **planned production time** (the Schedule's shifts less breaks) for the plant and each line, not against the minutes that happened to have readings.
+  - When readings cover less than 90% of the planned time, the report says so.
+  - An MO run spanning two days puts each day's share of its scrap and output on that day.
+- **Quality, SPC:**
+  - Cp/Cpk now use the within-process spread (average moving range ÷ 1.128). Pp/Ppk (overall spread) are shown beside them.
+  - Capability from under 25 measurements is marked preliminary.
+- **Admin › Health:**
+  - "All good" now also checks data sources, sensors in fault or alarm, live video and the off-server backup copy.
+  - The page lists what needs a look.
+  - MariaDB off-server copies are labelled as a dump check, not a test restore.
+- **Supervisor › Timeline:** when a busy period has more events than it can load, it says from when the list is complete instead of leaving some out silently.
+- **Switch person:** the list of names is only given to a screen where someone is signed in.
+- **Fixes:**
+  - **Machine counts:** a push-feed machine with no counter now counts from its speed instead of recording 0.
+  - **Ticker:**
+    - A reading isn't stamped onto minutes being caught up.
+    - A ticker that lost its lease no longer runs pulls, backups or video.
+  - **Downtime:**
+    - No more downtime entries that end before they start.
+    - A stop, the QC due after a changeover and a pleats override carry into the next log at a shift or operator change.
+  - **Changeovers:**
+    - End order needs the count, as a whole number, and locks the MO while it updates it.
+    - Picking up a passed-over changeover with an MO scanned keeps the line in the changeover.
+    - Passing over a changeover in the first seconds of a shift names the new shift.
+  - **Shifts:** shift names follow each machine's own schedule.
+  - **Sign-in:**
+    - Wrong-PIN limits count per address even without cookies.
+    - The kiosk's automatic ping no longer keeps an idle shift lead signed in.
+  - **Scheduler:**
+    - Pacing weighs each upstream line by what it makes, not by time.
+    - A time split before part 1 can start keeps part 1 on the board, flagged.
+  - **Updates:** state writes and the waiting file are now safe when the web server and the ticker act at once.
+  - **Settings:** a `.env` value with a comment after it is read correctly.
+
 ## What's new in 1.9.12
 
 - **Every page and tab has its own address**, so it can be bookmarked or sent: /admin/backup/, /supervisor/down/, /quality/trace/, /maintenance/inventory/, /scheduler/orders/ and so on. Older links still work and switch to the new address.

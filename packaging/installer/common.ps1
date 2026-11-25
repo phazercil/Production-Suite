@@ -6,8 +6,8 @@
   Windows PowerShell 5.1 compatible.
 #>
 
-$script:SuiteVersion = "1.9.12"
-$script:SuiteRevision = 33
+$script:SuiteVersion = "1.9.13"
+$script:SuiteRevision = 34
 $script:PyVersion = "3.12.7"
 $script:TaskWeb = "Production Suite Web"
 $script:TaskTicker = "Production Suite Ticker"

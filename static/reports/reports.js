@@ -54,9 +54,12 @@
     const kpi = (label, val, sub = '') => `<div class="kpi"><span>${label}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
     const kpis = [
       kpi('Filters made', n0(T.units)),
-      isMo ? kpi('Run time', hrs(T.obs)) : kpi('Uptime', `<span class="${T.uptime == null ? '' : T.uptime >= 85 ? 'ok' : T.uptime >= 70 ? 'warn' : 'bad'}">${pct(T.uptime)}</span>`, `${hrs(T.run)} running of ${hrs(T.obs)}`),
+      isMo ? kpi('Run time', hrs(T.obs)) : T.avail != null
+        ? kpi('Availability', `<span class="${T.avail >= 85 ? 'ok' : T.avail >= 70 ? 'warn' : 'bad'}">${pct(T.avail)}</span>`,
+              `${hrs(T.run)} running of ${hrs(T.planned)} planned` + (T.lowCoverage ? ` · <span class="bad" title="Minutes with no readings from the line: the figures may be off">readings for only ${pct(T.coverage)} of it</span>` : ''))
+        : kpi('Uptime', `<span class="${T.uptime == null ? '' : T.uptime >= 85 ? 'ok' : T.uptime >= 70 ? 'warn' : 'bad'}">${pct(T.uptime)}</span>`, `${hrs(T.run)} running of ${hrs(T.obs)} observed`),
       kpi('Downtime', hrs(T.down), T.reasons[0] ? `Top: ${esc(T.reasons[0].reason)}` : ''),
-      isMo ? '' : kpi('OEE', `<span class="${T.oee == null ? '' : T.oee >= 75 ? 'ok' : T.oee >= 55 ? 'warn' : 'bad'}">${pct(T.oee)}</span>`, `uptime ${pct(T.uptime)} × speed ${pct(T.perf)} × good ${pct(T.quality)}`),
+      isMo ? '' : kpi('OEE', `<span class="${T.oee == null ? '' : T.oee >= 75 ? 'ok' : T.oee >= 55 ? 'warn' : 'bad'}">${pct(T.oee)}</span>`, `${T.availBasis === 'planned' ? 'availability ' + pct(T.avail) : 'uptime (observed) ' + pct(T.uptime)} × speed ${pct(T.perf)} × good ${pct(T.quality)}` + (T.lowCoverage ? ' · incomplete readings' : '')),
       isMo ? '' : kpi('Speed loss', T.speedLossMin == null ? '—' : hrs(T.speedLossMin), T.perf == null ? 'set each line\'s rated speed in Admin › Machines' : `running at ${pct(T.perf)} of rated speed`),
       isMo ? '' : kpi('Average speed', T.ppmAvg == null ? '—' : `${n1(T.ppmAvg)} P/m`, 'while running'),
       kpi('Operator QC', pct(T.qcPass), `${n0(T.qc)} checks · ${n0(T.qcFail)} failed`),
@@ -74,7 +77,7 @@
     }).join('')}</div><div class="legend"><span><i style="background:var(--s-accent)"></i>Filters made</span><span><i style="background:#e3b341;border-radius:50%"></i>Uptime %</span>${R.drill.buckets ? '<span>Click a bar to look closer</span>' : ''}</div></div>`;
     // table
     const childName = { plant: 'Line', line: 'Shift', shift: 'MO' }[R.scope.level];
-    const cols = [['Filters', r => n0(r.units)], ...(R.scope.level === 'shift' ? [['Run time', r => hrs(r.obs)]] : [['OEE', r => pct(r.oee)], ['Uptime', r => pct(r.uptime)], ['Speed', r => pct(r.perf)], ['Good', r => pct(r.quality)], ['Running', r => hrs(r.run)], ['Avg P/m', r => n1(r.ppmAvg)]]),
+    const cols = [['Filters', r => n0(r.units)], ...(R.scope.level === 'shift' ? [['Run time', r => hrs(r.obs)]] : [['OEE', r => pct(r.oee) + (r.lowCoverage ? ' ⚠' : '')], [R.scope.level === 'plant' ? 'Availability' : 'Uptime', r => pct(r.avail != null ? r.avail : r.uptime)], ['Speed', r => pct(r.perf)], ['Good', r => pct(r.quality)], ['Running', r => hrs(r.run)], ['Avg P/m', r => n1(r.ppmAvg)]]),
       ['Down', r => hrs(r.down)], ['Top reason', r => r.reasons && r.reasons[0] ? esc(r.reasons[0].reason) : '—'], ['QC pass', r => pct(r.qcPass)],
       ...(T.aq ? [['Vision pass', r => pct(r.aqPass)]] : []), ['MOs done', r => n0(r.mos)], ...(L ? [['Wages', r => money(r.laborCost, 0)], ['$ / filter', r => money(r.laborPerUnit, 4)]] : [])];
     const table = R.rows.length ? `<div class="card"><h2>By ${childName.toLowerCase()}</h2><div class="tw"><table class="rt"><thead><tr><th>${childName}</th>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead>

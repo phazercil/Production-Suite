@@ -16,7 +16,7 @@ class MaintenanceTests(TestCase):
         Ticket.objects.all().delete()
         now = timezone.now()
         self.t1 = Ticket.objects.create(t=now, line="Barbara", by="J. Ortiz", machine="Barbara", type="Mechanical", priority="High", notes="Belt slipping")
-        self.t2 = Ticket.objects.create(t=now, line="Salvatore", by="M. Lee", machine="Salvatore", type="Electrical", status="Closed", updated=now)
+        self.t2 = Ticket.objects.create(t=now, line="Salvatore", by="M. Lee", machine="Salvatore", type="Electrical", status="Closed", updated=now, closed_at=now)
         self.belt = InventoryItem.objects.create(name="Drive belt", part_no="BT-1240", qty=4, min_qty=2)
         self.mt = engine.Ctx(user=Person.objects.get(pin="3333"))      # maintenance
         self.op = engine.Ctx(user=Person.objects.get(pin="1111"))      # operator

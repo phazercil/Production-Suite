@@ -12,7 +12,12 @@ class _ActiveKeyQS(models.QuerySet):
 
     def update(self, **kw):
         if "active" in kw and "active_machine" not in kw:
-            kw["active_machine"] = models.F("machine") if kw["active"] else None
+            # the machine being set in the same update: use the new value (F() would read the old one)
+            new_m = kw.get("machine", kw.get("machine_id"))
+            if kw["active"]:
+                kw["active_machine"] = (getattr(new_m, "pk", new_m) if new_m is not None else models.F("machine"))
+            else:
+                kw["active_machine"] = None
         return super().update(**kw)
 
 
@@ -55,6 +60,8 @@ class ShiftRun(models.Model):
     last_count = models.BigIntegerField(null=True, blank=True)
     draw_checked = models.DateTimeField(null=True, blank=True)
     qc_last = models.DateTimeField(null=True, blank=True)
+    rx = models.JSONField(null=True, blank=True, help_text="The recipe the MO runs with, from the machine's telemetry, and a "
+                          "change to another recipe: {mo, recipe, to, changed (ms), n, off, held}")
     qc_after_co = models.BooleanField(default=False)   # a QC check is due as soon as the machine runs after a changeover
     qc_due_at = models.DateTimeField(null=True, blank=True)   # when that check became due
     uptime = models.IntegerField(null=True, blank=True)
@@ -81,7 +88,7 @@ class ShiftRun(models.Model):
             self.carry_counter()
         self.active_machine = self.machine_id if self.active and self.machine_id else None
         uf = kw.get("update_fields")
-        if uf is not None and ("active" in uf or "machine" in uf):
+        if uf is not None and ("active" in uf or "machine" in uf or "machine_id" in uf):
             kw["update_fields"] = list(uf) + ["active_machine"]
         super().save(*a, **kw)
 
@@ -221,6 +228,9 @@ class Ticket(models.Model):
     status = models.CharField(max_length=20, default="Open")
     updated = models.DateTimeField(null=True, blank=True)
     updated_by = models.CharField(max_length=120, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                     help_text="When it was completed: set once, when its status goes to Completed (notes added later don't move it)")
+    pm_parts_used = models.DateTimeField(null=True, blank=True, help_text="When the PM's parts list was recorded as used (once per request)")
     pm = models.ForeignKey("PMTask", null=True, blank=True, on_delete=models.SET_NULL, related_name="tickets",
                            help_text="The planned maintenance task this request is for (opened by the PM schedule)")
     # lockout: Maintenance took the machine out of service from this request (Maintenance › request › Lock out), and

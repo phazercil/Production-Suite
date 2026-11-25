@@ -21,6 +21,12 @@ from .models import InventoryMove
 REPEAT = 3
 
 
+
+def done(t):
+    """When a request was completed: closed_at (set once, at completion). Requests closed before it existed were
+    given it from their completion note (migration hmi 00xx_ticket_closed_at)."""
+    return t.closed_at or (t.updated if t.status == "Closed" else None)
+
 def build(now, days=90, machine=""):
     a = now - timedelta(days=days)
     reps = Ticket.objects.filter(t__gte=a, pm__isnull=True)
@@ -32,7 +38,7 @@ def build(now, days=90, machine=""):
         by[t.machine].append(t)
     rows = []
     for m, ts in sorted(by.items()):
-        fixed = [(t.updated - t.t).total_seconds() / 3600 for t in ts if t.status == "Closed" and t.updated]
+        fixed = [(done(t) - t.t).total_seconds() / 3600 for t in ts if t.status == "Closed" and done(t)]
         mins = run.get(m)
         rows.append({"machine": m, "failures": len(ts), "open": sum(1 for t in ts if t.status != "Closed"),
                      "runH": round(mins / 60, 1) if mins else None,
@@ -49,9 +55,11 @@ def build(now, days=90, machine=""):
         task = x.pm
         if not task or task.unit != "days" or (machine and x.machine != machine):
             continue
-        prev = Ticket.objects.filter(pm=task, status="Closed", updated__lt=x.updated).order_by("-updated").first()
-        start = prev.updated if prev else task.created
-        if (x.updated - start).total_seconds() / 86400 - task.every > 0.5:
+        if not done(x):
+            continue
+        prev = Ticket.objects.filter(pm=task, status="Closed", closed_at__lt=done(x)).order_by("-closed_at").first()
+        start = done(prev) if prev else task.created
+        if (done(x) - start).total_seconds() / 86400 - task.every > 0.5:
             late += 1
         else:
             on_time += 1
@@ -73,7 +81,7 @@ def build(now, days=90, machine=""):
         used = used.filter(machine=machine)
     parts = list(used.values("item__name", "item__part_no", "item__unit").annotate(n=Sum("qty"), times=Count("id")).order_by("-n")[:15])
     per_machine = list(used.values("machine").annotate(n=Count("id"), q=Sum("qty")).order_by("-n")[:20])
-    done = on_time + late
-    return {"rows": rows, "repeats": repeats, "pm": {"onTime": on_time, "late": late, "pct": round(100 * on_time / done) if done else None},
+    total = on_time + late
+    return {"rows": rows, "repeats": repeats, "pm": {"onTime": on_time, "late": late, "pct": round(100 * on_time / total) if total else None},
             "coming": coming, "comingN": sum(len(v) for v in coming.values()), "parts": parts, "perMachine": per_machine,
             "failures": sum(r["failures"] for r in rows), "repeatAt": REPEAT}

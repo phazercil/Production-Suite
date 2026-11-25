@@ -14,7 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from plant.models import MO, Machine, PartSpec, Person, PlantSettings, part_key
-from plant.util import Catalog, from_ms, ms, now, part_spec, shift_at
+from plant.util import Catalog, from_ms, local, ms, now, part_spec, shift_at
 from suite.svg import speed_chart
 
 from . import integrations
@@ -349,6 +349,11 @@ class Screen:
         if self.qc_due():
             parts.append({"modal": "qc", "text": "QC check", "post": " due"})
         sh = self.shift
+        if sh and (sh.rx or {}).get("off") and sh.mo_id and not sh.co:
+            cut = from_ms(sh.rx["changed"])
+            parts.append({"modal": "changeover", "pre": "Recipe changed · ",
+                          "text": f"{sh.rx.get('to')} since {local(cut).strftime('%H:%M')}",
+                          "post": f": MO {sh.mo.number} ended then. End order and pick the next MO ({int(sh.rx.get('held') or 0):,} made for it so far)."})
         state = ("Changeover in progress" if sh.state == "changeover" else "Line stopped" if sh.state == "stopped" else "Running") if sh else "No shift running"
         w = shift_at(ms(self.t))
         from .snapshot import server_info
@@ -788,7 +793,7 @@ def maintenance_page(s, show="open"):
     if show == "open":
         qs = qs.exclude(status="Closed")
     elif show == "done":
-        qs = qs.filter(status="Closed", updated__gte=month)
+        qs = qs.filter(status="Closed", closed_at__gte=month)
     else:
         qs = qs.filter(Q(t__gte=month) | ~Q(status="Closed"))
     tickets = list(qs.order_by("-t")[:200])
@@ -808,7 +813,7 @@ def maintenance_page(s, show="open"):
         rows.sort(key=lambda r: (order.get(r["t"].priority, 1), r["t"].t))
     return {"tickets": rows, "limit": PHOTO_LIMIT, "show": show,
             "counts": {"open": Ticket.objects.filter(status="Open").count(), "work": Ticket.objects.filter(status__in=("Reviewed", "In progress", "Waiting on parts")).count(),
-                       "done": Ticket.objects.filter(status="Closed", updated__gte=week).count()},
+                       "done": Ticket.objects.filter(status="Closed", closed_at__gte=week).count()},
             "canWork": s.can("tickets.work")}
 
 

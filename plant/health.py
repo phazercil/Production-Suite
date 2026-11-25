@@ -160,9 +160,22 @@ def build():
     for e in errs:
         e["at"] = datetime.fromtimestamp(e["t"], tz=dt_timezone.utc)
     out["errors"] = errs[:40]
-    bad = [x for x in (not out["ticker"]["ok"], out["machinesBad"], any(not c["ok"] for c in out["conns"]),
-                       out["webhook"]["failing"], out["backup"]["old"], any(d.get("low") or d.get("err") for d in disks)) if x]
-    out["summary"] = "ok" if not bad else "warn"
+    off = out["backup"]["offsite"] or {}
+    vid = out["cameras"]["video"] or {}
+    checks = [
+        ("The minute ticker isn't running", not out["ticker"]["ok"]),
+        (f"{out['machinesBad']} machine(s) not reporting", out["machinesBad"]),
+        ("A connection is failing", any(not c["ok"] for c in out["conns"])),
+        ("A data source is failing", any(s["enabled"] and s["last_ok"] is False for s in out["sources"])),
+        ("Webhook deliveries are failing", out["webhook"]["failing"]),
+        ("The newest backup is over 2 days old", out["backup"]["old"]),
+        ("The last off-server copy failed", off.get("on") and off.get("ok") is False),
+        ("Sensors in fault or alarm", out["sensors"] and (out["sensors"]["fault"] or out["sensors"]["alarms"])),
+        ("Live video isn't running", out["cameras"]["live"] and vid.get("supported") and not vid.get("fresh")),
+        ("Disk space is low", any(d.get("low") or d.get("err") for d in disks)),
+    ]
+    out["problems"] = [why for why, bad in checks if bad]
+    out["summary"] = "ok" if not out["problems"] else "warn"
     return out
 
 

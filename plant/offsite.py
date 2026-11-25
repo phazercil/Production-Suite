@@ -74,7 +74,10 @@ def _sha(path):
 
 
 def verify(path):
-    """Read a backup file all the way through and test-restore it. Returns a sentence; raises OffsiteError."""
+    """Read a backup file all the way through and check it. Returns a sentence; raises OffsiteError.
+    SQLite backups are test-restored (opened and integrity-checked). MariaDB backups get a dump check: the whole file
+    reads, every table's definition is there and it reaches the end marker. That is not a restore (that needs a
+    spare MariaDB database), and the sentence says so."""
     name = Path(path).name
     try:
         if name.endswith(".sqlite3.gz"):
@@ -97,7 +100,7 @@ def verify(path):
                     last = line.strip()
         if last != "-- end of backup":
             raise OffsiteError("The copy is cut short (it doesn't reach the end of the backup).")
-        return f"Complete ({tables} tables)."
+        return f"Dump check passed: complete, {tables} tables (a dump check, not a test restore)."
     except (OSError, EOFError, gzip.BadGzipFile, sqlite3.DatabaseError) as e:
         raise OffsiteError(f"The copy can't be read back: {e}")
 

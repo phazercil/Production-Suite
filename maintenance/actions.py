@@ -49,7 +49,8 @@ def ticket_set(p, ctx):
     if st != old:
         t.status = st
         t.updated, t.updated_by = ctx.now, ctx.by
-        t.save(update_fields=["status", "updated", "updated_by"])
+        t.closed_at = ctx.now if st == "Closed" else None   # set at completion; reopening clears it
+        t.save(update_fields=["status", "updated", "updated_by", "closed_at"])
     kind = "closed" if st == "Closed" and old != "Closed" else "started" if st == "In progress" and old != st else "note"
     text = (f"{STATUS[old]} → {STATUS[st]}" if st != old else "") + (": " if st != old and note else "") + note
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind=kind, text=text)
@@ -203,9 +204,10 @@ def _low_stock(it, ctx):
 def item_use_bom(p, ctx):
     """A PM request done: record its parts list as used, in one go (Maintenance › request › Use the PM's parts)."""
     from .models import PMPart
-    t = Ticket.objects.filter(pk=p.get("ticket") or 0).first()
+    # lock the request first, then check: two presses at once (two screens) record the parts once
+    t = Ticket.objects.select_for_update().filter(pk=p.get("ticket") or 0).first()
     need(t and t.pm_id, "That isn't a planned maintenance request.")
-    need(not InventoryMove.objects.filter(ticket=t, kind="used", note__startswith="PM parts list").exists(),
+    need(not t.pm_parts_used and not InventoryMove.objects.filter(ticket=t, kind="used", note__startswith="PM parts list").exists(),
          "The PM's parts are already recorded on this request.")
     rows = list(PMPart.objects.filter(task_id=t.pm_id).select_related("item"))
     need(rows, "This PM task has no parts list.")
@@ -220,6 +222,7 @@ def item_use_bom(p, ctx):
         InventoryMove.objects.create(item=it, kind="used", qty=r.qty, machine=t.machine, ticket=t, note="PM parts list", t=ctx.now, by=ctx.by)
         used.append(_qty(r.qty, it))
         _low_stock(it, ctx)
+    Ticket.objects.filter(pk=t.pk).update(pm_parts_used=ctx.now)
     TicketNote.objects.create(ticket=t, t=ctx.now, by=ctx.by, kind="note", text="Used the PM's parts: " + ", ".join(used))
     audit(ctx, f"Inventory: PM parts used on {t.machine} (request #{t.id}): {', '.join(used)}")
     return {"msg": "Used: " + ", ".join(used) + "."}
@@ -287,9 +290,13 @@ def return_service(p, ctx):
 @cmd("itemUseUndo", "tickets.work")
 def item_use_undo(p, ctx):
     """Take back a use recorded by mistake: the stock goes back up and the request gets a note."""
-    mv = InventoryMove.objects.select_related("item", "ticket").filter(pk=p.get("id") or 0, kind="used").first()
+    mv = InventoryMove.objects.filter(pk=p.get("id") or 0).first()
     need(mv, "That entry is no longer on file.")
     it = InventoryItem.objects.select_for_update().get(pk=mv.item_id)
+    # under the item's lock, read the use again: a second take-back of the same use (two screens at once) finds it
+    # already taken back
+    mv = InventoryMove.objects.select_for_update().select_related("item", "ticket").get(pk=mv.pk)
+    need(mv.kind == "used", "That use was already taken back.")
     it.qty = round(it.qty + mv.qty, 3)
     it.updated, it.updated_by = ctx.now, ctx.by
     it.save(update_fields=["qty", "updated", "updated_by"])

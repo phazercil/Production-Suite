@@ -125,7 +125,7 @@ def _filters(sc):
 
 
 def _blank():
-    return {"obs": 0, "run": 0, "units": 0, "ppmAvg": None, "down": 0.0, "qc": 0, "qcFail": 0, "aq": 0, "aqFail": 0, "mos": 0, "moQty": 0,
+    return {"planned": 0.0, "obs": 0, "run": 0, "units": 0, "ppmAvg": None, "down": 0.0, "qc": 0, "qcFail": 0, "aq": 0, "aqFail": 0, "mos": 0, "moQty": 0,
             "moMin": 0.0, "laborCost": None, "reasons": {}, "speedSum": 0.0, "ratedSum": 0.0, "scrap": 0}
 
 
@@ -134,14 +134,40 @@ def _rated():
     return {m.name: float(m.ppm or 0) for m in Machine.objects.filter(stage="s1")}
 
 
+COVERAGE_MIN = 90   # % of planned production time with minute readings, below which availability is flagged
+
+
+def planned_minutes(line, a, b):
+    """Planned production time of a line between a and b, in minutes: its shifts on the plant calendar (Schedule),
+    less breaks, lunch, the start-up allowance and breaks added for the day. Availability is measured against this,
+    so minutes with no readings (a feed that went quiet during a stop) can't make a line look better."""
+    from types import SimpleNamespace
+
+    from hmi.engine import planned_windows
+    m = Machine.objects.filter(name=line).first()
+    if not m or b <= a:
+        return 0.0
+    off = sorted(planned_windows(SimpleNamespace(machine=m, machine_id=m.pk, start=a, end=b)))
+    gone, cur = 0.0, a
+    for s0, e0 in off:   # union of the windows, clipped to [a, b)
+        s0, e0 = max(s0, cur, a), min(e0, b)
+        if e0 > s0:
+            gone += (e0 - s0).total_seconds() / 60
+            cur = e0
+    return max(0.0, (b - a).total_seconds() / 60 - gone)
+
+
 def oee_parts(x):
-    """Availability (uptime) x Performance (speed while running against the rated speed) x Quality (good of made).
+    """Availability x Performance (speed while running against the rated speed) x Quality (good of made).
+    Availability is running time against planned production time (the Schedule's shifts less breaks) where that is
+    known (the plant and each line); otherwise it is the uptime of the minutes observed, and is labelled so.
     The speed loss is the running time the slow running cost: running minutes x (1 - performance)."""
     perf = min(150.0, 100 * x["speedSum"] / x["ratedSum"]) if x.get("ratedSum") else None
     qual = 100 * max(0, x["units"] - x["scrap"]) / x["units"] if x.get("units") else None
-    av = x.get("uptime")
+    av = x.get("avail") if x.get("avail") is not None else x.get("uptime")
     oee = av * perf * qual / 10000 if None not in (av, perf, qual) else None
-    return {"perf": round(perf, 1) if perf is not None else None, "quality": round(qual, 1) if qual is not None else None,
+    return {"availBasis": "planned" if x.get("avail") is not None else "observed",
+            "perf": round(perf, 1) if perf is not None else None, "quality": round(qual, 1) if qual is not None else None,
             "oee": round(oee, 1) if oee is not None else None,
             "speedLossMin": round(x["run"] * max(0.0, 1 - perf / 100), 1) if perf is not None else None}
 
@@ -210,19 +236,18 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
             for r in qs.values(grp).annotate(**ann):
                 x = row(r[grp])
                 x[n_key], x[f_key] = r["n"], r["fails"]
-    # MOs finished (a run of an MO that ended in the period)
-    for r in MoRun.objects.filter(end_time__gte=a, end_time__lt=b, **g).values("mo", "qty", "scrap", "start_time", "end_time", *([grp] if grp and grp != "mo" else [])):
+    # MO runs: an MO run counts as finished in the period it ended in; its filters, scrap and time are shared out over
+    # the periods it ran in (by time), so a run over two days puts each day's share of its scrap on that day
+    for r in MoRun.objects.filter(start_time__lt=b, end_time__gt=a, **g).values("mo", "qty", "scrap", "start_time", "end_time", *([grp] if grp and grp != "mo" else [])):
         mins = max(0.0, (r["end_time"] - r["start_time"]).total_seconds() / 60)
-        total["mos"] += 1
-        total["moQty"] += r["qty"] or 0
-        total["moMin"] += mins
-        total["scrap"] += r["scrap"] or 0
-        if grp:
-            x = row(r[grp] if grp != "mo" else r["mo"])
-            x["mos"] += 1
-            x["moQty"] += r["qty"] or 0
-            x["moMin"] += mins
-            x["scrap"] += r["scrap"] or 0
+        share = _clip(a, b, r["start_time"], r["end_time"]) / mins if mins else (1.0 if a <= r["end_time"] < b else 0.0)
+        ended = a <= r["end_time"] < b
+        parts = [total] + ([row(r[grp] if grp != "mo" else r["mo"])] if grp else [])
+        for x in parts:
+            x["mos"] += 1 if ended else 0
+            x["moQty"] += (r["qty"] or 0) * share
+            x["moMin"] += mins * share
+            x["scrap"] += (r["scrap"] or 0) * share
     if sc["level"] == "mo" or grp == "mo":
         # an MO's own filters made = what its runs recorded; its time = how long they ran
         if sc["level"] == "mo":
@@ -231,10 +256,27 @@ def summarize(sc, a, b, stop_ppm, with_rows=True, labor=None):
             x["units"], x["obs"] = x["moQty"], round(x["moMin"])
     if labor is not None:
         _labor(sc, a, b, f, total, rows, grp, labor)
+    # planned production time (plant and line scopes): availability against it, and how much of it had readings
+    if sc["level"] in ("plant", "line"):
+        lines = [sc["line"]] if sc["level"] == "line" else list(PpmReading.objects.filter(t__gte=a, t__lt=b).values_list("line", flat=True).distinct())
+        planned = {ln: planned_minutes(ln, a, b) for ln in lines}
+        total["planned"] = round(sum(planned.values()), 1)
+        if grp == "line":
+            for ln, pm in planned.items():
+                row(ln)["planned"] = round(pm, 1)
     for x in [total, *rows.values()]:
         x["down"] = round(x["down"], 1)
+        x["scrap"] = round(x["scrap"])
+        x["moQty"] = round(x["moQty"])
         per_mo = sc["level"] == "mo" or (x is not total and grp == "mo")  # MOs have run time, not minute readings
         x["uptime"] = round(100 * x["run"] / x["obs"], 1) if x["obs"] and not per_mo else None
+        if x.get("planned"):
+            x["avail"] = round(min(100.0, 100 * x["run"] / x["planned"]), 1)
+            x["coverage"] = round(min(100.0, 100 * x["obs"] / x["planned"]), 1)
+            x["lowCoverage"] = x["coverage"] < COVERAGE_MIN
+        else:
+            x["avail"] = x["coverage"] = None
+            x["lowCoverage"] = False
         x["qcPass"] = round(100 * (x["qc"] - x["qcFail"]) / x["qc"], 1) if x["qc"] else None
         x["aqPass"] = round(100 * (x["aq"] - x["aqFail"]) / x["aq"], 1) if x["aq"] else None
         x.update(oee_parts(x) if not per_mo else {"perf": None, "quality": round(100 * max(0, x["units"] - x["scrap"]) / x["units"], 1)

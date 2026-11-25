@@ -1,0 +1,8 @@
+{# Start of shift: the line ran another MO with nobody logged in. When did it change over? #}
+{% if ask %}<div class="panel" style="border-color:var(--warn)"><h3 class="h2">When did {{ old.floor_number }} change to {{ new.floor_number }}?</h3>
+  <p class="note">Since {{ since|clock }} the line made {{ made|num }} with nobody logged in, counted on MO {{ old.floor_number }}. Pick the stop when it changed over: what was made before it stays on {{ old.floor_number }}, what was made after goes to {{ new.floor_number }}.</p>
+  <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+    {% for d in stops %}<label class="chk"><input type="radio" name="coAt" value="stop:{{ d.pk }}" required> {{ d.start_time|clock }} – {{ d.end_time|clock }} · {{ d.minutes }} min{% if d.reason %} · {{ d.reason }}{% endif %}</label>{% endfor %}
+    {% if stopped %}<label class="chk"><input type="radio" name="coAt" value="now" required> Now: it's stopped for the changeover since {{ stopped|clock }}</label>{% endif %}
+    <label class="chk"><input type="radio" name="coAt" value="before" required> Before this shift started <span class="note">(everything this shift goes to {{ new.floor_number }}; a supervisor sorts out the earlier logs)</span></label>
+  </div></div>{% endif %}

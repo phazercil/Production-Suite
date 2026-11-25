@@ -8,6 +8,7 @@ packaging follows on). Opened with "Open Stations" (Admin › Permissions); the 
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
+from django.db import IntegrityError, transaction
 from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from django.utils import timezone
@@ -73,6 +74,52 @@ def page(request):
                                                        "err": request.GET.get("err", "")})
 
 
+class _No(Exception):
+    pass
+
+
+def _act(j, name, post, me, now, stage):
+    if name == "start":
+        if j.wip_started:
+            raise _No(f"MO {j.mo.number} is already started.")
+        busy = Job.objects.filter(machine=j.machine, op=j.op, wip_started__isnull=False, wip_done__isnull=True).exclude(pk=j.pk).first()
+        if busy:
+            raise _No(f"MO {busy.mo.number} is still under way on {j.machine.name}: complete it first.")
+        j.wip_started, j.wip_by, j.wip_lane = now, me.name, lane(j)
+        j.save(update_fields=["wip_started", "wip_by", "wip_lane"])
+        return f"{stage} started on MO {j.mo.number}."
+    if name in ("qty", "complete"):
+        if not j.wip_started:
+            raise _No(f"Start MO {j.mo.number} first.")
+        raw = str(post.get("qty") or "").strip()
+        if raw:
+            try:
+                n = float(raw)
+            except ValueError:
+                raise _No("Type how many as a number.")
+            if n < 0 or n > 10_000_000:
+                raise _No("That quantity isn't possible.")
+            j.wip_qty = (j.wip_qty or 0) + n if post.get("how") == "add" else n   # (the row is locked: no lost update)
+        if name == "complete":
+            j.wip_done, j.wip_lane = now, None
+        j.save(update_fields=["wip_qty", "wip_done", "wip_lane"])
+        return f"{stage} on MO {j.mo.number}: {j.wip_qty:,.0f} done" + (" · completed" if name == "complete" else "")
+    if name == "undo":
+        if not j.wip_done:
+            raise _No("That stage isn't completed.")
+        if Job.objects.filter(machine=j.machine, op=j.op, wip_started__isnull=False, wip_done__isnull=True).exclude(pk=j.pk).exists():
+            raise _No(f"Another MO is under way on {j.machine.name}: complete it before reopening this one.")
+        j.wip_done, j.wip_lane = None, lane(j)
+        j.save(update_fields=["wip_done", "wip_lane"])
+        return f"MO {j.mo.number} is back under way."
+    raise _No("Unknown action.")
+
+
+def lane(j):
+    """The key the database keeps unique: one MO under way per station machine and stage."""
+    return f"{j.machine_id}:{j.op}"
+
+
 @require_POST
 def do(request, name):
     me, denied = _gate(request)
@@ -89,39 +136,16 @@ def do(request, name):
     from hmi.engine import Ctx
     ctx = Ctx(user=me)
     stage = dict(STAGES).get(j.op, j.op)
-    if name == "start":
-        if j.wip_started:
-            return go(err=f"MO {j.mo.number} is already started.")
-        busy = Job.objects.filter(machine=j.machine, op=j.op, wip_started__isnull=False, wip_done__isnull=True).exclude(pk=j.pk).first()
-        if busy:
-            return go(err=f"MO {busy.mo.number} is still under way on {j.machine.name}: complete it first.")
-        j.wip_started, j.wip_by = now, me.name
-        j.save(update_fields=["wip_started", "wip_by"])
-        msg = f"{stage} started on MO {j.mo.number}."
-    elif name in ("qty", "complete"):
-        if not j.wip_started:
-            return go(err=f"Start MO {j.mo.number} first.")
-        raw = str(request.POST.get("qty") or "").strip()
-        if raw:
-            try:
-                n = float(raw)
-            except ValueError:
-                return go(err="Type how many as a number.")
-            if n < 0 or n > 10_000_000:
-                return go(err="That quantity isn't possible.")
-            j.wip_qty = (j.wip_qty or 0) + n if request.POST.get("how") == "add" else n
-        if name == "complete":
-            j.wip_done = now
-        j.save(update_fields=["wip_qty", "wip_done"])
-        msg = f"{stage} on MO {j.mo.number}: {j.wip_qty:,.0f} done" + (" · completed" if name == "complete" else "")
-    elif name == "undo":
-        if not j.wip_done:
-            return go(err="That stage isn't completed.")
-        j.wip_done = None
-        j.save(update_fields=["wip_done"])
-        msg = f"MO {j.mo.number} is back under way."
-    else:
-        return go(err="Unknown action.")
+    try:
+        with transaction.atomic():
+            # one station action at a time per machine: lock the machine, then read the job again under the lock
+            Machine.objects.select_for_update().filter(pk=j.machine_id).first()
+            j = Job.objects.select_for_update().select_related("mo", "machine").get(pk=j.pk)
+            msg = _act(j, name, request.POST, me, now, stage)
+    except _No as e:
+        return go(err=str(e))
+    except IntegrityError:   # the database's one-under-way-per-machine rule (two screens at the same instant)
+        return go(err=f"Another MO was just started on {j.machine.name}: complete it first.")
     audit(ctx, f"Stations · {j.machine.name}: {msg}")
     event("stage", {"line": j.machine.name, "op": j.op, "mo": j.mo.number, "qty": j.wip_qty, "done": bool(j.wip_done), "by": me.name})
     from plant.models import PlantSettings

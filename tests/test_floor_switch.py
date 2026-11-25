@@ -271,7 +271,7 @@ class ForceEndTests(TestCase):
         self.assertNotContains(c.get("/supervisor/?tab=co"), "Changeovers open now")
         # the kiosk: a supervisor's PIN first
         engine.execute("coOpen", {}, self.op)
-        engine.execute("coEnd", {"checks": ALL}, self.op)
+        engine.execute("coEnd", {"checks": ALL, "qty": ShiftRun.objects.get(pk=self.sh.pk).mo_count}, self.op)
         k = Client(HTTP_HX_REQUEST="true")
         k.post("/kiosk/do/station", {"line": "Barbara"})
         k.post("/kiosk/do/login", {"pin": "1111"})

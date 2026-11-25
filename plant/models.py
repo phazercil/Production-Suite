@@ -125,6 +125,9 @@ class Machine(models.Model):
     code = models.CharField(max_length=12, blank=True, help_text="S2K process code, e.g. BARB")
     tags = models.JSONField(default=dict, blank=True, help_text="This machine's tag in each other system, e.g. {\"PIM\": \"A-1023\"} (Admin › Machines)")
     stage = models.CharField(max_length=2, choices=STAGES, default="s1")
+    count_from_speed = models.BooleanField(default=True, help_text="No parts counter hooked up: count filters from the speed "
+                                           "(pleats ÷ pleats per filter). Off: nothing is counted until a counter is connected; "
+                                           "the operator enters the count at End order.")
     speed_mode = models.CharField(max_length=8, default="fixed")
     ppm = models.FloatField(default=180, help_text="Stage 1: rated / fixed speed, in the machine's speed unit")
     # What the machine's speed is measured in (plant/units.py): pleats per minute, linear mm per second of media,
@@ -153,6 +156,9 @@ class Machine(models.Model):
     feed_poll = models.IntegerField(default=10)
     feed_ppm_field = models.CharField(max_length=80, default="ppm")
     feed_count_field = models.CharField(max_length=80, blank=True, help_text="Filters cut (the machine's counter)")
+    count_kind = models.CharField(max_length=8, default="total", choices=[("total", "A running total"), ("minute", "Filters made per minute")],
+                                  help_text="What the counter value is: a running total that keeps going up (the suite counts what it "
+                                            "went up by each minute), or how many filters were made in the last minute")
     feed_recipe_field = models.CharField(max_length=80, blank=True, help_text="Recipe loaded in the machine")
     # "Database table" source: {"db": "machines", "table": .., "orderCol": newest row by, "keyCol": .., "keyVal": .., "maxAge": minutes}
     feed_src = models.JSONField(default=dict, blank=True)
