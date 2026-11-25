@@ -1,6 +1,8 @@
 <div class="wi-edit-step" data-wi-row><span class="wi-n">{{ i|add:1 }}</span>
   <div class="wi-edit-body"><textarea name="s_text" rows="3" maxlength="4000" placeholder="What to do">{{ s.text|default:"" }}</textarea>
     <input name="s_caution" maxlength="500" value="{{ s.caution|default:'' }}" placeholder="Caution (optional): shown in red above the step">
+    <div class="wi-addpic"><label class="btn sm">📷 Add photo / video<input type="file" name="s_files_{{ i }}" data-wi-files multiple accept="image/*,video/mp4,video/webm,video/quicktime" hidden></label>
+      <span class="wi-picked" data-wi-picked></span>{% if media %}<span class="note">or tick ones already added:</span>{% endif %}</div>
     {% if media %}<div class="wi-pick">{% for m in media %}<label class="wi-pm" title="{{ m.name }}"><input type="checkbox" name="s_media_{{ i }}" data-wi-media value="{{ m.pk }}" {% if s and m.pk in s.media %}checked{% endif %}>
       {% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}?size=thumb" alt="">{% else %}<span class="wi-vid">▶ {{ m.name|truncatechars:18 }}</span>{% endif %}</label>{% endfor %}</div>{% endif %}
   </div>

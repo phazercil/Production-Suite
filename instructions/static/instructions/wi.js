@@ -7,6 +7,7 @@
       var n = row.querySelector(".wi-n");
       if (n) n.textContent = String(i + 1);
       row.querySelectorAll("[data-wi-media]").forEach(function (cb) { cb.name = "s_media_" + i; });
+      row.querySelectorAll("[data-wi-files]").forEach(function (inp) { inp.name = "s_files_" + i; });
     });
   }
   function fresh(kind) {
@@ -79,6 +80,33 @@
     box.focus();
     var at = a + token.length;
     try { box.setSelectionRange(at, at); } catch (err) { /* not a text box */ }
+  });
+  // Add photo / video on a step: show what was picked (photos as thumbnails); they're saved with the draft
+  document.addEventListener("change", function (e) {
+    var inp = e.target.closest && e.target.closest("[data-wi-files]");
+    if (!inp) return;
+    var out = inp.closest("[data-wi-row]").querySelector("[data-wi-picked]");
+    if (!out) return;
+    out.textContent = "";
+    Array.prototype.forEach.call(inp.files, function (f) {
+      var chip = document.createElement("span");
+      chip.className = "wi-new";
+      if (f.type.indexOf("image/") === 0) {
+        var img = document.createElement("img");
+        img.src = URL.createObjectURL(f);
+        img.alt = f.name;
+        chip.appendChild(img);
+      } else {
+        chip.textContent = "▶ " + f.name;
+      }
+      out.appendChild(chip);
+    });
+    if (inp.files.length) {
+      var note = document.createElement("span");
+      note.className = "note";
+      note.textContent = inp.files.length === 1 ? "added when you save the draft" : inp.files.length + " added when you save the draft";
+      out.appendChild(note);
+    }
   });
   document.addEventListener("submit", function (e) {
     var form = e.target.closest && e.target.closest("[data-wi-form]");

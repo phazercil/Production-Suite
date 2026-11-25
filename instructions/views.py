@@ -122,17 +122,59 @@ def do(request, name):
     P = request.POST
     p = {k: P.get(k) for k in P if k not in ("csrfmiddlewaretoken",)}
     p["machines"] = P.getlist("machines")
+    skipped = 0
     if name == "wiSave":   # the editor: one list per field, in row order
         texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
         p["steps"] = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "",
                        "media": P.getlist(f"s_media_{i}")} for i in range(len(texts))]
+        # photos and videos picked on a step (Add photo / video): kept with the instruction and put on that step
+        x = Instruction.objects.filter(pk=p.get("id") or 0).first()
+        added = 0
+        if x and x.draft() and perms.can(me, "wi.edit"):
+            for i, st in enumerate(p["steps"]):
+                for f in request.FILES.getlist(f"s_files_{i}")[:20]:
+                    m = store_media(x, f, me)
+                    if m:
+                        st["media"] = list(st["media"]) + [str(m.pk)]
+                        added += 1
+                    else:
+                        skipped += 1
+            if added:
+                engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {added} photo(s)/video(s) added on steps")
         cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
         p["params"] = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
     r = engine.execute(name, p, engine.Ctx(user=me))
+    if name == "wiSave" and r.get("ok") and skipped:
+        r["msg"] = f"{r.get('msg') or 'Saved.'} {skipped} file{'s' if skipped != 1 else ''} not added: photos (JPEG, PNG…) up to 25 MB, videos (MP4, WebM, MOV) up to 300 MB."
     pk = (r.get("data") or {}).get("id") or p.get("id")
     base = f"/instructions/{pk}/" if pk else "/instructions/"
     from urllib.parse import urlencode
     return HttpResponseRedirect(base + "?" + urlencode({"msg": r.get("msg") or "Saved."} if r.get("ok") else {"err": r.get("error") or "That didn't save."}))
+
+
+def store_media(x, f, me):
+    """Keep one uploaded photo (as a JPEG, in the database) or video (a file under media/instructions/) with an
+    instruction. None if it isn't a photo or a video the suite takes, or is too big."""
+    ctype = (f.content_type or mimetypes.guess_type(f.name)[0] or "").lower()
+    if ctype.startswith("image/"):
+        from hmi import photos
+        if f.size > photos.MAX_BYTES:
+            return None
+        try:
+            jpeg, thumb, w, h = photos.process(f.read())
+        except photos.PhotoError:
+            return None
+        return Media.objects.create(instruction=x, kind="image", content_type="image/jpeg", data=jpeg, thumb=thumb, size=len(jpeg),
+                                    name=f.name[:200], t=timezone.now(), by=me.name)
+    if ctype in VIDEO_TYPES and f.size <= VIDEO_MAX:
+        ext = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov", "video/ogg": ".ogv"}[ctype]
+        fn = f"{x.pk}-{uuid.uuid4().hex}{ext}"
+        with open(media_dir() / fn, "wb") as out:
+            for chunk in f.chunks():
+                out.write(chunk)
+        return Media.objects.create(instruction=x, kind="video", content_type=ctype, file=fn, size=f.size, name=f.name[:200],
+                                    t=timezone.now(), by=me.name)
+    return None
 
 
 @require_POST
@@ -147,29 +189,7 @@ def upload(request, pk):
     back = f"/instructions/{pk}/"
     if not perms.can(me, "wi.edit"):
         return HttpResponseRedirect(back + "?err=Adding+photos+and+videos+needs+Write+work+instructions.")
-    n = 0
-    for f in request.FILES.getlist("files")[:20]:
-        ctype = (f.content_type or mimetypes.guess_type(f.name)[0] or "").lower()
-        if ctype.startswith("image/"):
-            from hmi import photos
-            if f.size > photos.MAX_BYTES:
-                continue
-            try:
-                jpeg, thumb, w, h = photos.process(f.read())
-            except photos.PhotoError:
-                continue
-            Media.objects.create(instruction=x, kind="image", content_type="image/jpeg", data=jpeg, thumb=thumb, size=len(jpeg),
-                                 name=f.name[:200], t=timezone.now(), by=me.name)
-            n += 1
-        elif ctype in VIDEO_TYPES and f.size <= VIDEO_MAX:
-            ext = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov", "video/ogg": ".ogv"}[ctype]
-            fn = f"{x.pk}-{uuid.uuid4().hex}{ext}"
-            with open(media_dir() / fn, "wb") as out:
-                for chunk in f.chunks():
-                    out.write(chunk)
-            Media.objects.create(instruction=x, kind="video", content_type=ctype, file=fn, size=f.size, name=f.name[:200],
-                                 t=timezone.now(), by=me.name)
-            n += 1
+    n = sum(1 for f in request.FILES.getlist("files")[:20] if store_media(x, f, me))
     engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {n} photo(s)/video(s) added")
     msg = f"{n} added: pick them on the steps they belong to." if n else "Nothing added: photos (JPEG, PNG…) and videos (MP4, WebM, MOV, 300 MB at most)."
     return HttpResponseRedirect(back + "?" + ("msg=" if n else "err=") + msg.replace(" ", "+"))

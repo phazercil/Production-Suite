@@ -261,16 +261,19 @@ CO_KINDS = {False: ("changeover",), True: ("inkjet",)}
 
 
 def _specific(x, part):
-    """How closely an instruction is aimed at a machine and part: machines named, then an exact part over a pattern."""
+    """How closely an instruction is aimed at a machine and part, highest first: the exact part number, then the
+    longest matching pattern (MG4062* before MG*), then a named machine before every machine."""
     p = (part or "").upper()
     pats = x.part_patterns()
     exact = p in pats
-    return (2 if x.machines.all() else 0) + (4 if exact else 2 if pats else 0)
+    longest = max((len(pat.replace("*", "").replace("?", "")) for pat in pats if fnmatch.fnmatchcase(p, pat)), default=0)
+    return (1 if exact else 0, longest, 1 if x.machines.all() else 0)
 
 
 def changeover_for(machine, part, inkjet=False):
     """The approved changeover instruction for changing this machine over to this part (Inkjet change instructions
-    for an inkjet-only change): the one aimed most closely at them. None if none."""
+    for an inkjet-only change): the one aimed most closely at them, which replaces the more general ones (they are
+    not combined). None if none."""
     kinds = CO_KINDS[bool(inkjet)]
     best = None
     for x in Instruction.objects.filter(active=True, kind__in=kinds).prefetch_related("machines"):
@@ -279,7 +282,7 @@ def changeover_for(machine, part, inkjet=False):
         r = x.current()
         if not r or not r.steps:
             continue
-        key = (-_specific(x, part), kinds.index(x.kind), x.doc_no)
+        key = (tuple(-n for n in _specific(x, part)), kinds.index(x.kind), x.doc_no)
         if best is None or key < best[0]:
             best = (key, x, r)
     return (best[1], best[2]) if best else (None, None)

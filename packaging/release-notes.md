@@ -28,7 +28,11 @@
 
 **One kind for changeovers.** The Setup kind is gone: every Setup instruction is now a Changeover instruction, with nothing else about it changed.
 
-**Editing instructions.** Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
+**Editing instructions.**
+- Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
+- **📷 Add photo / video** on each step: pick photos or videos (or take them on a tablet). They're shown on the step right away and saved with the draft.
+
+**The most specific instruction wins.** When several Changeover instructions match, the kiosk uses the one aimed most closely; they aren't combined. Order: an exact part number (MG4062HP), then the longest pattern (MG4062* before MG*), then one for the machine before one for every machine.
 
 ## What's new in 1.9.14
 

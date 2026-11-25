@@ -14,7 +14,7 @@
 
     {% if edit %}
       <div class="flash warn">You're changing the draft (rev {{ draft.rev }}). The kiosks keep showing {% if cur %}rev {{ cur.rev }}{% else %}nothing{% endif %} until it's approved. <a href="?view=1">See {% if cur %}rev {{ cur.rev }}{% else %}it as it reads{% endif %}</a></div>
-      <form method="post" action="/instructions/do/wiSave" data-wi-form>{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
+      <form method="post" action="/instructions/do/wiSave" enctype="multipart/form-data" data-wi-form>{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
         <h3>Steps</h3>
         <div class="wi-step-list" data-wi-list="step">{% for s in steps %}{% include "instructions/_edit_step.html" with s=s i=forloop.counter0 %}{% endfor %}</div>
         <div class="wi-actions"><button type="button" class="btn" data-wi-add="step">+ Add step</button></div>
@@ -31,7 +31,7 @@
         <div class="wi-actions"><button class="btn go">Save the draft</button></div></form>
       {% include "instructions/_try.html" %}
       <form method="post" action="/instructions/{{ x.pk }}/upload" enctype="multipart/form-data" class="wi-up">{% csrf_token %}
-        <label>Add photos or videos <small>(then tick them on their steps; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
+        <label>Add photos or videos to the library <small>(to tick on steps; or use 📷 Add photo / video on a step; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
       <div class="wi-actions">
         {% if canApprove %}{% if mine and me.role != "admin" %}<span class="note">Someone other than its author approves it.</span>{% else %}<form method="post" action="/instructions/do/wiApprove">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn go" data-confirm="Approve rev {{ draft.rev }}? The kiosks show it from now on{% if cur %} and rev {{ cur.rev }} becomes obsolete{% endif %}. Save the draft first if you changed it.">Approve rev {{ draft.rev }}</button></form>{% endif %}{% else %}<span class="note">Approving needs <b>Approve work instructions</b>.</span>{% endif %}
         {% if revs|length > 1 %}<form method="post" action="/instructions/do/wiDiscard">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn bad po" data-confirm="Discard draft rev {{ draft.rev }}?">Discard the draft</button></form>{% endif %}

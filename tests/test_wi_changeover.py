@@ -154,3 +154,66 @@ class SetupFoldedIntoChangeover(TransactionTestCase):
         ex.migrate(ex.loader.graph.leaf_nodes())
         self.assertEqual(Instruction.objects.get(doc_no="WI-900").kind, "changeover")
         self.assertNotIn("setup", dict(Instruction.KINDS))
+
+
+class PhotosOnSteps(TestCase):
+    def setUp(self):
+        seed_demo(reset=True)
+        self.lead = Person.objects.filter(role="lead").first()
+        r = engine.execute("wiCreate", {"title": "P7 changeover", "kind": "changeover"}, engine.Ctx(user=self.lead))
+        self.x = Instruction.objects.get(pk=r["data"]["id"])
+        self.cl = Client()
+        self.cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+
+    def test_add_photo_on_a_step_when_saving(self):
+        import io
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new("RGB", (40, 30), "blue").save(b, "PNG")
+        pic = SimpleUploadedFile("screws.png", b.getvalue(), content_type="image/png")
+        junk = SimpleUploadedFile("notes.txt", b"hello", content_type="text/plain")
+        r = self.cl.post("/instructions/do/wiSave", {"id": self.x.pk, "s_text": ["Lock out", "Set the screws"], "s_caution": ["", ""],
+                                                     "s_files_1": [pic, junk], "p_name": [""], "change_note": "First"})
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("1+file+not+added", r["Location"])
+        steps = self.x.draft().steps
+        self.assertEqual(steps[0]["media"], [])
+        self.assertEqual(len(steps[1]["media"]), 1)
+        m = self.x.media.get()
+        self.assertEqual((m.kind, m.name, steps[1]["media"][0]), ("image", "screws.png", m.pk))
+        r = self.cl.get(f"/instructions/{self.x.pk}/")
+        self.assertContains(r, 'name="s_files_0"')
+        self.assertContains(r, 'enctype="multipart/form-data" data-wi-form')
+        self.assertContains(r, f'name="s_media_1" data-wi-media value="{m.pk}" checked')
+
+
+class MostSpecificWins(TestCase):
+    def setUp(self):
+        seed_demo(reset=True)
+        self.lead = Person.objects.filter(role="lead").first()
+        self.admin = Person.objects.get(pin="9999")
+        self.bar = Machine.objects.get(name="Barbara")
+
+    def wi(self, parts, machines=()):
+        r = engine.execute("wiCreate", {"title": parts or "all", "kind": "changeover", "parts": parts, "machines": [str(m.pk) for m in machines]},
+                           engine.Ctx(user=self.lead))
+        x = Instruction.objects.get(pk=r["data"]["id"])
+        engine.execute("wiSave", {"id": x.pk, "change_note": "x", "steps": [{"text": parts or "all"}]}, engine.Ctx(user=self.lead))
+        assert engine.execute("wiApprove", {"id": x.pk}, engine.Ctx(user=self.admin))["ok"]
+        return x
+
+    def test_exact_then_longest_pattern_then_machine(self):
+        from instructions.cmds import changeover_for
+        every = self.wi("")
+        mg = self.wi("MG*")                         # made before the narrower ones: lower WI number
+        mg_bar = self.wi("MG*", machines=[self.bar])
+        mg4062 = self.wi("MG4062*")
+        exact = self.wi("MG4062HP")
+        pick = lambda part, m=self.bar: changeover_for(m, part)[0]   # noqa: E731
+        self.assertEqual(pick("MG4062HP"), exact)
+        self.assertEqual(pick("MG4062C"), mg4062)
+        self.assertEqual(pick("MG5000"), mg_bar)
+        self.assertEqual(pick("MG5000", Machine.objects.get(name="Salvatore")), mg)
+        self.assertEqual(pick("AQ1278"), every)

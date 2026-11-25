@@ -37,3 +37,8 @@ td.wi-row-tools{width:1%;white-space:nowrap}
 form[data-wi-form] .wi-params{table-layout:fixed;width:100%}
 form[data-wi-form] .wi-params th:nth-child(1){width:15%}form[data-wi-form] .wi-params th:nth-child(2){width:17%}
 form[data-wi-form] .wi-params th:nth-child(6){width:80px}form[data-wi-form] .wi-params th:nth-child(7){width:48px}
+.wi-addpic{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.wi-addpic label.btn{cursor:pointer}
+.wi-picked{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wi-new{display:inline-flex;align-items:center;border:1px dashed var(--s-rule);border-radius:6px;padding:3px;font-size:12px}
+.wi-new img{height:44px;border-radius:4px}
