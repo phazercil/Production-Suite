@@ -1,3 +1,33 @@
+## What's new in 1.9.15
+
+**Changeover steps and settings now live in Quality › Work instructions, inside the suite.**
+- **Where they come from:**
+  - A changeover now uses the approved **Changeover** work instruction for the machine and the part being changed to (or a Setup one if there's no Changeover one).
+  - An inkjet-only change uses an approved **Inkjet change** instruction.
+  - When several apply, the one aimed most closely wins: an exact part over a pattern, and a named machine over every machine.
+  - With no approved instruction, the standard checklists in Admin › Checklists are used as before.
+- **No outside database:** the asset database is no longer used for changeover steps or machine settings. Admin › Changeover data is now **Part data** and covers part specs, drawings, tooling and 3D data only.
+- **Saved steps become drafts:** steps the suite last read from the asset database can be turned into draft instructions with one button on the Work instructions list, then checked and approved.
+- **On the kiosk changeover:**
+  - Each step shows its caution, photos and videos.
+  - The process parameters show as the settings to set.
+  - The screen says which instruction and revision the steps come from.
+  - Finishing the changeover counts as reading that revision.
+
+**Formulas from the filter's own data.**
+- Target, Min and Max can be a formula worked out for the filter being run, e.g. `[Pleat height (mm)] + 1` for a screw height 1 mm above the pleat height.
+- **Where the values come from:**
+  - the 3D viewer's part library (in mm);
+  - Parts & specs (the drawing, in inches).
+- **Writing formulas:**
+  - Pick variables from **Insert variable**.
+  - Each parameter has a **Description** ("1mm above pleat height") shown with the result.
+  - A typo in a variable name is caught when the draft is saved.
+- **Checking them:** **Check with a part number** shows what every formula works out to for a part.
+- **When data is missing:** if a part has no value for a variable, the setting shows as missing, with the variable named. No value is guessed.
+
+**Editing instructions.** Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
+
 ## What's new in 1.9.14
 
 **Maintenance is now a full work-order system (CMMS).**

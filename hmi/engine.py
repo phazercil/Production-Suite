@@ -1035,71 +1035,22 @@ def run_scrap(sh, mo):
 
 
 def load_changeover_steps(sh, co):
-    """Steps and settings for the new part: asset database, else the last saved copy, else the standard checklist."""
-    st = settings_obj()
-    params = co_params(sh, co)
+    """Steps and settings for the new part: its approved changeover work instruction (Quality › Work instructions),
+    else the standard checklist (Admin › Checklists). Kept in the suite: no outside database."""
+    from instructions.cmds import changeover_checklist, changeover_for
     old = MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None
     new = MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None
     co["inkjet"] = inkjet_change(old, new)
-    if co["inkjet"]:   # same base part: only the inkjet branding changes
+    co.pop("cacheT", None)
+    co.pop("wi", None)
+    x, r = changeover_for(sh.machine, new.part if new else "", co["inkjet"])
+    if r:
+        steps, sets, wi = changeover_checklist(x, r, new.part if new else "")
+        co.update({"steps": steps, "settings": sets, "src": "wi", "wi": wi, "err": ""})
+    elif co["inkjet"]:   # same base part: only the inkjet branding changes
         co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
-        return
-    co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
-    if not (st.settings.get("useDb") and integrations.query_ready("changeover_steps")):
-        return
-    q = SavedQuery.objects.filter(name="changeover_steps").first()
-    qs = SavedQuery.objects.filter(name="asset_settings").first()
-    if not q:
-        return
-    try:
-        rows = integrations.run_saved(q.sql, params)["rows"]
-        steps = norm_steps(rows)
-        sets = norm_settings(integrations.run_saved(qs.sql, params)["rows"]) if qs else []
-        if steps:
-            co.update({"steps": steps, "settings": sets, "src": "db"})
-            ChangeoverCache.objects.update_or_create(part=params["part"], machine=sh.line,
-                                                     defaults={"steps": steps, "settings": sets, "t": now()})
-        else:
-            co["src"] = "admin-empty"
-    except Exception as e:  # database unreachable or query failed
-        log.warning("changeover lookup failed: %s", e)
-        cache = ChangeoverCache.objects.filter(part=params["part"], machine=sh.line).first()
-        if cache:
-            co.update({"steps": cache.steps, "settings": cache.settings, "src": "cache", "cacheT": ms(cache.t)})
-        else:
-            co["src"] = "admin-offline"
-
-
-def co_params(sh, co):
-    m = MO.objects.filter(pk=co.get("newMo")).first() if co and co.get("newMo") else sh.mo
-    old = MO.objects.filter(pk=co.get("oldMo")).first() if co and co.get("oldMo") else None
-    return {"part": part_key(m.part) if m else "", "machine": sh.line, "from_part": part_key(old.part) if old else "",
-            "mo": m.number if m else "", **machine_params(sh.machine)}
-
-
-def norm_steps(rows):
-    out = []
-    lc = [({str(k).lower(): v for k, v in r.items()}, i) for i, r in enumerate(rows or [])]
-    if all(o.get("seq") is not None for o, _ in lc):
-        lc.sort(key=lambda x: (float(x[0]["seq"]) if str(x[0]["seq"]).replace(".", "", 1).isdigit() else 0, x[1]))
-    for o, _ in lc:
-        text = str(o.get("step") or o.get("instruction") or o.get("text") or "").strip()
-        if text:
-            out.append({"text": text, "detail": str(o.get("detail") or ""), "setting": str(o.get("setting") or ""),
-                        "value": "" if o.get("value") is None else str(o["value"]), "unit": str(o.get("unit") or ""),
-                        "asset": str(o.get("asset") or ""), "image": str(o.get("image") or "")})
-    return out
-
-
-def norm_settings(rows):
-    out = []
-    for r in rows or []:
-        o = {str(k).lower(): v for k, v in r.items()}
-        name = str(o.get("name") or o.get("setting") or "").strip()
-        if name:
-            out.append({"name": name, "value": "" if o.get("value") is None else str(o["value"]), "unit": str(o.get("unit") or ""),
-                        "asset": str(o.get("asset") or "")})
-    return out
+    else:
+        co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
 
 
 @cmd("coPick")
@@ -1304,6 +1255,8 @@ def co_finish(p, ctx):
         m.line, m.seq = sh.machine, 0
         m.save(update_fields=["line", "seq"])
     co_piece(sh, ctx.now, "finished")
+    from instructions.cmds import ack_from_changeover
+    ack_from_changeover(co, ctx.user, sh.line, ctx.now)   # finishing it from a work instruction counts as reading it
     pending = int(co.get("pending") or 0)   # made after the machine ran, before an MO was picked: this MO's
     if pending:
         MO.objects.filter(pk=m.pk).update(produced=F("produced") + pending)
@@ -3855,7 +3808,7 @@ def test_all(p, ctx):
     return {"msg": f"{sum(1 for ok, _ in res if ok)} of {len(res)} connections OK"}
 
 
-QUERY_DB = {"changeover_steps": "assets", "asset_settings": "assets", "part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "filter_3d": "assets", "s2k_mos": "s2k"}
+QUERY_DB = {"part_spec": "assets", "part_drawing": "assets", "part_tooling": "assets", "filter_3d": "assets", "s2k_mos": "s2k"}
 
 
 def _which_db(p):

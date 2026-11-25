@@ -26,14 +26,12 @@
     {% if ovr %}<div class="panel" style="border-color:var(--warn)"><b>Supervisor override</b> by {{ ovr.by }}: {{ ovr.why }}{% if ovr.from %} · moved from {{ ovr.from }}{% endif %}. The Scheduler moves this MO to {{ sh.line }} once it runs.</div>{% endif %}
     <div class="row"><div class="grow"><div class="h2">{{ nmo.part }} · MO {{ nmo.floor_number }}</div><div class="sub">{{ nmo.qty|num }} units · {{ p.pleats|default_if_none:"—" }} pleats/unit · drawing rev {{ p.rev|default:"—" }} {% include "hmi/k/_open_drawing.html" %}</div></div><div class="bigtimer num" {% if co.start %}data-since="{{ co.first|default:co.start }}"{% endif %}>0:00:00</div></div>
     {% if co.loading %}<div class="panel empty">Loading steps for this part from the database…</div>{% else %}
-      {% if src == "inkjet" %}<p class="note">The inkjet checklist for {{ sh.line }}.</p>
-      {% elif src == "db" %}<p class="note">Steps and settings from the database for {{ p.key }} on {{ sh.line }}.</p>
-      {% elif src == "cache" %}<p class="note" style="color:var(--warn)">Database not reachable. Showing the steps saved for this part{% if cacheT %} at {{ cacheT|clock }}{% endif %}.</p>
-      {% elif src == "admin-offline" %}<p class="note" style="color:var(--warn)">Database not reachable and nothing saved for this part. Showing the standard checklist.</p>
-      {% elif src == "admin-empty" %}<p class="note" style="color:var(--warn)">No database steps for {{ p.key }} on {{ sh.line }}. Showing the standard checklist.</p>{% endif %}
+      {% if src == "wi" %}<p class="note">From work instruction <b>{{ wi.label }}</b> · {{ wi.title }}. Finishing the changeover counts as reading it.</p>
+      {% elif src == "inkjet" %}<p class="note">The inkjet checklist for {{ sh.line }} (Admin › Checklists). No approved Inkjet change work instruction for it yet.</p>
+      {% else %}<p class="note">The standard changeover checklist (Admin › Checklists). No approved changeover work instruction for {{ nmo.part }} on {{ sh.line }} yet.</p>{% endif %}
       {% if settingsRows %}<div><h3 class="h2">Settings for {{ p.key }}</h3>{% include "hmi/k/_co_settings.html" with rows=settingsRows %}</div>{% endif %}
       <div style="display:flex;flex-direction:column;gap:6px">{% for st in steps %}{% include "hmi/k/_co_step.html" %}{% endfor %}</div>
-      {% if canReload %}<div><button type="button" class="btn ghost sm" hx-post="/kiosk/do/coReload">Reload steps from database</button></div>{% endif %}
+      {% if canReload %}<div><button type="button" class="btn ghost sm" hx-post="/kiosk/do/coReload" hx-confirm="Reload the steps? Any steps already ticked are cleared.">Reload steps</button><span class="note"> picks up an instruction approved since the changeover started.</span></div>{% endif %}
     {% endif %}
     <div class="row"><button type="button" class="btn" hx-get="/kiosk/m/drawing" hx-target="#modal" hx-swap="innerHTML">Get updated drawing</button><button type="button" class="btn" hx-get="/kiosk/m/override" hx-target="#modal" hx-swap="innerHTML">Change setting - Admin</button><button type="button" class="btn" hx-get="/kiosk/m/rolls" hx-target="#modal" hx-swap="innerHTML">Scan roll tag</button><button type="button" class="btn" hx-get="/kiosk/m/qc" hx-target="#modal" hx-swap="innerHTML">First-article QC</button></div>
     {% if override %}<p class="note">Temporary settings for this MO: {{ override }}</p>{% endif %}

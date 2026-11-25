@@ -105,14 +105,9 @@ class KioskTests(TestCase):
         self.login_lead()
         with mock.patch.object(kadmin, "tables", return_value=SCHEMA), mock.patch.object(kadmin.integrations, "assets_ready", return_value=True):
             r = self.c.get("/kiosk/v/admin?tab=codata")
-            self.assertContains(r, "Changeover steps")
-            r = self.do("codata", op="pick", q="changeover_steps", changed="b_table", b_table="co_steps")
-            body = r.content.decode()
-            self.assertIn("data-hold", body)
-            self.assertIn("<option selected>instruction</option>", body)   # columns guessed from their names
-            r = self.do("codata", op="build", q="changeover_steps", b_table="co_steps", b_step="instruction", b_seq="step_no", b_f_part="part_no")
-            self.assertContains(r, "WHERE `part_no` = :part")
-            self.assertContains(r, "ORDER BY `step_no`")
+            self.assertContains(r, "Quality › Work instructions")   # changeover steps are written there now
+            r = self.do("codata", op="pick", q="part_tooling", changed="b_table", b_table="co_steps")
+            self.assertIn("data-hold", r.content.decode())
             r = self.c.get("/kiosk/v/admin?tab=codata")
             self.assertContains(r, "Tooling for the part")
             r = self.do("codata", op="build", q="part_tooling", b_table="co_steps", b_f_part="part_no")

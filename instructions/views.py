@@ -19,18 +19,27 @@ from plant import perms
 from plant.models import Machine
 
 from .cmds import for_station
+from .formula import resolve_params, variables
 from .models import Ack, Instruction, Media, Revision
 
 PERM = "section.quality"
 VIDEO_MAX = 300 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/ogg"}
-POSTS = {"wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
+POSTS = {"wiImportSaved", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
 
 
 def media_dir():
     d = Path(settings.BASE_DIR) / "media" / "instructions"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _isnum(v):
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def _gate(request, need_section=True):
@@ -68,7 +77,9 @@ def index(request):
         cur = next((r for r in revs if r.status == "approved"), None)
         rows.append({"x": x, "cur": cur, "draft": next((r for r in revs if r.status == "draft"), None),
                      "acks": cur.acks.count() if cur else 0})
-    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", "")))
+    from hmi.models import ChangeoverCache
+    saved = ChangeoverCache.objects.count() if perms.can(me, "wi.edit") else 0
+    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
 
 
 def detail(request, pk, rev=None):
@@ -88,13 +99,16 @@ def detail(request, pk, rev=None):
     edit = draft and perms.can(me, "wi.edit") and not rev and request.GET.get("view") != "1"
     r = shown or (draft if edit else cur or draft)
     steps = [{**s, "m": [media[i] for i in s.get("media", []) if i in media]} for s in (r.steps if r else [])]
-    if edit:   # room to add: two blank steps and three blank parameters
-        steps += [{"text": "", "caution": "", "media": [], "m": []} for _ in range(2)]
-    params = list(r.params if r else []) + ([{} for _ in range(3)] if edit else [])
+    if edit and not steps:   # an empty draft: one step and one parameter to type into (Add step / Add parameter for more)
+        steps = [{"text": "", "caution": "", "media": [], "m": []}]
+    params = list(r.params if r else []) + ([{}] if edit and not (r and r.params) else [])
     acks = list(cur.acks.all()[:200]) if cur else []
+    try_part = " ".join(str(request.GET.get("part") or "").split()).upper()[:40]
+    preview = resolve_params(r.params, try_part) if (try_part and r and r.params) else None
     return render(request, "instructions/detail.html", _ctx(
         me, x=x, revs=revs, r=r, cur=cur, draft=draft, edit=edit, steps=steps, params=params, media=list(media.values()),
-        acks=acks, mids=[m.pk for m in x.machines.all()], msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
+        acks=acks, mids=[m.pk for m in x.machines.all()], tryPart=try_part, preview=preview,
+        fvars=variables() if edit else [], hasFormula=any(not _isnum(p.get(k)) for p in (r.params if r else []) for k in ("target", "min", "max") if p.get(k)), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
         mine=bool(draft and me and me.name in [a.strip() for a in draft.author.split(",")])))
 
 
@@ -112,7 +126,7 @@ def do(request, name):
         texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
         p["steps"] = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "",
                        "media": P.getlist(f"s_media_{i}")} for i in range(len(texts))]
-        cols = {k: P.getlist(f"p_{k}") for k in ("name", "target", "min", "max", "unit")}
+        cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
         p["params"] = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
     r = engine.execute(name, p, engine.Ctx(user=me))
     pk = (r.get("data") or {}).get("id") or p.get("id")
@@ -196,6 +210,7 @@ def kiosk_data(s):
     for d in items:
         media = {m.pk: m for m in Media.objects.filter(instruction=d["x"]).defer("data", "thumb")}
         d["steps"] = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in d["r"].steps]
+        d["params"] = resolve_params(d["r"].params, nxt or part)
     return {"wi": items, "wiPart": nxt or part, "wiNext": bool(nxt), "wiJson": json.dumps([d["r"].pk for d in items])}
 
 
