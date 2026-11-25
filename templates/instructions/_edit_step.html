@@ -1,6 +1,11 @@
 <div class="wi-edit-step" data-wi-row><span class="wi-n">{{ i|add:1 }}</span>
   <div class="wi-edit-body"><textarea name="s_text" rows="3" maxlength="4000" placeholder="What to do">{{ s.text|default:"" }}</textarea>
     <input name="s_caution" maxlength="500" value="{{ s.caution|default:'' }}" placeholder="Caution (optional): shown in red above the step">
+    <input type="hidden" name="s_card" value="">
+    <details class="wi-step-more" {% if s.watch %}open{% endif %}><summary>Only if it changes <small>{% if s.watch %}· compares {{ s.watch }}{% else %}(optional){% endif %}</small></summary>
+      <label>Compare this with the filter run before <small>(a parameter or the filter's data, e.g. Screw # or Side A height (mm); blank: always this step)</small><input name="s_watch" maxlength="120" value="{{ s.watch|default:'' }}" placeholder="Screw #" data-wi-watch></label>
+      <label>When it's the same, say this instead <small>(blank: skip the step when nothing changes)</small><textarea name="s_same" rows="2" maxlength="2000" placeholder="Leave the {Screw #} screws on the machine">{{ s.same|default:"" }}</textarea></label>
+      <p class="note">Use <code>{Screw #:was}</code> for the filter before and <code>{Screw #}</code> for the new one: "Pull out the {Screw #:was} screws and install the {Screw #} screws".</p></details>
     <div class="wi-addpic"><label class="btn sm">📷 Add photo / video<input type="file" name="s_files_{{ i }}" data-wi-files multiple accept="image/*,video/mp4,video/webm,video/quicktime" hidden></label>
       <span class="wi-picked" data-wi-picked></span>{% if media %}<span class="note">or tick ones already added:</span>{% endif %}</div>
     {% if media %}<div class="wi-pick">{% for m in media %}<label class="wi-pm" title="{{ m.name }}"><input type="checkbox" name="s_media_{{ i }}" data-wi-media value="{{ m.pk }}" {% if s and m.pk in s.media %}checked{% endif %}>

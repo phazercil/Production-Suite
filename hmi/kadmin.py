@@ -24,6 +24,61 @@ TABS = [("machines", "Machines"), ("connections", "Connections"), ("connector", 
         ("reasons", "Downtime reasons"), ("checklists", "Checklists"), ("maintenance", "Maintenance lists"),
         ("rules", "Rules"), ("health", "Health"), ("alerts", "Alerts"), ("sensors", "Sensors & alarms"), ("cameras", "Cameras"), ("network", "Network"), ("updates", "Updates"), ("backup", "Backup"),
         ("permissions", "Permissions")]
+# The Admin sidebar: the tabs by what they're for (every tab is in one group), with a line on each for the page and
+# the Admin search (words people might look for, beyond the name)
+GROUPS = [("setup", "Plant setup", ["machines", "shifts", "codata", "reasons", "checklists", "maintenance", "rules"]),
+          ("integrations", "Integrations", ["connections", "connector"]),
+          ("people", "People & access", ["permissions"]),
+          ("monitoring", "Monitoring", ["health", "sensors", "cameras"]),
+          ("notifications", "Notifications", ["alerts"]),
+          ("system", "System", ["network", "updates", "backup"])]
+DESC = {"machines": "The machines: name, S2K code, rated speed, speed unit, in service and each machine's screen address.",
+        "shifts": "Each machine's shifts, breaks and lunches, and the plant calendar.",
+        "codata": "Where filter dimensions come from, and the asset-database lookups for part specs, drawings, tooling and 3D data.",
+        "reasons": "The downtime reasons operators pick from when the line stops.",
+        "checklists": "Safety, shift PM, end-of-order, changeover and inkjet checklists.",
+        "maintenance": "Issue types, other equipment, and failure, cause and remedy codes for maintenance requests.",
+        "rules": "How the plant runs: stop speed, short stops, changeover times, QC timing, idle sign-out and more.",
+        "connections": "Machine data, databases and accounts, S2K, Paycom, Grafana, the people list and copying records out.",
+        "connector": "Wire database columns to what the suite needs, by dragging.",
+        "permissions": "Who can do what: each permission, by role.",
+        "health": "The ticker, machine feeds, connections, backups and cameras right now.",
+        "sensors": "Sensors, their alarm limits and what happens when one trips.",
+        "cameras": "Cameras and live video.",
+        "alerts": "Who is told about what, and how.",
+        "network": "The server's network address and the plant networks allowed in.",
+        "updates": "Install an update, schedule one, or go back to the version before.",
+        "backup": "Database backups: when, where, and restoring one."}
+WORDS = {"machines": "line pleater speed s2k code screen station", "shifts": "shift break lunch calendar holiday schedule",
+         "codata": "part data tooling drawing specs 3d filter library asset", "reasons": "downtime stop reason",
+         "checklists": "checklist safety pm changeover inkjet end of order", "maintenance": "failure cause remedy issue equipment codes",
+         "rules": "minDown startGrace adminTimeout timeout idle sign out stopPpm changeover qc grace rate efficiency",
+         "connections": "database s2k paycom grafana influx webhook people machine data feed counter",
+         "connector": "connector builder wire columns sql", "permissions": "users roles pin access who can",
+         "health": "ticker heartbeat feed status errors", "sensors": "sensor alarm temperature pressure", "cameras": "camera video",
+         "alerts": "email text sms notify notification contacts", "network": "ip address dhcp plant networks",
+         "updates": "update version install upgrade rollback go back", "backup": "backup restore offsite"}
+
+
+def admin_nav(tab):
+    """The sidebar's groups for the open tab: [{key, label, on, items: [{k, label, desc, words, on}]}], and the group
+    the tab is in (for the breadcrumb). A tab missing from GROUPS still gets listed, under Other."""
+    labels = dict(TABS)
+    placed = {k for _, _, ks in GROUPS for k in ks}
+    groups = [(g, lbl, [k for k in ks if k in labels]) for g, lbl, ks in GROUPS]
+    rest = [k for k, _ in TABS if k not in placed]
+    if rest:
+        groups.append(("other", "Other", rest))
+    out, here = [], None
+    for g, lbl, ks in groups:
+        items = [{"k": k, "label": labels[k], "desc": DESC.get(k, ""), "words": WORDS.get(k, ""), "on": k == tab} for k in ks]
+        on = any(i["on"] for i in items)
+        if on:
+            here = lbl
+        out.append({"key": g, "label": lbl, "items": items, "on": on})
+    return out, here
+
+
 LISTS = {"reasons": [("reasons", "Downtime reasons", "The list operators pick from when the downtime prompt asks why the line stopped. Add, rename, "
                       "reorder or remove reasons here; the order here is the order on the screen. Maintenance and shift leads can also type a "
                       "reason that isn't listed, or change a reason already entered. Removing a reason keeps it on stops already logged. "

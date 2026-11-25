@@ -158,8 +158,8 @@ STATS = {"ok": ("✓", "OK"), "warning": ("!", "WARNING"), "stale": ("◷", "STA
 
 @register.simple_tag
 def stat(kind, text=None):
-    """<span class="stat stat-ok"><i>✓</i>OK</span>; text replaces the word (still with the kind's icon)."""
+    """<span class="sbadge sbadge-ok"><i>✓</i>OK</span>; text replaces the word (still with the kind's icon)."""
     from django.utils.html import format_html
     k = str(kind or "na").lower()
     icon, word = STATS.get(k, STATS["na"])
-    return format_html('<span class="stat stat-{}"><i aria-hidden="true">{}</i>{}</span>', k if k in STATS else "na", icon, text or word)
+    return format_html('<span class="sbadge sbadge-{}"><i aria-hidden="true">{}</i>{}</span>', k if k in STATS else "na", icon, text or word)

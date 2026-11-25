@@ -103,6 +103,7 @@ def detail(request, pk, rev=None):
     return render(request, "instructions/detail.html", _ctx(
         me, x=x, revs=revs, r=r, cur=cur, draft=draft, edit=edit, steps=steps, params=params, media=list(media.values()),
         acks=acks, mids=[m.pk for m in x.machines.all()], 
+        noteCards=list(Instruction.objects.filter(kind="note", active=True).exclude(pk=x.pk)) if edit else [],
         fvars=variables() if edit else [], allvars=variables() if perms.can(me, "wi.edit") else [],
         seeAlso=list(Instruction.objects.filter(doc_no__in=x.see_also_list())), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
         mine=bool(draft and me and me.name in [a.strip() for a in draft.author.split(",")])))
@@ -151,8 +152,10 @@ def do(request, name):
 def editor_fields(P):
     """The draft editor's steps and parameters as posted: one list per field, in row order."""
     texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
-    steps = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "", "media": P.getlist(f"s_media_{i}")}
-             for i in range(len(texts))]
+    cards, watch, same = P.getlist("s_card"), P.getlist("s_watch"), P.getlist("s_same")
+    at = lambda xs, i: xs[i] if i < len(xs) else ""   # noqa: E731
+    steps = [{"text": texts[i], "caution": at(cautions, i), "media": P.getlist(f"s_media_{i}"), "card": at(cards, i),
+              "watch": at(watch, i), "same": at(same, i)} for i in range(len(texts))]
     cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
     params = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
     return steps, params
@@ -190,10 +193,12 @@ def preview(request, pk):
         except Need as e:   # shown in the preview: a typo shouldn't stop you seeing the rest
             err = str(e)
             params = [q for q in raw_params if str(q.get("name") or "").strip()]
-            steps = [{"text": s["text"], "caution": s["caution"], "media": [int(m) for m in s["media"] if str(m).isdigit()]}
-                     for s in raw_steps if s["text"].strip() or s["media"]]
+            steps = [{"text": s["text"], "caution": s["caution"], "media": [int(m) for m in s["media"] if str(m).isdigit()],
+                      "card": s.get("card") or "", "watch": s.get("watch") or "", "same": s.get("same") or ""}
+                     for s in raw_steps if s["text"].strip() or s["media"] or s.get("card")]
         label = "what's in the editor now (not saved)"
-    filled, resolved = fill_steps(steps, params, part) if part else (steps, resolve_params(params, ""))
+    from_part = " ".join(str(P.get("from_part") or "").split()).upper()[:40]
+    filled, resolved = fill_steps(steps, params, part, from_part) if part else (steps, resolve_params(params, ""))
     media = {m.pk: m for m in Media.objects.filter(instruction=x).defer("data", "thumb")}
     filled = [{**s, "m": [media[i] for i in s.get("media", []) if i in media]} for s in filled]
     known = bool(part) and (viewer_has(part))
@@ -209,13 +214,29 @@ def preview(request, pk):
             excl = {"ok": ok, "missing": missing, "err": cerr}
     exceptPart = bool(part) and any(__import__("fnmatch").fnmatchcase(part, p) for p in x.except_patterns())
     return render(request, "instructions/_preview.html", {"x": x, "steps": filled, "params": resolved, "part": part, "err": err,
-                                                          "label": label, "newFiles": new_files, "known": known, "cond": cond, "excl": excl,
+                                                          "label": label, "newFiles": new_files, "known": known, "cond": cond, "excl": excl, "fromPart": from_part,
                                                           "exceptPart": exceptPart})
 
 
 def viewer_has(part):
     from quality import viewer
     return bool(viewer.find(part))
+
+
+GIF_MAX_FRAMES = 2000
+
+
+def animated_gif(data):
+    """True for an animated GIF the server can read (and not too big to decode safely): kept as uploaded so it moves."""
+    import io as _io
+
+    from PIL import Image
+    try:
+        im = Image.open(_io.BytesIO(data))
+        return im.format == "GIF" and getattr(im, "n_frames", 1) > 1 and im.width * im.height <= 4_000_000 \
+            and im.n_frames <= GIF_MAX_FRAMES
+    except Exception:  # noqa: BLE001 - not a GIF it can read: handled as a still picture
+        return False
 
 
 def store_media(x, f, me):
@@ -226,10 +247,14 @@ def store_media(x, f, me):
         from hmi import photos
         if f.size > photos.MAX_BYTES:
             return None
+        raw = f.read()
         try:
-            jpeg, thumb, w, h = photos.process(f.read())
+            jpeg, thumb, w, h = photos.process(raw)
         except photos.PhotoError:
             return None
+        if animated_gif(raw):   # kept as it is, so it plays; the thumbnail is its first frame
+            return Media.objects.create(instruction=x, kind="image", content_type="image/gif", data=raw, thumb=thumb, size=len(raw),
+                                        name=f.name[:200], t=timezone.now(), by=me.name)
         return Media.objects.create(instruction=x, kind="image", content_type="image/jpeg", data=jpeg, thumb=thumb, size=len(jpeg),
                                     name=f.name[:200], t=timezone.now(), by=me.name)
     if ctype in VIDEO_TYPES and f.size <= VIDEO_MAX:
@@ -271,8 +296,9 @@ def media(request, mid):
     if not m:
         raise Http404
     if m.kind == "image":
-        data = bytes(m.thumb) if request.GET.get("size") == "thumb" and m.thumb else bytes(m.data)
-        r = HttpResponse(data, content_type="image/jpeg")
+        thumb = request.GET.get("size") == "thumb" and m.thumb
+        data = bytes(m.thumb) if thumb else bytes(m.data)
+        r = HttpResponse(data, content_type="image/jpeg" if thumb or m.content_type not in ("image/gif",) else "image/gif")
     else:
         path = media_dir() / os.path.basename(m.file)
         if not path.is_file():
@@ -295,7 +321,7 @@ def kiosk_data(s):
     items = for_station(s.machine, nxt or part, who)
     for d in items:
         media = {m.pk: m for m in Media.objects.filter(instruction=d["x"]).defer("data", "thumb")}
-        filled, d["params"] = fill_steps(d["r"].steps, d["r"].params, nxt or part)
+        filled, d["params"] = fill_steps(d["r"].steps, d["r"].params, nxt or part, part if nxt else "")
         d["steps"] = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in filled]
     return {"wi": items, "wiPart": nxt or part, "wiNext": bool(nxt), "wiJson": json.dumps([d["r"].pk for d in items])}
 

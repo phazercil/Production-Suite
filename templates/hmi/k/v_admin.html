@@ -1,8 +1,22 @@
-<div class="row"><h1 class="h1 grow">Admin</h1>{% if me %}<span class="pill bad">{{ roleLabel }} · {{ me.name }}</span><button class="btn ghost" hx-post="/kiosk/do/logout">Log out</button>{% endif %}</div>
+<div class="adm" data-adm data-admin-tab="{{ tab }}">
+{% if canOpen %}<aside class="adm-side" id="adm-side" aria-label="Admin pages">
+  <div class="adm-find"><input type="search" data-adm-find data-search placeholder="Find a setting…" aria-label="Find an Admin page (Ctrl+K)" autocomplete="off" aria-controls="adm-hits" aria-expanded="false"><kbd class="adm-kbd" aria-hidden="true">Ctrl K</kbd>
+    <div class="adm-hits" id="adm-hits" data-adm-hits role="listbox" hidden></div></div>
+  <nav class="adm-nav">{% for g in nav %}<details class="adm-g" data-adm-g="{{ g.key }}" open><summary>{{ g.label }}</summary>
+    {% for it in g.items %}<button type="button" class="adm-i{% if it.on %} on{% endif %}" {% if it.on %}aria-current="page"{% endif %} data-adm-item="{{ it.k }}" data-adm-group="{{ g.label }}" data-adm-desc="{{ it.desc }}" data-adm-words="{{ it.words }}"
+      hx-get="/kiosk/v/admin?tab={{ it.k }}" hx-target="#view" hx-push-url="/admin/{{ it.k }}/" title="{{ it.desc }}">{{ it.label }}</button>{% endfor %}
+    {% if g.key == "people" %}<a class="adm-i adm-ext" href="/operator/team/" title="Add people, set their PINs and training (Operator Kiosk › Team)">People &amp; PINs <span aria-hidden="true">↗</span></a>{% endif %}
+  </details>{% endfor %}</nav>
+</aside>{% endif %}
+<section class="adm-main">
+  <div class="adm-top">{% if canOpen %}<button type="button" class="btn ghost adm-toggle" data-adm-toggle aria-controls="adm-side" aria-expanded="true" title="Show or hide the Admin pages">☰ <span>Pages</span></button>{% endif %}
+    <nav class="adm-crumbs" aria-label="You are here"><span>Admin</span>{% if canOpen %}{% if navGroup %}<span aria-hidden="true">›</span><span>{{ navGroup }}</span>{% endif %}<span aria-hidden="true">›</span><b aria-current="page">{{ tabLabel }}</b>{% endif %}</nav>
+    <span class="grow"></span>{% if me %}<span class="pill bad">{{ roleLabel }} · {{ me.name }}</span><button class="btn ghost" hx-post="/kiosk/do/logout">Log out</button>{% endif %}</div>
+  {% if canOpen %}<header class="adm-head"><h1 class="h1">{{ tabLabel }}</h1>{% if tabDesc %}<p class="sub">{{ tabDesc }}</p>{% endif %}</header>{% else %}<h1 class="h1">Admin</h1>{% endif %}
 {% if not canOpen %}<div class="panel row" style="border-color:var(--warn)"><span class="grow">{% if me %}{{ me.name }} doesn't have permission to open Admin.{% else %}Log in to open Admin.{% endif %}</span><button class="btn primary" hx-get="/kiosk/m/login?perm=section.admin" hx-target="#modal" hx-swap="innerHTML">Log in</button></div>
 {% else %}
 {% if not tabCan %}<div class="panel row" style="border-color:var(--warn)"><span class="grow">View only. Changing this needs permission for <b>{{ tabPermLabel }}</b>.</span><button class="btn primary" hx-get="/kiosk/m/login?perm={{ tabPerm }}" hx-target="#modal" hx-swap="innerHTML">Log in</button></div>{% endif %}
-<div class="tabs" role="tablist" data-admin-tab="{{ tab }}">{% for k, l in tabs %}<button role="tab" aria-selected="{% if tab == k %}true{% else %}false{% endif %}" class="{% if tab == k %}on{% endif %}" hx-get="/kiosk/v/admin?tab={{ k }}" hx-target="#view" hx-push-url="/admin/{{ k }}/">{{ l }}</button>{% endfor %}</div>
 {% include "hmi/k/admin/_"|add:tab|add:".html" with C=A %}
 {% if audit %}<div class="panel"><h2 class="h2">Recent changes</h2><div class="auditlog">{% for a in audit %}<div><span class="num note">{{ a.t|day }} {{ a.t|clock }}</span> · {{ a.by }} · {{ a.what }}</div>{% endfor %}</div></div>{% endif %}
 {% endif %}
+</section></div>

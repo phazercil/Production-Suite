@@ -1,6 +1,6 @@
 {% load suite %}<div class="wi-pv" data-wi-pv>
   <div class="wi-pv-head"><div class="grow"><h2>{{ x.doc_no }} · {{ x.title }}</h2>
-    <p class="note">Preview{% if part %} for <b>{{ part }}</b>{% endif %} · {{ label }}</p></div>
+    <p class="note">Preview{% if part %} for <b>{{ part }}</b>{% endif %}{% if fromPart %}, changing from <b>{{ fromPart }}</b>{% endif %} · {{ label }}</p></div>
     <button type="button" class="btn ghost" data-wi-pv-close aria-label="Close the preview">Close</button></div>
   {% if err %}<div class="flash bad">This wouldn't save yet: {{ err }}</div>{% endif %}
   {% if not part %}<div class="flash warn">Type a part number to see the values for that filter. Shown without one, every {…} stays as written.</div>
@@ -11,15 +11,16 @@
     <code>{{ x.exclude }}</code>{% if part %} for {{ part }}{% if excl.missing %}: {{ excl.missing|join:", " }} not on file (it still shows, marked unchecked){% elif excl.err %}: {{ excl.err }}{% endif %}{% endif %}</p>{% endif %}
   {% if exceptPart %}<p>{% stat "disabled" "Excluded" %} {{ part }} is one of its Except parts ({{ x.except_parts }}).</p>{% endif %}
   {% if newFiles %}<p class="note">{{ newFiles }} photo{{ newFiles|pluralize }} or video{{ newFiles|pluralize }} picked but not saved yet: they show once you save the draft.</p>{% endif %}
-  {% if params %}<h3>Settings for {{ part|default:"the part" }}</h3>
-  <table class="st wi-params"><thead><tr><th>Setting</th><th class="n">Target</th><th class="n">Min</th><th class="n">Max</th><th>Unit</th><th>Notes</th></tr></thead><tbody>
-    {% for p in params %}<tr><td><b>{{ p.name }}</b></td><td class="n num"><b>{{ p.target|default:"—" }}</b></td><td class="n num">{{ p.min|default:"—" }}</td><td class="n num">{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td>
-      <td class="note">{{ p.desc }}{% if p.missing %}{% if p.desc %} · {% endif %}{% stat "warning" "Not on file" %} {{ p.missing|join:", " }}{% elif p.err %}{% if p.desc %} · {% endif %}{% stat "failed" "Error" %} {{ p.err }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
   {% if steps %}<div class="wi-pv-nav"><button type="button" class="btn" data-wi-pv-prev>‹ Previous</button><span class="num" data-wi-pv-at>Step 1 of {{ steps|length }}</span>
     <button type="button" class="btn" data-wi-pv-next>Next ›</button><span class="grow"></span><label class="chk"><input type="checkbox" data-wi-pv-all> Show all steps</label></div>
   <ol class="wi-steps wi-pv-steps">{% for s in steps %}<li data-wi-pv-step {% if not forloop.first %}hidden{% endif %} value="{{ forloop.counter }}">
     <div class="wi-pv-n">Step {{ forloop.counter }} of {{ steps|length }}</div>
-    {% if s.caution %}<div class="wi-caution">⚠ {{ s.caution }}</div>{% endif %}<div class="wi-text">{{ s.text|linebreaksbr }}</div>
+    {% if s.note %}{% include "instructions/_card_body.html" %}{% elif s.card %}<div class="wicard"><div class="wicard-h">⚑ Special card {{ s.card }}</div><div class="note">Shows here only for filters that meet the card's Show when: type a part number to see it.</div></div>{% else %}{% if s.caution %}<div class="wi-caution">⚠ {{ s.caution }}</div>{% endif %}<div class="wi-text">{{ s.text|linebreaksbr }}</div>{% if s.unchanged %}<div class="note">Same as the filter before, so it reads this way.</div>{% endif %}{% endif %}
     {% if s.m %}<div class="wi-media">{% for m in s.m %}{% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}" alt="{{ m.name }}" loading="lazy">{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}</ol>
   {% else %}<p class="note">No steps yet.</p>{% endif %}
+  {% if params %}<h3 class="wi-pv-set">Settings for {{ part|default:"the part" }}</h3>
+  <table class="st wi-params"><thead><tr><th>Setting</th><th class="n">Target</th><th class="n">Min</th><th class="n">Max</th><th>Unit</th><th>Notes</th></tr></thead><tbody>
+    {% for p in params %}<tr><td><b>{{ p.name }}</b></td><td class="n num"><b>{{ p.target|default:"—" }}</b></td><td class="n num">{{ p.min|default:"—" }}</td><td class="n num">{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td>
+      <td class="note">{{ p.desc }}{% if p.missing %}{% if p.desc %} · {% endif %}{% stat "warning" "Not on file" %} {{ p.missing|join:", " }}{% elif p.err %}{% if p.desc %} · {% endif %}{% stat "failed" "Error" %} {{ p.err }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+
 </div>

@@ -116,22 +116,42 @@ def wi_draft(p, ctx):
 
 
 def _clean_steps(raw, x, param_names=None):
-    """Each step: its text, caution and photos. A {…} in the text must be one of the parameters (or a formula)."""
-    from .formula import FormulaError, check_text
+    """Each step: its text, caution and photos; or a special card (a note card's WI number) placed between steps.
+    A step can be "only if it changes": compared (watch) with the filter run before, with other wording (same) for
+    when it's the same. Every {…} must be a parameter, one of the filter's values or a formula."""
+    from .formula import FormulaError, _norm, check_text, variables
     ok_media = set(Media.objects.filter(instruction=x).values_list("pk", flat=True))
     out = []
+    known = None
     for s in raw if isinstance(raw, list) else []:
-        text = str((s or {}).get("text") or "").strip()[:4000]
-        caution = str((s or {}).get("caution") or "").strip()[:500]
-        media = [int(m) for m in ((s or {}).get("media") or []) if str(m).isdigit() and int(m) in ok_media]
+        s = s or {}
+        card = str(s.get("card") or "").strip().upper()[:20]
+        if card:
+            need(x.kind != "note", "A special note card can't hold other cards.")
+            need(Instruction.objects.filter(doc_no=card, kind="note").exists(), f"Step {len(out) + 1}: there's no special note card {card}.")
+            out.append({"card": card, "text": "", "caution": "", "media": []})
+            continue
+        text = str(s.get("text") or "").strip()[:4000]
+        caution = str(s.get("caution") or "").strip()[:500]
+        media = [int(m) for m in (s.get("media") or []) if str(m).isdigit() and int(m) in ok_media]
+        watch = " ".join(str(s.get("watch") or "").replace("[", "").replace("]", "").replace("{", "").replace("}", "").split())[:120]
+        same = str(s.get("same") or "").strip()[:2000]
         if text or media:
             if param_names is not None:
                 try:
                     check_text(text, param_names)
                     check_text(caution, param_names)
+                    check_text(same, param_names)
                 except FormulaError as e:
                     need(False, f"Step {len(out) + 1}: {e}")
-            out.append({"text": text, "caution": caution, "media": media})
+            if watch:
+                if known is None:
+                    known = {_norm(n) for n in param_names or []} | {_norm(v["name"]) for v in variables()}
+                need(_norm(watch) in known, f"Step {len(out) + 1}: Only if it changes: there's no parameter or filter value called {watch}.")
+            row = {"text": text, "caution": caution, "media": media}
+            if watch:
+                row.update(watch=watch, same=same)
+            out.append(row)
     need(len(out) <= MAX_STEPS, f"{MAX_STEPS} steps at most.")
     return out
 
@@ -405,12 +425,15 @@ def notes_for(machine, part):
     return sorted(out, key=lambda t: t[0].doc_no)
 
 
-def note_cards(machine, part):
-    """The special note cards for a changeover to this part, as checklist items to tick (kept with the changeover)."""
+def note_cards(machine, part, old_part="", skip=()):
+    """The special note cards for a changeover to this part, as checklist items to tick (kept with the changeover).
+    Cards the changeover instruction already places among its steps (skip: their WI numbers) aren't repeated."""
     from .formula import fill_steps
     out = []
     for x, r, missing in notes_for(machine, part):
-        filled, _ = fill_steps(r.steps, r.params, part)
+        if x.doc_no in skip:
+            continue
+        filled, _ = fill_steps(r.steps, r.params, part, old_part, cards=False)
         out.append({"text": f"Special note: {x.title}", "media": [m for s in filled for m in s.get("media") or []],
                     "note": {"id": x.pk, "doc": x.doc_no, "title": x.title, "rev": r.pk, "unchecked": missing,
                              "lines": [{"text": s.get("text") or "", "caution": s.get("caution") or ""} for s in filled]}})
@@ -440,12 +463,14 @@ def also_read(machine, part, chosen=None):
     return out
 
 
-def changeover_checklist(x, r, part=""):
-    """An approved revision as the kiosk's changeover steps and settings, its formulas worked out for the part being
-    changed to (kept with the changeover, so a revision approved part-way through doesn't change what's ticked off)."""
+def changeover_checklist(x, r, part="", old_part=""):
+    """An approved revision as the kiosk's changeover steps and settings, worked out for the part being changed to and
+    the one before it ({Screw #:was}, steps that only show when something changes, special cards between steps).
+    Kept with the changeover, so a revision approved part-way through doesn't change what's being ticked off."""
     from .formula import fill_steps
-    filled, resolved = fill_steps(r.steps, r.params, part)
-    steps = [{"text": s.get("text") or "", "caution": s.get("caution") or "", "media": list(s.get("media") or [])} for s in filled]
+    filled, resolved = fill_steps(r.steps, r.params, part, old_part)
+    steps = [{"text": s.get("text") or "", "caution": s.get("caution") or "", "media": list(s.get("media") or []),
+              **({"note": s["note"]} if s.get("note") else {}), **({"unchanged": True} if s.get("unchanged") else {})} for s in filled]
     sets = []
     for p in resolved:
         lo, hi = p["min"], p["max"]

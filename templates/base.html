@@ -38,7 +38,7 @@
 {% else %}{% block fsfloat %}<button type="button" class="suite-fs float" data-fullscreen title="Full screen (Esc leaves it)" aria-label="Full screen">
   <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fs-in" d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/><path class="fs-out" d="M8 3v5H3M17 8h-5V3M12 17v-5h5M3 12h5v5"/></svg></button>{% endblock %}
 {% endif %}
-{% if suite_warn and not kiosk_lock %}<div class="suitewarn" role="status"><span class="stat stat-stale"><i aria-hidden="true">◷</i>STALE</span> {{ suite_warn.text }} <a href="{{ suite_warn.href }}">Open Health</a></div>{% endif %}
+{% if suite_warn and not kiosk_lock %}<div class="suitewarn" role="status"><span class="sbadge sbadge-stale"><i aria-hidden="true">◷</i>STALE</span> {{ suite_warn.text }} <a href="{{ suite_warn.href }}">Open Health</a></div>{% endif %}
 <div class="mode">{% block content %}{% endblock %}</div>
 {% if kiosk_lock %}<div class="suite-rev" aria-label="Production Suite version">{{ suite_rev }}</div>{% endif %}
 <script src="{% static 'suite/rev.js' %}" data-rev="{{ suite_revision }}" defer></script>

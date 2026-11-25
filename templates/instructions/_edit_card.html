@@ -1,0 +1,7 @@
+<div class="wi-edit-step wi-edit-card" data-wi-row><span class="wi-n">{{ i|add:1 }}</span>
+  <div class="wi-edit-body"><input type="hidden" name="s_text" value=""><input type="hidden" name="s_caution" value=""><input type="hidden" name="s_watch" value=""><input type="hidden" name="s_same" value="">
+    <label class="wi-card-pick"><span>⚑ Special card here <small>(it shows at this step only for filters that meet the card's own Show when; otherwise this step is skipped)</small></span>
+      <select name="s_card"><option value="">Pick a special note card…</option>{% for n in noteCards %}<option value="{{ n.doc_no }}" {% if s.card == n.doc_no %}selected{% endif %}>{{ n.doc_no }} · {{ n.title }}{% if n.condition %} (when {{ n.condition }}){% endif %}</option>{% endfor %}</select></label>
+    {% if not noteCards %}<p class="note">No special note cards yet: make one with New + (kind Special note card) and give it a Show when.</p>{% endif %}
+  </div>
+  <div class="wi-row-tools"><button type="button" class="btn ghost sm" data-wi-up title="Move up" aria-label="Move up">↑</button><button type="button" class="btn ghost sm" data-wi-down title="Move down" aria-label="Move down">↓</button><button type="button" class="btn ghost sm" data-wi-insert title="Add a step below this one" aria-label="Add a step below">+</button><button type="button" class="btn bad sm" data-wi-remove title="Remove this card" aria-label="Remove card">✕</button></div></div>

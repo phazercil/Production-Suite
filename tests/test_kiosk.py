@@ -51,7 +51,7 @@ class KioskTests(TestCase):
         for tab, _ in kadmin.TABS:
             r = self.c.get(f"/kiosk/v/admin?tab={tab}")
             self.assertEqual(r.status_code, 200, tab)
-            self.assertContains(r, 'aria-selected="true"')
+            self.assertContains(r, f'aria-current="page" data-adm-item="{tab}"')   # its sidebar entry is marked
         r = self.c.get("/kiosk/v/admin?tab=connections")
         self.assertContains(r, 'id="accounts"')
         self.assertContains(r, 'id="mc-')

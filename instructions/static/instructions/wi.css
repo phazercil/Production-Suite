@@ -72,3 +72,37 @@ form[data-wi-form]{padding-bottom:84px}   /* room under the last field for the S
 .wi-dialog{width:min(760px,94vw);max-height:90vh;overflow:auto;background:var(--s-ground);color:var(--s-ink);border:1px solid var(--s-rule);border-radius:14px;padding:18px 20px}
 .wi-dialog::backdrop{background:rgba(8,10,12,.72)}
 .wi-dialog-h{display:flex;align-items:center;gap:12px}.wi-dialog-h h2{margin:0;flex:1}
+/* Insert variable: one picker for every field, opened from beside Save */
+.wi-ins{position:absolute;right:0;bottom:calc(100% + 8px);width:min(420px,92vw);max-height:min(60vh,520px);display:flex;flex-direction:column;z-index:45;
+  background:var(--s-ground);border:1px solid var(--s-rule);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.5);overflow:hidden}
+.wi-ins[hidden]{display:none}
+.wi-ins-h{display:flex;flex-direction:column;gap:6px;padding:10px;border-bottom:1px solid var(--s-rule)}
+.wi-ins-h input{font:500 15px var(--s-body);color:var(--s-ink);background:var(--s-surface);border:1px solid var(--s-rule);border-radius:8px;padding:9px 10px;min-height:44px}
+.wi-ins-list{overflow:auto;padding:6px}
+.wi-ins-g{display:flex;flex-direction:column;margin-bottom:6px}
+.wi-ins-g[hidden]{display:none}
+.wi-ins-g>b{font:600 11px var(--s-body);text-transform:uppercase;letter-spacing:.06em;color:var(--s-ink-2);padding:6px 8px 4px}
+.wi-ins-i{text-align:left;background:none;border:0;border-radius:7px;padding:8px 10px;min-height:40px;color:var(--s-ink);font:500 14px var(--s-body);cursor:pointer}
+.wi-ins-i:hover,.wi-ins-i:focus-visible{background:var(--s-sel);color:var(--s-sel-ink)}
+.wi-ins-i small{color:var(--s-ink-2);font-size:11px;margin-left:4px}
+.wi-savebar{overflow:visible}
+
+/* a special note card placed among the steps */
+.wicard{border:2px solid #F2B66D;background:#3A2E1C;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+.wicard-h{color:#F7CC94;font-weight:700}
+.wicard-doc{font-weight:500;font-size:12px;opacity:.8;margin-left:6px}
+.wicard-u{color:#F7CC94;font-size:13px}
+.wi-step-more{border:1px dashed var(--s-rule);border-radius:8px;padding:6px 10px}
+.wi-step-more>summary{cursor:pointer;font-size:13px;color:var(--s-ink-2);min-height:28px;display:flex;align-items:center;gap:6px}
+.wi-step-more label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--s-muted,var(--s-ink-2));margin-top:6px}
+.wi-step-more input,.wi-step-more textarea{font:500 14px var(--s-body);color:var(--s-ink);background:var(--s-ground,#111);border:1px solid var(--s-rule);border-radius:8px;padding:7px 9px;width:100%;box-sizing:border-box}
+.wi-edit-card .wi-card-pick{display:flex;flex-direction:column;gap:6px;color:#F7CC94;font-weight:600}
+.wi-edit-card .wi-card-pick small{font-weight:400;color:var(--s-ink-2)}
+.wi-edit-card .wi-card-pick select{font:500 15px var(--s-body);color:var(--s-ink);background:var(--s-ground);border:2px solid #F2B66D;border-radius:8px;padding:8px;min-height:44px}
+/* preview: the step is the main thing, big; the settings follow */
+.wi-pv-steps{font-size:22px;line-height:1.45}
+.wi-pv-steps li{padding:20px 22px;min-height:220px}
+.wi-pv-steps .wi-caution{font-size:20px}
+.wi-pv-steps .wi-media img{height:auto;max-height:50vh;max-width:100%;width:auto}
+.wi-pv-steps .wi-media video{max-height:50vh}
+.wi-pv-set{margin-top:8px}
