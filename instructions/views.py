@@ -19,27 +19,19 @@ from plant import perms
 from plant.models import Machine
 
 from .cmds import for_station
-from .formula import resolve_params, variables
+from .formula import fill_steps, resolve_params, variables
 from .models import Ack, Instruction, Media, Revision
 
 PERM = "section.quality"
 VIDEO_MAX = 300 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/ogg"}
-POSTS = {"wiImportSaved", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
+POSTS = {"wiImportSaved", "wiSaveAll", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
 
 
 def media_dir():
     d = Path(settings.BASE_DIR) / "media" / "instructions"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _isnum(v):
-    try:
-        float(v)
-        return True
-    except (TypeError, ValueError):
-        return False
 
 
 def _gate(request, need_section=True):
@@ -79,7 +71,12 @@ def index(request):
                      "acks": cur.acks.count() if cur else 0})
     from hmi.models import ChangeoverCache
     saved = ChangeoverCache.objects.count() if perms.can(me, "wi.edit") else 0
-    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
+    show = "drafts" if q.get("show") == "drafts" else "effect"
+    in_effect = [r for r in rows if r["cur"]]
+    drafts = [r for r in rows if not r["cur"]]
+    return render(request, "instructions/index.html", _ctx(me, rows=drafts if show == "drafts" else in_effect, show=show,
+                                                           nEffect=len(in_effect), nDrafts=len(drafts), f=q,
+                                                           newMachines=[m for m in str(q.get("m") or "").split(",") if m], fvars=variables() if perms.can(me, "wi.edit") else [], msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
 
 
 def detail(request, pk, rev=None):
@@ -103,12 +100,11 @@ def detail(request, pk, rev=None):
         steps = [{"text": "", "caution": "", "media": [], "m": []}]
     params = list(r.params if r else []) + ([{}] if edit and not (r and r.params) else [])
     acks = list(cur.acks.all()[:200]) if cur else []
-    try_part = " ".join(str(request.GET.get("part") or "").split()).upper()[:40]
-    preview = resolve_params(r.params, try_part) if (try_part and r and r.params) else None
     return render(request, "instructions/detail.html", _ctx(
         me, x=x, revs=revs, r=r, cur=cur, draft=draft, edit=edit, steps=steps, params=params, media=list(media.values()),
-        acks=acks, mids=[m.pk for m in x.machines.all()], tryPart=try_part, preview=preview,
-        fvars=variables() if edit else [], hasFormula=any(not _isnum(p.get(k)) for p in (r.params if r else []) for k in ("target", "min", "max") if p.get(k)), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
+        acks=acks, mids=[m.pk for m in x.machines.all()], 
+        fvars=variables() if edit else [], allvars=variables() if perms.can(me, "wi.edit") else [],
+        seeAlso=list(Instruction.objects.filter(doc_no__in=x.see_also_list())), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
         mine=bool(draft and me and me.name in [a.strip() for a in draft.author.split(",")])))
 
 
@@ -123,10 +119,8 @@ def do(request, name):
     p = {k: P.get(k) for k in P if k not in ("csrfmiddlewaretoken",)}
     p["machines"] = P.getlist("machines")
     skipped = 0
-    if name == "wiSave":   # the editor: one list per field, in row order
-        texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
-        p["steps"] = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "",
-                       "media": P.getlist(f"s_media_{i}")} for i in range(len(texts))]
+    if name in ("wiSave", "wiSaveAll"):   # the editor: one list per field, in row order
+        p["steps"], p["params"] = editor_fields(P)
         # photos and videos picked on a step (Add photo / video): kept with the instruction and put on that step
         x = Instruction.objects.filter(pk=p.get("id") or 0).first()
         added = 0
@@ -141,15 +135,87 @@ def do(request, name):
                         skipped += 1
             if added:
                 engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {added} photo(s)/video(s) added on steps")
-        cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
-        p["params"] = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
     r = engine.execute(name, p, engine.Ctx(user=me))
-    if name == "wiSave" and r.get("ok") and skipped:
+    if name in ("wiSave", "wiSaveAll") and r.get("ok") and skipped:
         r["msg"] = f"{r.get('msg') or 'Saved.'} {skipped} file{'s' if skipped != 1 else ''} not added: photos (JPEG, PNG…) up to 25 MB, videos (MP4, WebM, MOV) up to 300 MB."
     pk = (r.get("data") or {}).get("id") or p.get("id")
     base = f"/instructions/{pk}/" if pk else "/instructions/"
     from urllib.parse import urlencode
+    if name == "wiCreate" and not r.get("ok"):   # the New + form comes back open with what was typed
+        keep = {k: str(P.get(k) or "")[:400] for k in ("title", "kind", "parts", "condition", "exclude", "except_parts", "see_also")}
+        return HttpResponseRedirect("/instructions/?" + urlencode({"new": "1", "err": r.get("error") or "That didn't save.", **keep}
+                                                                  | {"m": ",".join(P.getlist("machines"))}))
     return HttpResponseRedirect(base + "?" + urlencode({"msg": r.get("msg") or "Saved."} if r.get("ok") else {"err": r.get("error") or "That didn't save."}))
+
+
+def editor_fields(P):
+    """The draft editor's steps and parameters as posted: one list per field, in row order."""
+    texts, cautions = P.getlist("s_text"), P.getlist("s_caution")
+    steps = [{"text": texts[i], "caution": cautions[i] if i < len(cautions) else "", "media": P.getlist(f"s_media_{i}")}
+             for i in range(len(texts))]
+    cols = {k: P.getlist(f"p_{k}") for k in ("name", "desc", "target", "min", "max", "unit")}
+    params = [{k: (v[i] if i < len(v) else "") for k, v in cols.items()} for i in range(len(cols["name"]))]
+    return steps, params
+
+
+@require_POST
+def preview(request, pk):
+    """How the instruction reads on the kiosk for a part, step by step: from what's in the editor now (saved or not;
+    nothing is saved or changed), or from a revision (rev=). Returns the preview's HTML for the page to show."""
+    me, denied = _gate(request)
+    if denied:
+        return HttpResponse(status=403)
+    x = Instruction.objects.filter(pk=pk).first()
+    if not x:
+        raise Http404
+    P = request.POST
+    part = " ".join(str(P.get("part") or "").split()).upper()[:40]
+    err, new_files = "", 0
+    if P.get("rev"):
+        r = Revision.objects.filter(instruction=x, pk=P.get("rev")).first()
+        if not r:
+            raise Http404
+        steps, params, label = list(r.steps), list(r.params), f"rev {r.rev} ({r.get_status_display().lower()})"
+    else:
+        from hmi.engine import Need
+        from .cmds import _clean_params, _clean_steps
+        raw_steps, raw_params = editor_fields(P)
+        try:
+            new_files = max(0, int(P.get("new_files") or 0))
+        except ValueError:
+            new_files = 0
+        try:
+            params = _clean_params(raw_params)
+            steps = _clean_steps(raw_steps, x, [q["name"] for q in params])
+        except Need as e:   # shown in the preview: a typo shouldn't stop you seeing the rest
+            err = str(e)
+            params = [q for q in raw_params if str(q.get("name") or "").strip()]
+            steps = [{"text": s["text"], "caution": s["caution"], "media": [int(m) for m in s["media"] if str(m).isdigit()]}
+                     for s in raw_steps if s["text"].strip() or s["media"]]
+        label = "what's in the editor now (not saved)"
+    filled, resolved = fill_steps(steps, params, part) if part else (steps, resolve_params(params, ""))
+    media = {m.pk: m for m in Media.objects.filter(instruction=x).defer("data", "thumb")}
+    filled = [{**s, "m": [media[i] for i in s.get("media", []) if i in media]} for s in filled]
+    known = bool(part) and (viewer_has(part))
+    cond = excl = None
+    if part and (x.condition or x.exclude):
+        from .formula import condition, values_for
+        vals = values_for(part)
+        if x.condition:
+            ok, missing, cerr = condition(x.condition, vals)
+            cond = {"ok": ok, "missing": missing, "err": cerr}
+        if x.exclude:
+            ok, missing, cerr = condition(x.exclude, vals)
+            excl = {"ok": ok, "missing": missing, "err": cerr}
+    exceptPart = bool(part) and any(__import__("fnmatch").fnmatchcase(part, p) for p in x.except_patterns())
+    return render(request, "instructions/_preview.html", {"x": x, "steps": filled, "params": resolved, "part": part, "err": err,
+                                                          "label": label, "newFiles": new_files, "known": known, "cond": cond, "excl": excl,
+                                                          "exceptPart": exceptPart})
+
+
+def viewer_has(part):
+    from quality import viewer
+    return bool(viewer.find(part))
 
 
 def store_media(x, f, me):
@@ -229,8 +295,8 @@ def kiosk_data(s):
     items = for_station(s.machine, nxt or part, who)
     for d in items:
         media = {m.pk: m for m in Media.objects.filter(instruction=d["x"]).defer("data", "thumb")}
-        d["steps"] = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in d["r"].steps]
-        d["params"] = resolve_params(d["r"].params, nxt or part)
+        filled, d["params"] = fill_steps(d["r"].steps, d["r"].params, nxt or part)
+        d["steps"] = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in filled]
     return {"wi": items, "wiPart": nxt or part, "wiNext": bool(nxt), "wiJson": json.dumps([d["r"].pk for d in items])}
 
 
@@ -260,4 +326,4 @@ def acks_csv(request, pk):
     return resp
 
 
-__all__ = ["index", "detail", "do", "upload", "media", "kiosk_data", "unread", "acks_csv", "Revision"]
+__all__ = ["index", "detail", "do", "upload", "preview", "media", "kiosk_data", "unread", "acks_csv", "Revision"]

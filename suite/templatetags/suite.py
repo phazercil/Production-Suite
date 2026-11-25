@@ -148,3 +148,18 @@ def mo_in(text):
     import re
     m = re.search(r"\bMO\s+([A-Za-z0-9-]+)", str(text or ""))
     return m.group(1) if m else ""
+
+
+# One status vocabulary across the suite, each with its own icon and word (never colour alone): {% stat "stale" %}
+STATS = {"ok": ("✓", "OK"), "warning": ("!", "WARNING"), "stale": ("◷", "STALE"), "offline": ("○", "OFFLINE"),
+         "failed": ("✕", "FAILED"), "held": ("❚❚", "HELD"), "running": ("▶", "RUNNING"), "disabled": ("–", "DISABLED"),
+         "na": ("?", "NOT AVAILABLE"), "info": ("i", "INFO")}
+
+
+@register.simple_tag
+def stat(kind, text=None):
+    """<span class="stat stat-ok"><i>✓</i>OK</span>; text replaces the word (still with the kind's icon)."""
+    from django.utils.html import format_html
+    k = str(kind or "na").lower()
+    icon, word = STATS.get(k, STATS["na"])
+    return format_html('<span class="stat stat-{}"><i aria-hidden="true">{}</i>{}</span>', k if k in STATS else "na", icon, text or word)

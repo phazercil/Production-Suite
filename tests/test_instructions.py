@@ -81,7 +81,7 @@ class WorkInstructions(TestCase):
         self.assertEqual(rv.steps, [{"text": "Swap the guide", "caution": "", "media": [img.pk, vid.pk]}])
         self.assertEqual(rv.params[0]["target"], "180")
         self.assertEqual(c.get("/quality/wi/")["Location"], "/instructions/")
-        self.assertContains(c.get("/instructions/"), "WI-001")
+        self.assertContains(c.get("/instructions/?show=drafts"), "WI-001")   # not approved yet: under Drafts
         # approved (by an admin, their own: allowed) and on the kiosk, with the banner until it's read
         self.assertTrue(engine.execute("wiApprove", {"id": x.pk}, engine.Ctx(user=self.admin))["ok"])
         k = Client(HTTP_HX_REQUEST="true")

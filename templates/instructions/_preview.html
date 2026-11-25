@@ -1,0 +1,25 @@
+{% load suite %}<div class="wi-pv" data-wi-pv>
+  <div class="wi-pv-head"><div class="grow"><h2>{{ x.doc_no }} · {{ x.title }}</h2>
+    <p class="note">Preview{% if part %} for <b>{{ part }}</b>{% endif %} · {{ label }}</p></div>
+    <button type="button" class="btn ghost" data-wi-pv-close aria-label="Close the preview">Close</button></div>
+  {% if err %}<div class="flash bad">This wouldn't save yet: {{ err }}</div>{% endif %}
+  {% if not part %}<div class="flash warn">Type a part number to see the values for that filter. Shown without one, every {…} stays as written.</div>
+  {% elif not known %}<div class="flash warn">{{ part }} isn't in the 3D filter library, so values worked out from the filter's data show as not on file.</div>{% endif %}
+  {% if x.condition %}<p>{% if not part %}{% stat "info" "Show when" %}{% elif cond.ok %}{% stat "ok" "Shows" %}{% elif cond.ok is None %}{% stat "warning" "Can't check" %}{% else %}{% stat "disabled" "Doesn't show" %}{% endif %}
+    <code>{{ x.condition }}</code>{% if part %} for {{ part }}{% if cond.missing %}: {{ cond.missing|join:", " }} not on file{% if x.kind == "note" %} (a note card still shows, marked unchecked){% endif %}{% elif cond.err %}: {{ cond.err }}{% endif %}{% endif %}</p>{% endif %}
+  {% if x.exclude %}<p>{% if not part %}{% stat "info" "Not when" %}{% elif excl.ok %}{% stat "disabled" "Excluded" %}{% elif excl.ok is None %}{% stat "warning" "Can't check" %}{% else %}{% stat "ok" "Not excluded" %}{% endif %}
+    <code>{{ x.exclude }}</code>{% if part %} for {{ part }}{% if excl.missing %}: {{ excl.missing|join:", " }} not on file (it still shows, marked unchecked){% elif excl.err %}: {{ excl.err }}{% endif %}{% endif %}</p>{% endif %}
+  {% if exceptPart %}<p>{% stat "disabled" "Excluded" %} {{ part }} is one of its Except parts ({{ x.except_parts }}).</p>{% endif %}
+  {% if newFiles %}<p class="note">{{ newFiles }} photo{{ newFiles|pluralize }} or video{{ newFiles|pluralize }} picked but not saved yet: they show once you save the draft.</p>{% endif %}
+  {% if params %}<h3>Settings for {{ part|default:"the part" }}</h3>
+  <table class="st wi-params"><thead><tr><th>Setting</th><th class="n">Target</th><th class="n">Min</th><th class="n">Max</th><th>Unit</th><th>Notes</th></tr></thead><tbody>
+    {% for p in params %}<tr><td><b>{{ p.name }}</b></td><td class="n num"><b>{{ p.target|default:"—" }}</b></td><td class="n num">{{ p.min|default:"—" }}</td><td class="n num">{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td>
+      <td class="note">{{ p.desc }}{% if p.missing %}{% if p.desc %} · {% endif %}{% stat "warning" "Not on file" %} {{ p.missing|join:", " }}{% elif p.err %}{% if p.desc %} · {% endif %}{% stat "failed" "Error" %} {{ p.err }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  {% if steps %}<div class="wi-pv-nav"><button type="button" class="btn" data-wi-pv-prev>‹ Previous</button><span class="num" data-wi-pv-at>Step 1 of {{ steps|length }}</span>
+    <button type="button" class="btn" data-wi-pv-next>Next ›</button><span class="grow"></span><label class="chk"><input type="checkbox" data-wi-pv-all> Show all steps</label></div>
+  <ol class="wi-steps wi-pv-steps">{% for s in steps %}<li data-wi-pv-step {% if not forloop.first %}hidden{% endif %} value="{{ forloop.counter }}">
+    <div class="wi-pv-n">Step {{ forloop.counter }} of {{ steps|length }}</div>
+    {% if s.caution %}<div class="wi-caution">⚠ {{ s.caution }}</div>{% endif %}<div class="wi-text">{{ s.text|linebreaksbr }}</div>
+    {% if s.m %}<div class="wi-media">{% for m in s.m %}{% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}" alt="{{ m.name }}" loading="lazy">{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}</ol>
+  {% else %}<p class="note">No steps yet.</p>{% endif %}
+</div>

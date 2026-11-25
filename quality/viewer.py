@@ -38,6 +38,7 @@ def app(request):
     resp = render(request, "quality/fv_app.html", {
         "canEdit": (not view) and perms.can(me, EDIT_PERM), "view": view,
         "part": str(request.GET.get("part") or "")[:60], "line": str(request.GET.get("line") or "")[:60],
+        "newModel": request.GET.get("new") == "1",
         "who": me.name if me else ""})
     # The viewer is one page with its script inline (as it was built), so this page allows inline script. It still
     # can't load or send anything outside the suite (default-src / connect-src 'self'), and only the suite frames it.

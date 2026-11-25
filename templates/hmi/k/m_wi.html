@@ -1,0 +1,11 @@
+{% extends "hmi/k/m_base.html" %}
+{% block title %}{{ x.doc_no }} · {{ x.title }}{% endblock %}
+{% block body %}
+  <p class="note">{{ x.get_kind_display }} · rev {{ r.rev }}{% if part %} · values for {{ part }}{% endif %}{% if read %} · <span class="pill ok">READ</span>{% endif %}</p>
+  {% if msg %}<p class="note" style="color:var(--ok-ink)">{{ msg }}</p>{% endif %}
+  {% if params %}<div class="tblwrap"><table class="xl"><thead><tr><th>Setting</th><th>Target</th><th>Min</th><th>Max</th><th></th><th></th></tr></thead><tbody>{% for p in params %}<tr><td class="l"><b>{{ p.name }}</b></td><td><b>{{ p.target|default:"—" }}</b></td><td>{{ p.min|default:"—" }}</td><td>{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td><td class="l note">{{ p.desc }}{% if p.missing %} · not on file: {{ p.missing|join:", " }}{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  <ol class="wi-ksteps">{% for s in steps %}<li>{% if s.caution %}<div class="wi-kcaution">⚠ {{ s.caution }}</div>{% endif %}<div>{{ s.text|linebreaksbr }}</div>
+    {% if s.m %}<div class="wi-kmedia">{% for m in s.m %}{% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}" alt="{{ m.name }}" loading="lazy">{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}</ol>
+{% endblock %}
+{% block foot %}{% if back %}<button type="button" class="btn ghost" hx-get="/kiosk/m/changeover?refresh=1" hx-target="#modal" hx-swap="innerHTML">‹ Back to the changeover</button>{% endif %}
+  {% if not read %}{% if S.me %}<button type="button" class="btn go" hx-post="/kiosk/do/wiReadCo" hx-vals='{"rev": "{{ r.pk }}", "id": "{{ x.pk }}"}'>Read and understood</button>{% else %}<span class="note">Log in to mark it read.</span>{% endif %}{% endif %}{% endblock %}

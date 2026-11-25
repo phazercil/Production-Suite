@@ -657,3 +657,10 @@ tr.hl td{background:rgba(242,182,109,.22)!important;outline:2px solid var(--warn
 .csecnav{display:flex;flex-wrap:wrap;gap:6px;position:sticky;top:0;z-index:5;padding:8px 0;background:var(--ground)}
 .csecnav .chip[aria-pressed="true"],.cmachnav .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink,#0b1420);font-weight:600}
 [data-ctable] .linkbtn b{text-decoration:underline;text-decoration-color:var(--rule-2);text-underline-offset:3px}
+/* a special note card in the changeover checklist: called out so it isn't missed */
+.conote{border:2px solid var(--warn);background:var(--warn-bg);border-radius:10px;padding:10px 12px;color:var(--ink)}
+.conote.done{border-color:var(--ok);background:var(--ok-bg)}
+.conote-h{display:flex;align-items:center;gap:8px;color:var(--warn-ink);font-size:16px}
+.conote.done .conote-h{color:var(--ok-ink)}
+.conote-tag{font-size:18px}
+.conote .grow{flex:1}

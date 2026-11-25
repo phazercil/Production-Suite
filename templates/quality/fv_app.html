@@ -367,7 +367,7 @@
 </div>
 
 <script src="{% static 'vendor/xlsx/xlsx.full.min.js' %}"></script>
-<script>window.FV_HOST = {"canEdit": {{ canEdit|yesno:"true,false" }}, "view": {{ view|yesno:"true,false" }}, "part": "{{ part|escapejs }}", "line": "{{ line|escapejs }}"};</script>
+<script>window.FV_HOST = {"canEdit": {{ canEdit|yesno:"true,false" }}, "view": {{ view|yesno:"true,false" }}, "part": "{{ part|escapejs }}", "line": "{{ line|escapejs }}", "newModel": {{ newModel|yesno:"true,false" }}};</script>
 <script src="{% static 'quality/fv-host.js' %}"></script>
 <script type="importmap">
 { "imports": {
@@ -2404,6 +2404,7 @@ renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, came
       };
       await follow(); setInterval(() => { if (!document.hidden) follow(); }, 20000);
     } else if (H.part) await open(H.part);
+    if (H.newModel && H.canEdit && !H.view) openNew();   // Filter catalog › Add new model
   });
 })();
 </script>

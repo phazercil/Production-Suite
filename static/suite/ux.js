@@ -253,3 +253,30 @@ document.addEventListener("htmx:afterSettle", function () {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
   document.addEventListener("htmx:afterSettle", apply);
 })();
+// the bar's plant clock: the server's time when the page was made, then kept by this screen's clock (no requests)
+(function () {
+  "use strict";
+  var el = document.querySelector("[data-clock]");
+  if (!el) return;
+  var skew = (+el.getAttribute("data-now") || Date.now()) - Date.now();
+  var opts = { hour: "numeric", minute: "2-digit" };
+  try { new Intl.DateTimeFormat(undefined, { timeZone: el.getAttribute("data-tz") }); opts.timeZone = el.getAttribute("data-tz"); } catch (e) { /* the screen's own zone */ }
+  var fmt = new Intl.DateTimeFormat(undefined, opts);
+  function tick() { el.textContent = fmt.format(new Date(Date.now() + skew)); }
+  tick();
+  setInterval(tick, 15000);
+})();
+// a page part that should fill the rest of the screen (Quality › 3D viewer): sized to what's left below it
+(function () {
+  "use strict";
+  function fit() {
+    document.querySelectorAll("[data-fit-height]").forEach(function (el) {
+      var scroller = el.closest(".mode") || document.documentElement;
+      var top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + (scroller.scrollTop || 0);
+      var room = (scroller.clientHeight || window.innerHeight) - top - 16;
+      el.style.height = Math.max(360, room) + "px";
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fit); else fit();
+  window.addEventListener("resize", fit);
+})();

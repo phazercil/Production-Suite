@@ -1037,7 +1037,7 @@ def run_scrap(sh, mo):
 def load_changeover_steps(sh, co):
     """Steps and settings for the new part: its approved changeover work instruction (Quality › Work instructions),
     else the standard checklist (Admin › Checklists). Kept in the suite: no outside database."""
-    from instructions.cmds import changeover_checklist, changeover_for
+    from instructions.cmds import also_read, changeover_checklist, changeover_for, note_cards
     old = MO.objects.filter(pk=co.get("oldMo")).first() if co.get("oldMo") else None
     new = MO.objects.filter(pk=co.get("newMo")).first() if co.get("newMo") else None
     co["inkjet"] = inkjet_change(old, new)
@@ -1051,6 +1051,10 @@ def load_changeover_steps(sh, co):
         co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
     else:
         co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
+    # special note cards for this filter (e.g. its 2 mm side bands) come first, each ticked like a step
+    part = new.part if new else ""
+    co["steps"] = note_cards(sh.machine, part) + co["steps"]
+    co["alsoRead"] = also_read(sh.machine, part, x if r else None)
 
 
 @cmd("coPick")

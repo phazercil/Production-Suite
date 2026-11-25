@@ -1,10 +1,13 @@
 {% extends "base.html" %}{% load static suite %}
 {% block title %}Quality · Work instructions{% endblock %}
 {% block body_class %}scroll{% endblock %}
-{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'supervisor/supervisor.css' %}"><link rel="stylesheet" href="{% static 'instructions/wi.css' %}"><script src="{% static 'instructions/wi.js' %}" defer></script>{% endblock %}
 {% block content %}<div class="sv">
 {% include "instructions/_head.html" %}
-  <form class="sv-filter" method="get">
+  <div class="wi-listhead">
+    <nav class="wi-tabs" aria-label="Which instructions"><a href="?show=effect" {% if show == "effect" %}aria-current="page"{% endif %}>In effect <span class="num">({{ nEffect }})</span></a><a href="?show=drafts" {% if show == "drafts" %}aria-current="page"{% endif %}>Drafts not approved yet <span class="num">({{ nDrafts }})</span></a></nav>
+    <span class="grow"></span>{% if canEdit %}<button type="button" class="btn go" data-wi-new>New +</button>{% endif %}</div>
+  <form class="sv-filter" method="get"><input type="hidden" name="show" value="{{ show }}">
     <label>Find<input type="search" name="q" value="{{ f.q|default:'' }}" placeholder="Title, WI number or part"></label>
     <label>Machine<select name="machine"><option value="">All</option>{% for m in machines %}<option value="{{ m.pk }}" {% if f.machine == m.pk|stringformat:"s" %}selected{% endif %}>{{ m.name }}</option>{% endfor %}</select></label>
     <label>Kind<select name="kind"><option value="">All</option>{% for k, l in kinds %}<option value="{{ k }}" {% if f.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
@@ -12,19 +15,25 @@
   <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Document</th><th>Kind</th><th>For</th><th>In effect</th><th>Draft</th><th class="n">Read by</th></tr></thead><tbody>
   {% for r in rows %}<tr class="{% if not r.x.active %}muted{% endif %}"><td><a href="/instructions/{{ r.x.pk }}/"><b>{{ r.x.doc_no }}</b> {{ r.x.title }}</a>{% if not r.x.active %} <span class="pill idle">WITHDRAWN</span>{% endif %}</td>
     <td>{{ r.x.get_kind_display }}</td>
-    <td class="note">{% for m in r.x.machines.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% empty %}Every machine{% endfor %} · {{ r.x.parts|default:"every part" }}</td>
+    <td class="note">{% for m in r.x.machines.all %}{{ m.name }}{% if not forloop.last %}, {% endif %}{% empty %}Every machine{% endfor %} · {{ r.x.parts|default:"every part" }}{% if r.x.condition %} · when <code>{{ r.x.condition }}</code>{% endif %}{% if r.x.exclude %} · not when <code>{{ r.x.exclude }}</code>{% endif %}{% if r.x.except_parts %} · except {{ r.x.except_parts }}{% endif %}</td>
     <td class="nw">{% if r.cur %}rev {{ r.cur.rev }} <span class="note">{{ r.cur.approved_at|day }}</span>{% else %}<span class="pill warn">NOT APPROVED YET</span>{% endif %}</td>
     <td class="nw">{% if r.draft %}<span class="pill idle">rev {{ r.draft.rev }} draft</span>{% else %}—{% endif %}</td>
     <td class="n">{{ r.acks }}</td></tr>
-  {% empty %}<tr><td colspan="6" class="empty">No work instructions yet.{% if canEdit %} Add the first one below.{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+  {% empty %}<tr><td colspan="6" class="empty">{% if show == "drafts" %}No drafts waiting for approval.{% elif nDrafts %}None approved yet: {{ nDrafts }} draft{{ nDrafts|pluralize }} under Drafts not approved yet.{% else %}No work instructions yet.{% if canEdit %} Press New + to write the first one.{% endif %}{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
   {% if savedCo %}<div class="card"><h2>Changeover steps saved from the asset database</h2><p class="note">Changeovers now take their steps and settings from approved Changeover instructions here, not the asset database. {{ savedCo }} set{{ savedCo|pluralize }} of steps the suite last read from it {{ savedCo|pluralize:"is,are" }} still kept: make them draft instructions to check and approve.</p>
     <form method="post" action="/instructions/do/wiImportSaved">{% csrf_token %}<button class="btn" data-confirm="Make a draft Changeover instruction for each machine and part with saved steps?">Make them drafts</button></form></div>{% endif %}
-  {% if canEdit %}<div class="card"><h2>New work instruction</h2>
+  {% if canEdit %}<dialog class="wi-dialog" data-wi-newdlg {% if f.new %}data-open{% endif %} aria-labelledby="wi-new-h"><div class="wi-dialog-h"><h2 id="wi-new-h">New work instruction</h2><button type="button" class="btn ghost" data-wi-newclose>Cancel</button></div>
+    <p class="note">Give it a title and say what it's for. Creating it opens the editor, where you write its steps, add photos and parameters, and preview it.</p>
     <form method="post" action="/instructions/do/wiCreate" class="wi-grid">{% csrf_token %}
-      <label class="wide">Title<input name="title" required maxlength="160" placeholder="e.g. P7 pleaters changeover: MG cabin filters"></label>
-      <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
-      <label>Parts <small>(comma-separated, * for any; blank: every part)</small><input name="parts" maxlength="400" placeholder="MG4062*, AQ12*"></label>
-      <fieldset class="wide"><legend>Machines <small>(none ticked: every machine)</small></legend>{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}"> {{ m.name }}</label>{% endfor %}</fieldset>
-      <button class="btn go">Create the draft</button></form></div>{% endif %}
+      <label class="wide">Title<input name="title" required maxlength="160" value="{{ f.title|default:'' }}" placeholder="e.g. P7 pleaters changeover: MG cabin filters"></label>
+      <label>Kind<select name="kind">{% for k, l in kinds %}<option value="{{ k }}" {% if f.kind == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+      <label>Parts <small>(comma-separated, * for any; blank: every part)</small><input name="parts" maxlength="400" value="{{ f.parts|default:'' }}" placeholder="MG4062*, AQ12*"></label>
+      <label class="wide">Show when <small>(only for filters where this is true, from the filter's data in the 3D viewer, e.g. <code>[Side A thickness (mm)] = 2</code> or <code>[Side bands] = 1 and [Media type] = "carbon"</code>; blank: every filter. Needed for a special note card)</small><input name="condition" data-wi-formula maxlength="400" value="{{ f.condition|default:'' }}" placeholder="[Side A thickness (mm)] = 2"></label>
+      <label class="wide">Not for filters where <small>(an exclusion: it doesn't show for filters where this is true, e.g. <code>[Side bands] = 0</code>)</small><input name="exclude" data-wi-formula maxlength="400" value="{{ f.exclude|default:'' }}" placeholder="[Side bands] = 0"></label>
+      <label class="wide">Except parts <small>(never for these part numbers, comma-separated, * for any)</small><input name="except_parts" maxlength="400" value="{{ f.except_parts|default:'' }}" placeholder="MG4062HP, AQ12*"></label>
+      <label class="wide">Insert variable<select data-wi-var><option value="">Pick the filter's data…</option>{% regroup fvars by group as groups %}{% for g in groups %}<optgroup label="{{ g.grouper }}">{% for v in g.list %}<option value="{{ v.name }}">{{ v.name }}{% if v.type and v.type != "number" %} ({{ v.type }}){% endif %}</option>{% endfor %}</optgroup>{% endfor %}</select></label>
+      <label class="wide">Also read <small>(other instructions to read with this one: WI numbers, comma-separated)</small><input name="see_also" maxlength="200" value="{{ f.see_also|default:'' }}" placeholder="WI-004, WI-007"></label>
+      <fieldset class="wide"><legend>Machines <small>(none ticked: every machine)</small></legend>{% for m in machines %}<label class="chk"><input type="checkbox" name="machines" value="{{ m.pk }}" {% if m.pk|stringformat:"s" in newMachines %}checked{% endif %}> {{ m.name }}</label>{% endfor %}</fieldset>
+      <button class="btn go">Create the draft and open the editor</button></form></dialog>{% endif %}
   <p class="note">A new instruction (and each change after) is a draft until someone with <b>Approve work instructions</b> approves it, someone other than who wrote it. Then the kiosks show it on the Instructions page for its machines and parts, and the revision before becomes obsolete (kept, read-only). Operators tap <b>Read and understood</b> for each revision.</p>
 </div>{% endblock %}

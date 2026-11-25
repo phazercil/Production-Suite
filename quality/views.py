@@ -22,7 +22,7 @@ from plant.util import local, part_spec
 
 PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
-TABS = [("report", "Quality report"), ("spc", "SPC"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"),
+TABS = [("report", "Quality report"), ("spc", "SPC"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Filter catalog"), ("tol", "Tolerances"),
         ("viewer", "3D viewer"), ("wi", "Work instructions")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
            "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
@@ -180,6 +180,31 @@ def tol_rows(cfg=None):
             for k, label in qc.tol_specs(cfg)]
 
 
+def catalog(q=""):
+    """Quality › Filter catalog: every filter in the 3D viewer's part library, with its size worked out as the viewer
+    does (mm), its information sheet's fields, and how many values still need review."""
+    from plant.models import FilterModel3D
+    from quality import viewer
+    qs = FilterModel3D.objects.order_by("part")
+    if q:
+        qs = qs.filter(part__icontains=q) | qs.filter(pid__icontains=q)
+    n = qs.count()
+    rows = []
+    for x in qs[:500]:
+        data = x.data or {}
+        info = data.get("info") or {}
+        d = viewer.dims(x)
+        rows.append({"part": x.part, "oe": info.get("cust") or "", "base": info.get("base") or "", "media": info.get("mtype") or "",
+                     "pleats": d["pleats"], "ph": d["ph"], "olen": d["olen"], "wid": d["wid"], "hgt": d["hgt"],
+                     "sb": d["sb"] if d["side_on"] else None, "sides": d["side_on"],
+                     "tols": [(lbl, info.get(k)) for k, lbl in (("tol_len", "L"), ("tol_wid", "W"), ("tol_fh", "H"), ("tol_ph", "PH"))
+                              if str(info.get(k) or "").strip()],
+                     "glue": info.get("glue") or "", "screw": info.get("screw") or "", "helix": info.get("helix") or "",
+                     "needs": len(data.get("needs") or []), "updated": x.updated, "by": x.by,
+                     "empty": all(d[k] is None for k in ("pleats", "ph", "olen", "wid"))})
+    return {"cat": rows, "catN": n, "catTotal": FilterModel3D.objects.count()}
+
+
 def unwired_features(cfg=None):
     """Measurements added in Tolerances that the asset database connection doesn't read yet (Part specs in the
     Connector builder has no column for them)."""
@@ -220,7 +245,8 @@ def page(request):
         from plant.models import FilterModel3D
 
         from .viewer import db_ready
-        ctx.update(fvDb=db_ready(), fvCount=FilterModel3D.objects.count())
+        ctx.update(fvDb=db_ready(), fvCount=FilterModel3D.objects.count(), fvPart=str(request.GET.get("part") or "")[:60],
+                   fvNew=request.GET.get("new") == "1")
     if f["tab"] == "checks":
         from plant.models import STAGES
         cfg = PlantSettings.load().config
@@ -253,6 +279,7 @@ def page(request):
                    canImport=lib or integrations.query_ready("part_spec", "part_drawing"),
                    uomWired="AS uom" in (getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""),
                    pasted=request.POST.get("parts", "") if err else "")
+        ctx.update(catalog(q), canModel=perms.can(me, "quality.tolerances"), qcOpen=bool(request.GET.get("qc") or request.GET.get("msg")) or bool(err))
         return render(request, "quality/page.html", ctx)
     if f["tab"] == "trace":
         return trace_tab(request, f, ctx, err)

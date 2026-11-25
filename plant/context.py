@@ -8,7 +8,52 @@ MODES = [("operator", "/operator/", "Operator Kiosk"), ("packaging", "/packaging
 # who may open each mode (Admin › Permissions); modes without one are open to everyone on the plant network
 MODE_PERM = {"packaging": "section.packaging", "stations": "section.stations", "supervisor": "section.supervisor", "quality": "section.quality",
              "maintenance": "section.maintenance", "admin": "section.admin", "labor": "section.labor"}
-MORE = {"schedule", "reports", "labor", "admin"}   # back-office modes: under More, so the bar stays one row on floor screens
+MORE = {"schedule", "reports", "labor", "admin"}   # back-office modes (the Labor page's own bar still uses MODES and this)
+
+# The top bar by workflow: a group with one mode is a link, with more a menu (key, name, modes in it)
+GROUPS = [("production", "Production", ["operator", "packaging", "stations"]),
+          ("planning", "Planning", ["scheduler", "schedule"]),
+          ("oversight", "Oversight", ["supervisor", "reports", "data", "labor"]),
+          ("quality", "Quality", ["quality"]),
+          ("maintenance", "Maintenance", ["maintenance"]),
+          ("admin", "Admin", ["admin"])]
+
+
+def groups_for(modes, current=""):
+    """The top bar's groups for the modes this person may open: [{key, label, items: [(key, href, label)], on}].
+    Groups with nothing to open are left out; a mode in no group gets its own entry, so nothing disappears."""
+    have = {m[0]: m for m in modes}
+    out, placed = [], set()
+    for key, label, keys in GROUPS:
+        items = [have[k] for k in keys if k in have]
+        placed.update(k for k in keys if k in have)
+        if items:
+            out.append({"key": key, "label": label, "items": items, "on": any(k == current for k, _, _ in items)})
+    for m in modes:
+        if m[0] not in placed:
+            out.append({"key": m[0], "label": m[2], "items": [m], "on": m[0] == current})
+    return out
+
+
+def _health_warning(me):
+    """The bar's warning for people who look after the system: machine data isn't being read (the minute ticker has
+    stopped). Read from the last time the ticker reported in; nothing is shown to everyone else."""
+    from plant import perms
+    if not me or not (perms.can(me, "section.admin") or perms.can(me, "section.supervisor")):
+        return None
+    try:
+        from django.utils import timezone
+
+        from plant.models import PlantSettings
+        seen = PlantSettings.objects.filter(pk=1).values_list("ticker_seen", flat=True).first()
+    except Exception:  # noqa: BLE001 - before the first migration
+        return None
+    if seen is None:
+        return {"text": "Machine data isn't being read: the minute ticker hasn't run yet.", "href": "/admin/health/"}
+    mins = (timezone.now() - seen).total_seconds() / 60
+    if mins >= 3:
+        return {"text": f"Machine data isn't being read: the minute ticker last ran {int(mins)} minutes ago.", "href": "/admin/health/"}
+    return None
 
 
 def _me(request):
@@ -58,7 +103,12 @@ def suite(request):
     if me:
         from plant.perms import ROLES
         role = dict(ROLES).get(me.role, me.role)
-    return {"suite_pin_lens": _pin_lens(), "suite_sse": sse, "kiosk_lock": request.session.get("kiosk_lock", False), "suite_modes": modes,
+    from django.utils import timezone
+    path = request.path or "/"
+    current = next((k for k, href, _ in MODES if path.startswith(href)), "")
+    return {"suite_groups": groups_for(modes, current), "suite_warn": _health_warning(me),
+            "suite_now": int(timezone.now().timestamp() * 1000), "suite_tz": settings.TIME_ZONE,
+            "suite_pin_lens": _pin_lens(), "suite_sse": sse, "kiosk_lock": request.session.get("kiosk_lock", False), "suite_modes": modes,
             "suite_main": [m for m in modes if m[0] not in MORE], "suite_more": [m for m in modes if m[0] in MORE],
             "suite_me": me, "suite_role": role,
             "suite_rev": f"v{settings.SUITE['VERSION']} · rev {settings.SUITE['REVISION']}", "suite_revision": settings.SUITE["REVISION"], "suite_version": settings.SUITE["VERSION"]}

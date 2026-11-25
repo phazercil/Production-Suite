@@ -1,6 +1,9 @@
 """Digital work instructions (Quality › Work instructions): machine- and part-specific changeover and
 operating instructions with photos, videos and approved process parameters, under revision control.
 
+Special note cards are short call-outs for filters with something particular about them (a condition on the filter's
+data, e.g. 2 mm side bands): every changeover to such a filter shows them at the top of the checklist, to be ticked.
+
 Changeover and Inkjet change instructions are also the kiosk's changeover checklist: the approved one for the machine and
 the part being changed to gives the steps operators tick off and the settings shown above them.
 
@@ -11,13 +14,18 @@ from django.db import models
 
 
 class Instruction(models.Model):
-    KINDS = [("changeover", "Changeover"), ("inkjet", "Inkjet change"), ("operation", "Operation"), ("quality", "Quality check"), ("safety", "Safety"),
+    KINDS = [("changeover", "Changeover"), ("inkjet", "Inkjet change"), ("note", "Special note card"), ("operation", "Operation"), ("quality", "Quality check"), ("safety", "Safety"),
              ("maintenance", "Maintenance")]
     doc_no = models.CharField(max_length=20, unique=True)
     title = models.CharField(max_length=160)
     kind = models.CharField(max_length=12, choices=KINDS, default="changeover")
     machines = models.ManyToManyField("plant.Machine", blank=True, related_name="instructions", help_text="None: every machine")
     parts = models.CharField(max_length=400, blank=True, help_text="Part numbers it's for, comma-separated; * matches anything (MG4062*, AQ12*). Blank: every part")
+    condition = models.CharField(max_length=400, blank=True, help_text="Only for filters where this is true, from the filter's data "
+                                 "([Side A thickness (mm)] = 2 or [Side bands] = 1). Blank: every filter it's for")
+    exclude = models.CharField(max_length=400, blank=True, help_text="Not for filters where this is true ([Side bands] = 0)")
+    except_parts = models.CharField(max_length=400, blank=True, help_text="Never for these part numbers (comma-separated, * for any)")
+    see_also = models.CharField(max_length=200, blank=True, help_text="Other instructions to read with this one: WI numbers, comma-separated")
     active = models.BooleanField(default=True)
     created = models.DateTimeField()
     created_by = models.CharField(max_length=120)
@@ -34,6 +42,12 @@ class Instruction(models.Model):
 
     def draft(self):
         return self.revisions.filter(status="draft").order_by("-rev").first()
+
+    def see_also_list(self):
+        return [d.strip().upper() for d in self.see_also.replace(";", ",").split(",") if d.strip()]
+
+    def except_patterns(self):
+        return [p.strip().upper() for p in self.except_parts.split(",") if p.strip()]
 
     def part_patterns(self):
         return [p.strip().upper() for p in self.parts.split(",") if p.strip()]
