@@ -651,3 +651,9 @@ tr.hl td{background:rgba(242,182,109,.22)!important;outline:2px solid var(--warn
 .wi-k table{border-collapse:collapse;margin-top:12px;min-width:420px}
 .wi-k th,.wi-k td{padding:6px 14px 6px 0;text-align:left;border-bottom:1px solid var(--rule-2,#333)}
 .wi-k th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute,#aaa)}
+/* Admin › Connections: one section (and one machine) at a time */
+.csec{display:contents}
+.csec[hidden]{display:none}
+.csecnav{display:flex;flex-wrap:wrap;gap:6px;position:sticky;top:0;z-index:5;padding:8px 0;background:var(--ground)}
+.csecnav .chip[aria-pressed="true"],.cmachnav .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink,#0b1420);font-weight:600}
+[data-ctable] .linkbtn b{text-decoration:underline;text-decoration-color:var(--rule-2);text-underline-offset:3px}

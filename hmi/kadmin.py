@@ -269,7 +269,9 @@ def connections_data(s, request):
             "assetsEvery": st.get("assetsEvery", 1), "influxEvery": st.get("influxEvery", 1)}
     status = [{"k": k, "label": lbl, "addr": addr, "c": conn.get(k),
                "every": {"key": every[k][0], "min": every[k][1], "help": every[k][2], "v": vals[every[k][0]]} if k in every else None,
-               "fixed": fixed.get(k) or ("every minute (each minute is counted)" if k.startswith("feed:") else "")}
+               "fixed": fixed.get(k) or ("every minute (each minute is counted)" if k.startswith("feed:") else ""),
+               "kind": kind_of(k), "kindLabel": {"machine": "Machine", "database": "Database", "service": "Connection"}[kind_of(k)],
+               "machine": k[5:] if k.startswith("feed:") else ""}
               for k, lbl, addr in rows]
     out = {"status": status, "srv": srv, "g": g, "kiosk": st.get("kiosk") or {}, "pc": pc, "st": st,
            "panelsText": "\n".join(f"{x.get('title')} = {x.get('panel')}" for x in (st.get("kiosk") or {}).get("panels", [])),
@@ -499,6 +501,13 @@ def norm_settings(rows):
         if name:
             out.append({"name": name, "value": o.get("value") or "", "unit": o.get("unit") or "", "asset": o.get("asset") or ""})
     return out
+
+
+def kind_of(k):
+    """What a Connection status row is, for its Show filter: a machine's data, a database, or another connection."""
+    if k.startswith("feed:"):
+        return "machine"
+    return "database" if k in ("store", "machines", "assets", "s2kdb", "influx", "influxOut") else "service"
 
 
 def codata_data(s, request, states=None):

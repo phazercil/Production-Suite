@@ -24,6 +24,14 @@ def specs_from_asset_db(test):
     test.addCleanup(p.stop)
 
 
+def all_day_shift(machine):
+    """Tests that tick minutes ahead of now: one shift all day on this machine, so a tick never lands on a shift
+    change (the demo's 1st shift ends at 14:30) whatever time the tests run."""
+    from plant.models import Shift
+    sh = Shift.objects.create(name="All day", start="00:00", end="23:59", days=[0, 1, 2, 3, 4, 5, 6])
+    machine.shifts.set([sh])
+
+
 def no_planned_time(test):
     """These checks are about counting and stops, not breaks: run them as if the shift had no planned breaks,
     whatever time of day the tests run (planned time has its own tests in test_platform.py)."""

@@ -12,7 +12,7 @@ from hmi import engine
 from hmi.models import Downtime, LineState, PpmReading, ShiftRun, Ticket
 from plant.demo import seed_demo
 from plant.models import MO, Machine, Person, PlantSettings
-from tests.test_suite import no_planned_time
+from tests.test_suite import all_day_shift, no_planned_time
 
 
 class Engine(TestCase):
@@ -210,6 +210,7 @@ class CountFromSpeed(TestCase):
         seed_demo(reset=True)
         self.m = Machine.objects.get(name="Barbara")
         Machine.objects.filter(pk=self.m.pk).update(feed_count_field="")
+        all_day_shift(self.m)
 
     def run_minutes(self):
         sh = ShiftRun.objects.get(machine=self.m, active=True)
@@ -252,6 +253,7 @@ class RecipeChange(TestCase):
         seed_demo(reset=True)
         self.m = Machine.objects.get(name="Barbara")
         Machine.objects.filter(pk=self.m.pk).update(feed_count_field="count", count_kind="minute")
+        all_day_shift(self.m)
         ShiftRun.objects.filter(machine=self.m, active=True).update(acc=0.0)
         self.sh = ShiftRun.objects.get(machine=self.m, active=True)
         self.old = self.sh.mo

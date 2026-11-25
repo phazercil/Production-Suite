@@ -45,6 +45,13 @@
 - **Fallbacks:** filters without one use Quality › Tolerances, then the part's Tol ±.
 - **Where to see them:** Parts & specs shows each filter's sheet tolerances.
 
+**Admin › Connections is easier to get around.**
+- **Section buttons:** buttons at the top (Status, Machine data, Databases & accounts, S2K schedule, Paycom…) show just that section.
+- **One machine at a time:** Machine data shows one machine's card, picked by name.
+- **Status table:** it can be searched, filtered by type (machines, databases, other) and sorted with problems first.
+- **Jump to a machine:** clicking a machine's row opens its machine data settings.
+- **Remembered:** the choice is kept in the address (e.g. /admin/connections/?sec=machines&mach=Salvatore).
+
 **Editing instructions.**
 - Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
 - **📷 Add photo / video** on each step: pick photos or videos (or take them on a tablet). They're shown on the step right away and saved with the draft.
