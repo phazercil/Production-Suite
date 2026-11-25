@@ -81,7 +81,9 @@ def wi_draft(p, ctx):
     return {"msg": f"Draft rev {rev} started from rev {cur.rev if cur else '—'}."}
 
 
-def _clean_steps(raw, x):
+def _clean_steps(raw, x, param_names=None):
+    """Each step: its text, caution and photos. A {…} in the text must be one of the parameters (or a formula)."""
+    from .formula import FormulaError, check_text
     ok_media = set(Media.objects.filter(instruction=x).values_list("pk", flat=True))
     out = []
     for s in raw if isinstance(raw, list) else []:
@@ -89,6 +91,12 @@ def _clean_steps(raw, x):
         caution = str((s or {}).get("caution") or "").strip()[:500]
         media = [int(m) for m in ((s or {}).get("media") or []) if str(m).isdigit() and int(m) in ok_media]
         if text or media:
+            if param_names is not None:
+                try:
+                    check_text(text, param_names)
+                    check_text(caution, param_names)
+                except FormulaError as e:
+                    need(False, f"Step {len(out) + 1}: {e}")
             out.append({"text": text, "caution": caution, "media": media})
     need(len(out) <= MAX_STEPS, f"{MAX_STEPS} steps at most.")
     return out
@@ -130,8 +138,8 @@ def wi_save(p, ctx):
     x = _instruction(p, lock=True)
     r = x.draft()
     need(r, f"{x.doc_no} has no draft. Start one (New revision) to change it.")
-    r.steps = _clean_steps(p.get("steps"), x)
     r.params = _clean_params(p.get("params"))
+    r.steps = _clean_steps(p.get("steps"), x, [q["name"] for q in r.params])
     r.change_note = str(p.get("change_note") or "").strip()[:4000]
     r.updated = ctx.now
     if ctx.by not in r.author.split(", "):
@@ -291,10 +299,11 @@ def changeover_for(machine, part, inkjet=False):
 def changeover_checklist(x, r, part=""):
     """An approved revision as the kiosk's changeover steps and settings, its formulas worked out for the part being
     changed to (kept with the changeover, so a revision approved part-way through doesn't change what's ticked off)."""
-    from .formula import resolve_params
-    steps = [{"text": s.get("text") or "", "caution": s.get("caution") or "", "media": list(s.get("media") or [])} for s in r.steps]
+    from .formula import fill_steps
+    filled, resolved = fill_steps(r.steps, r.params, part)
+    steps = [{"text": s.get("text") or "", "caution": s.get("caution") or "", "media": list(s.get("media") or [])} for s in filled]
     sets = []
-    for p in resolve_params(r.params, part):
+    for p in resolved:
         lo, hi = p["min"], p["max"]
         rng = f"{lo}–{hi}" if lo and hi else f"≥ {lo}" if lo else f"≤ {hi}" if hi else ""
         note = p["desc"]

@@ -137,8 +137,9 @@ class ChangeoverFromInstructions(TestCase):
         self.assertContains(r, "data-wi-var")
         self.assertContains(r, "Pleat height (mm)")
         self.assertContains(r, "instructions/wi.js")
-        r = cl.get(f"/instructions/{x.pk}/?part=NOPE1")
-        self.assertContains(r, "Not on file for NOPE1")
+        r = cl.post(f"/instructions/{x.pk}/preview", {"rev": x.draft().pk, "part": "NOPE1"})
+        self.assertContains(r, "Not on file")
+        self.assertContains(r, "NOPE1 isn't in the 3D filter library")
 
 
 class SetupFoldedIntoChangeover(TransactionTestCase):
@@ -217,3 +218,72 @@ class MostSpecificWins(TestCase):
         self.assertEqual(pick("MG5000"), mg_bar)
         self.assertEqual(pick("MG5000", Machine.objects.get(name="Salvatore")), mg)
         self.assertEqual(pick("AQ1278"), every)
+
+
+class ParametersInSteps(TestCase):
+    def setUp(self):
+        seed_demo(reset=True)
+        self.lead = Person.objects.filter(role="lead").first()
+        self.admin = Person.objects.get(pin="9999")
+        FilterModel3D.objects.create(pid="MG7001", part="MG7001", flat={"pleat_height_mm": 30.5})
+        r = engine.execute("wiCreate", {"title": "P7 changeover", "kind": "changeover"}, engine.Ctx(user=self.lead))
+        self.x = Instruction.objects.get(pk=r["data"]["id"])
+        self.params = [{"name": "Screw height", "desc": "1mm above pleat height", "target": "[Pleat height (mm)] + 1",
+                        "min": "[Pleat height (mm)] + 0.5", "max": "[Pleat height (mm)] + 1.5", "unit": "mm"},
+                       {"name": "Glue temp", "target": "180", "unit": "°C"}]
+
+    def test_fill_text(self):
+        resolved = formula.resolve_params(self.params, "MG7001")
+        vals = formula.values_for("MG7001")
+        out = formula.fill_text("Set to {Screw height}, between {screw height:range}; glue {Glue temp:max}; "
+                                "half pleat {[Pleat height (mm)] / 2}; {Unknown}", resolved, vals)
+        self.assertEqual(out, "Set to 31.5 mm, between 31–32 mm; glue (Glue temp: no max set); half pleat 15.25; {Unknown}")
+        missing = formula.fill_text("{Screw height}", formula.resolve_params(self.params, "NOPE9"), {})
+        self.assertEqual(missing, "(not on file: Pleat height (mm))")
+
+    def test_saving_checks_the_names(self):
+        r = engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "Set {Screw hieght}"}], "params": self.params},
+                           engine.Ctx(user=self.lead))
+        self.assertFalse(r["ok"])
+        self.assertIn("Step 1: {Screw hieght}: there's no parameter called Screw hieght", r["error"])
+        self.assertFalse(engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "x {[Nope] + 1}"}], "params": self.params},
+                                        engine.Ctx(user=self.lead))["ok"])
+        self.assertTrue(engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "Set the screws to {Screw height}"}],
+                                                  "params": self.params, "change_note": "x"}, engine.Ctx(user=self.lead))["ok"])
+
+    def test_changeover_checklist_and_kiosk_show_the_values(self):
+        from instructions.cmds import changeover_checklist
+        engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "Set the screws to {Screw height}", "caution": "Under {Glue temp}"}],
+                                  "params": self.params, "change_note": "x"}, engine.Ctx(user=self.lead))
+        engine.execute("wiApprove", {"id": self.x.pk}, engine.Ctx(user=self.admin))
+        steps, sets, _ = changeover_checklist(self.x, self.x.current(), "MG7001")
+        self.assertEqual((steps[0]["text"], steps[0]["caution"]), ("Set the screws to 31.5 mm", "Under 180 °C"))
+        self.assertEqual(self.x.current().steps[0]["text"], "Set the screws to {Screw height}")   # the document keeps the placeholder
+
+    def test_preview_uses_unsaved_editor_content_and_saves_nothing(self):
+        cl = Client()
+        cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+        before = list(self.x.draft().steps)
+        r = cl.post(f"/instructions/{self.x.pk}/preview", {
+            "part": "mg7001", "s_text": ["Lock out", "Set the screws to {Screw height}"], "s_caution": ["", ""],
+            "p_name": ["Screw height"], "p_desc": ["1mm above"], "p_target": ["[Pleat height (mm)] + 1"], "p_min": [""], "p_max": [""],
+            "p_unit": ["mm"], "new_files": "2"})
+        self.assertEqual(r.status_code, 200)
+        html = r.content.decode()
+        self.assertIn("Set the screws to 31.5 mm", html)
+        self.assertIn("Step 2 of 2", html)
+        self.assertIn("for <b>MG7001</b>", html)
+        self.assertIn("2 photos or videos picked but not saved yet", html)
+        self.assertEqual(self.x.draft().steps, before)                         # nothing saved
+        r = cl.post(f"/instructions/{self.x.pk}/preview", {"part": "MG7001", "s_text": ["Set {Nope}"], "s_caution": [""], "p_name": [""]})
+        self.assertContains(r, "This wouldn't save yet")                 # a typo is shown, the rest still previews
+        self.assertContains(r, "Set {Nope}")
+        self.assertEqual(Client().post(f"/instructions/{self.x.pk}/preview", {"part": "x"}).status_code, 403)
+
+    def test_editor_page_has_preview_and_unsaved_guard(self):
+        cl = Client()
+        cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+        r = cl.get(f"/instructions/{self.x.pk}/")
+        for bit in ("data-wi-preview", "data-wi-savebar", "data-wi-dirty", "data-wi-param", "data-wi-modal"):
+            self.assertContains(r, bit)
+        self.assertNotContains(r, 'method="get" class="wi-try"')              # the old Work out form (it left the page)

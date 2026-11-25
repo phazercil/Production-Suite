@@ -235,3 +235,68 @@ def resolve_params(params, part):
             row["err"] = row["err"] or err
         out.append(row)
     return out
+
+
+# Parameters (and formulas) inside a step's text: "Set the screws to {Screw height}" shows "Set the screws to 31.5 mm".
+# {Name} is the parameter's target with its unit; {Name:min}, {Name:max} and {Name:range} its limits;
+# {[Pleat height (mm)] + 1} works a formula out on the spot (a number, no unit).
+PLACE = __import__("re").compile(r"\{([^{}\n]{1,200})\}")
+PARTS = {"": "target", "target": "target", "min": "min", "max": "max", "range": "range"}
+
+
+def _split(ref):
+    name, _, part = ref.rpartition(":") if ":" in ref else (ref, "", "")
+    if ":" in ref and part.strip().lower() in PARTS:
+        return name.strip(), PARTS[part.strip().lower()]
+    return ref.strip(), "target"
+
+
+def check_text(text, param_names):
+    """Raise FormulaError for a {…} in a step that isn't one of the parameters or a working formula."""
+    names = {_norm(n) for n in param_names if n}
+    for m in PLACE.finditer(str(text or "")):
+        ref = m.group(1)
+        if "[" in ref:
+            check(ref)
+            continue
+        name, _ = _split(ref)
+        if _norm(name) not in names:
+            raise FormulaError(f"{{{ref}}}: there's no parameter called {name}. Use one of the parameters below, "
+                               "e.g. {" + (sorted(param_names)[0] if param_names else "Screw height") + "}.")
+
+
+def fill_text(text, resolved, vals=None):
+    """A step's text with each {…} replaced by its value for the part (resolved = resolve_params for it). A value the
+    part doesn't have reads "(not on file: …)": the step still shows, never a guessed number."""
+    by = {_norm(p["name"]): p for p in resolved or []}
+
+    def one(m):
+        ref = m.group(1)
+        if "[" in ref:
+            v, missing, err = evaluate(ref, vals if vals is not None else {})
+            if missing:
+                return f"(not on file: {', '.join(missing)})"
+            return fmt(v) if v is not None else f"({err or 'can’t be worked out'})"
+        name, part = _split(ref)
+        p = by.get(_norm(name))
+        if not p:
+            return m.group(0)
+        unit = f" {p['unit']}" if p.get("unit") else ""
+        if p.get("missing"):
+            return f"(not on file: {', '.join(p['missing'])})"
+        if part == "range":
+            lo, hi = p.get("min"), p.get("max")
+            val = f"{lo}–{hi}" if lo and hi else f"≥ {lo}" if lo else f"≤ {hi}" if hi else ""
+        else:
+            val = p.get(part) or ""
+        return f"{val}{unit}" if val else f"({p['name']}: no {('value' if part == 'target' else part)} set)"
+    return PLACE.sub(one, str(text or ""))
+
+
+def fill_steps(steps, params, part):
+    """Steps with their {…} filled in for a part, and the parameters worked out: (steps, resolved)."""
+    resolved = resolve_params(params, part)
+    need_vals = any("[" in m.group(1) for s in steps for m in PLACE.finditer(str(s.get("text") or "") + str(s.get("caution") or "")))
+    vals = values_for(part) if need_vals else {}
+    return [{**s, "text": fill_text(s.get("text"), resolved, vals), "caution": fill_text(s.get("caution"), resolved, vals)}
+            for s in steps], resolved

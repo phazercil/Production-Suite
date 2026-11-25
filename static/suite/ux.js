@@ -253,3 +253,16 @@ document.addEventListener("htmx:afterSettle", function () {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
   document.addEventListener("htmx:afterSettle", apply);
 })();
+// the bar's plant clock: the server's time when the page was made, then kept by this screen's clock (no requests)
+(function () {
+  "use strict";
+  var el = document.querySelector("[data-clock]");
+  if (!el) return;
+  var skew = (+el.getAttribute("data-now") || Date.now()) - Date.now();
+  var opts = { hour: "numeric", minute: "2-digit" };
+  try { new Intl.DateTimeFormat(undefined, { timeZone: el.getAttribute("data-tz") }); opts.timeZone = el.getAttribute("data-tz"); } catch (e) { /* the screen's own zone */ }
+  var fmt = new Intl.DateTimeFormat(undefined, opts);
+  function tick() { el.textContent = fmt.format(new Date(Date.now() + skew)); }
+  tick();
+  setInterval(tick, 15000);
+})();

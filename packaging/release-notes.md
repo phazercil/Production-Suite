@@ -1,3 +1,34 @@
+## What's new in 1.9.16
+
+**Work instructions.**
+- **Nothing you type is lost:**
+  - the part-number check no longer leaves the page (it used to throw away unsaved edits);
+  - the Save button shows **Unsaved changes**, with **Discard changes** next to it;
+  - the browser asks before leaving the page while changes aren't saved.
+- **Preview:** type a part number and press **Preview** to step through the instruction as the kiosk shows it, with its settings worked out for that filter. Use Next and Previous, the arrow keys, or "Show all steps".
+  - **In the editor:** it previews what's there now, saved or not, and nothing is saved.
+  - **On a revision:** it previews that revision.
+- **Parameters in steps:**
+  - **Values:** write `{Screw height}` in a step to show that parameter's value for the filter being run, with its unit (e.g. "Set the screws to 31.5 mm").
+  - **Limits:** `{Screw height:min}`, `{Screw height:max}` and `{Screw height:range}` give its limits.
+  - **Formulas:** `{[Pleat height (mm)] + 1}` works a formula out right there.
+  - **Picking one:** "Insert a parameter" puts one into the step you were last in.
+  - **Typos:** a misspelled parameter name is caught when the draft is saved.
+  - **Where it shows:** the kiosk's changeover checklist and its Instructions page show the values.
+
+**A tidier top bar, grouped by what you're doing.**
+- **The groups:** Production (Operator, Packaging, Stations), Planning (Scheduler, Schedule), Oversight (Supervisor, Reports, Data Kiosk, Labor Budget), Quality, Maintenance and Admin.
+- **Menus:** a group with several pages opens a menu and shows which one you're on.
+- **Same as before:**
+  - every address works as it did;
+  - people only see what they may open;
+  - machine screens locked to one page still show no bar.
+- **Plant clock:** the bar shows the plant's time (the server's clock).
+- **Ticker warning:** if machine data stops being read (the minute ticker hasn't run for 3 minutes or more), Admins and supervisors get a warning under the bar with a link to Admin › Health.
+- **Groundwork for the Admin redesign:**
+  - shared colours, spacing and touch sizes;
+  - one set of status labels (OK, WARNING, STALE, OFFLINE, FAILED, HELD, RUNNING, DISABLED), each with an icon and a word, not colour alone.
+
 ## What's new in 1.9.15
 
 **Changeover steps and settings now live in Quality › Work instructions, inside the suite.**

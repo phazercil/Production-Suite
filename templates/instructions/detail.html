@@ -16,6 +16,8 @@
       <div class="flash warn">You're changing the draft (rev {{ draft.rev }}). The kiosks keep showing {% if cur %}rev {{ cur.rev }}{% else %}nothing{% endif %} until it's approved. <a href="?view=1">See {% if cur %}rev {{ cur.rev }}{% else %}it as it reads{% endif %}</a></div>
       <form method="post" action="/instructions/do/wiSave" enctype="multipart/form-data" data-wi-form>{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}">
         <h3>Steps</h3>
+        <div class="wi-vars"><label>Insert a parameter <small>(into the step you were last in; it shows the parameter's value for the filter being run)</small><select data-wi-param><option value="">Pick a parameter…</option></select></label>
+          <span class="note">In a step, <code>{Screw height}</code> shows that parameter's target with its unit (e.g. 31.5 mm); <code>{Screw height:min}</code>, <code>:max</code> and <code>:range</code> its limits; <code>{[Pleat height (mm)] + 1}</code> works a formula out right there.</span></div>
         <div class="wi-step-list" data-wi-list="step">{% for s in steps %}{% include "instructions/_edit_step.html" with s=s i=forloop.counter0 %}{% endfor %}</div>
         <div class="wi-actions"><button type="button" class="btn" data-wi-add="step">+ Add step</button></div>
         <template id="wi-tpl-step">{% include "instructions/_edit_step.html" with s=None i=0 %}</template>
@@ -28,8 +30,9 @@
         <template id="wi-tpl-param">{% include "instructions/_edit_param.html" with p=None %}</template>
         <div class="wi-actions"><button type="button" class="btn" data-wi-add="param">+ Add parameter</button></div>
         <label class="wi-note">What changed and why <small>(needed to approve)</small><textarea name="change_note" rows="2" maxlength="4000">{{ draft.change_note }}</textarea></label>
-        <div class="wi-actions"><button class="btn go">Save the draft</button></div></form>
-      {% include "instructions/_try.html" %}
+        <div class="wi-savebar" data-wi-savebar><span class="wi-dirty" data-wi-dirty hidden>● Unsaved changes</span><span class="note" data-wi-clean>All changes saved.</span><span class="grow"></span>
+          <button type="button" class="btn ghost" data-wi-discard hidden>Discard changes</button><button class="btn go">Save the draft</button></div>
+        {% include "instructions/_preview_bar.html" with rev=None %}</form>
       <form method="post" action="/instructions/{{ x.pk }}/upload" enctype="multipart/form-data" class="wi-up">{% csrf_token %}
         <label>Add photos or videos to the library <small>(to tick on steps; or use 📷 Add photo / video on a step; videos up to 300 MB)</small><input type="file" name="files" multiple accept="image/*,video/mp4,video/webm,video/quicktime"></label><button class="btn">Upload</button></form>
       <div class="wi-actions">
@@ -38,11 +41,12 @@
       </div>
     {% elif r %}
       {% include "instructions/_steps.html" with steps=steps params=params %}
-      {% if hasFormula %}{% include "instructions/_try.html" %}{% endif %}
+      {% include "instructions/_preview_bar.html" with rev=r %}
       {% if canEdit and not draft and r.status == "approved" %}<form method="post" action="/instructions/do/wiDraft" class="wi-actions">{% csrf_token %}<input type="hidden" name="id" value="{{ x.pk }}"><button class="btn">New revision</button><span class="note">Starts rev {{ revs.0.rev|add:1 }} as a draft from this one; this stays in effect until it's approved.</span></form>{% endif %}
       {% if draft and canEdit %}<p><a class="btn" href="/instructions/{{ x.pk }}/">Back to the draft (rev {{ draft.rev }})</a></p>{% endif %}
     {% endif %}
   </div>
+  <div class="wi-modal" data-wi-modal hidden role="dialog" aria-modal="true" aria-label="Preview"></div>
   <div class="grid2">
     <div class="card"><h2>Revisions</h2><table class="st"><tbody>{% for v in revs %}<tr><td><a href="/instructions/{{ x.pk }}/rev/{{ v.rev }}/">Rev {{ v.rev }}</a></td><td>{{ v.get_status_display }}</td><td class="note">{{ v.author }}{% if v.approved_by %} · approved {{ v.approved_by }} {{ v.approved_at|day }}{% endif %}</td><td class="note">{{ v.change_note|truncatechars:90 }}</td></tr>{% endfor %}</tbody></table></div>
     <div class="card"><h2>Read by {% if cur %}(rev {{ cur.rev }}){% endif %}</h2>{% for a in acks %}<div class="mt-urow"><span>{{ a.who }}</span><span class="note">{{ a.machine }} · {{ a.t|day }} {{ a.t|clock }}</span></div>{% empty %}<p class="note">Nobody yet.</p>{% endfor %}

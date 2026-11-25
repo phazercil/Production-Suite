@@ -74,6 +74,7 @@ urlpatterns = [
     path("instructions/<int:pk>/", wi.detail),
     path("instructions/<int:pk>/rev/<int:rev>/", wi.detail),
     path("instructions/<int:pk>/upload", wi.upload),
+    path("instructions/<int:pk>/preview", wi.preview),
     path("instructions/<int:pk>/read-by.csv", wi.acks_csv),
     path("instructions/media/<int:mid>", wi.media),
     path("instructions/do/<str:name>", wi.do),
