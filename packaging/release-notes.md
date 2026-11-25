@@ -17,6 +17,11 @@
   - **A running total**, as before: each minute counts what the counter went up by.
   - **Filters made per minute**: each minute's reading is that minute's filters.
   - A per-minute value read as a total only counted when the rate went up (Salvatore showed 50 instead of ~860).
+- **The machine's recipe times the MOs.** With the recipe coming from the machine's telemetry, an MO's run is tied to the recipe the machine was on when it began.
+  - If the machine runs another recipe for 2 minutes in a row, the old filter can't still be running. The MO's time ends at the change, and what's made from then on is held for the next MO.
+  - The kiosk shows "Recipe changed" until End order. The next MO gets the held filters and starts at the change.
+  - At Start of shift on a line nobody was logged in to, the recipe change answers "when did it change over?" by itself.
+  - An inkjet-only change keeps the same recipe, so it's timed as before (by the operator). A glance at another recipe (one minute) doesn't count.
 - **A changeover done with nobody logged in.** When Start of shift finds the line ran another MO with nobody on it, it asks when it changed over:
   - **One of this shift's stops:** that stop becomes the changeover. What was made before it stays on the old MO, and what was made after goes to the new one.
   - **Now:** the line is still stopped for the changeover.

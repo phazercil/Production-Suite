@@ -60,6 +60,8 @@ class ShiftRun(models.Model):
     last_count = models.BigIntegerField(null=True, blank=True)
     draw_checked = models.DateTimeField(null=True, blank=True)
     qc_last = models.DateTimeField(null=True, blank=True)
+    rx = models.JSONField(null=True, blank=True, help_text="The recipe the MO runs with, from the machine's telemetry, and a "
+                          "change to another recipe: {mo, recipe, to, changed (ms), n, off, held}")
     qc_after_co = models.BooleanField(default=False)   # a QC check is due as soon as the machine runs after a changeover
     qc_due_at = models.DateTimeField(null=True, blank=True)   # when that check became due
     uptime = models.IntegerField(null=True, blank=True)

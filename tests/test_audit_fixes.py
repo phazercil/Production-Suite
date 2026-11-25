@@ -11,7 +11,7 @@ from django.utils import timezone
 from hmi import engine
 from hmi.models import Downtime, LineState, PpmReading, ShiftRun, Ticket
 from plant.demo import seed_demo
-from plant.models import Machine, Person, PlantSettings
+from plant.models import MO, Machine, Person, PlantSettings
 from tests.test_suite import no_planned_time
 
 
@@ -244,3 +244,44 @@ class CountFromSpeed(TestCase):
         for i, v in enumerate((7, 7, 7.5, 7.5, 0)):
             engine.tick(m, {"ppm": 170, "count": v}, t + timedelta(minutes=i))
         self.assertEqual(ShiftRun.objects.get(pk=sh.pk).count - sh.count, 29)   # 7 + 7 + 7.5 + 7.5 (halves carry)
+
+
+class RecipeChange(TestCase):
+    def setUp(self):
+        no_planned_time(self)
+        seed_demo(reset=True)
+        self.m = Machine.objects.get(name="Barbara")
+        Machine.objects.filter(pk=self.m.pk).update(feed_count_field="count", count_kind="minute")
+        ShiftRun.objects.filter(machine=self.m, active=True).update(acc=0.0)
+        self.sh = ShiftRun.objects.get(machine=self.m, active=True)
+        self.old = self.sh.mo
+        self.t = timezone.now().replace(second=0, microsecond=0) + timedelta(minutes=30)
+
+    def minutes(self, recipes, start=0):
+        m = Machine.objects.get(pk=self.m.pk)
+        for i, r in enumerate(recipes, start=start):
+            engine.tick(m, {"ppm": 170, "count": 7, "recipe": r}, self.t + timedelta(minutes=i))
+
+    def test_a_new_recipe_ends_the_mo_and_holds_what_follows(self):
+        before = MO.objects.get(pk=self.old.pk).produced
+        self.minutes(["MG4062HP"] * 3 + ["AQ1234"] * 4)
+        sh = ShiftRun.objects.get(pk=self.sh.pk)
+        self.assertTrue(sh.rx["off"])
+        self.assertEqual(MO.objects.get(pk=self.old.pk).produced - before, 21)    # only the 3 minutes on its recipe
+        self.assertEqual(sh.rx["held"], 28)
+        self.assertEqual(engine.recipe_cut(sh)[0], self.t + timedelta(minutes=2))
+        # End order, then the next MO: it gets the held filters and starts at the change
+        op = engine.Ctx(user=Person.objects.get(pin="9999"), line="Barbara")
+        engine.execute("coOpen", {}, op)
+        r = engine.execute("coEnd", {"checks": [True] * 20, "qty": sh.mo_count}, op)
+        self.assertTrue(r["ok"], r)
+        from hmi.models import MoRun
+        self.assertEqual(MoRun.objects.filter(shift=sh, mo=self.old.number).latest("id").end_time, self.t + timedelta(minutes=2))
+        self.assertEqual(ShiftRun.objects.get(pk=sh.pk).co["pending"], 28)
+
+    def test_a_glance_at_another_recipe_doesnt_count(self):
+        before = MO.objects.get(pk=self.old.pk).produced
+        self.minutes(["MG4062HP", "MG4062HP", "AQ1234", "MG4062HP"])
+        sh = ShiftRun.objects.get(pk=self.sh.pk)
+        self.assertFalse(sh.rx.get("off"))
+        self.assertEqual(MO.objects.get(pk=self.old.pk).produced - before, 28)

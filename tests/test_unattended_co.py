@@ -63,3 +63,15 @@ class UnattendedChangeover(TestCase):
         sh = ShiftRun.objects.get(pk=self.sh.pk)
         self.assertEqual((sh.mo_id, sh.mo_count), (self.new.pk, 200))
         self.assertTrue(Notice.objects.filter(text__contains="Supervisor: check the earlier logs").exists())
+
+    def test_the_machines_recipe_change_answers_it(self):
+        from plant.util import ms
+        sh = ShiftRun.objects.get(pk=self.sh.pk)
+        cut = self.t + timedelta(minutes=20)
+        ShiftRun.objects.filter(pk=sh.pk).update(rx={"mo": self.old.pk, "recipe": "R1", "to": "R2", "changed": ms(cut), "n": 5, "off": True, "held": 40},
+                                                  mo_count=160)
+        r = self.start()   # no question: the machine said when
+        self.assertTrue(r["ok"], r)
+        sh.refresh_from_db()
+        self.assertEqual((sh.mo_id, sh.mo_count, sh.mo_start, sh.rx), (self.new.pk, 40, cut, None))
+        self.assertEqual(MoRun.objects.get(shift=sh).end_time, cut)

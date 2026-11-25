@@ -181,6 +181,8 @@ def _carried(old, at):
     if not old:
         return {}
     out = {"qc_after_co": old.qc_after_co, "qc_due_at": old.qc_due_at, "override": old.override}
+    if (old.rx or {}).get("off"):   # changed recipe: the hold (and when it began) goes on into the next log
+        out["rx"] = dict(old.rx)
     if getattr(old, "_stopped_at", None):   # stopped at the change: the stop goes on in the new log
         out.update(stop_start=at, stop_what=old._stopped_what or "")
     return out
@@ -263,8 +265,9 @@ def co_piece(sh, end, ended, note=""):
 def close_log(sh, end, why="window", note=""):
     """Close a log at `end`: its MO run, its stop, its changeover piece and its stats."""
     if sh.mo and sh.person_id:
+        cut, _ = recipe_cut(sh)
         MoRun.objects.create(shift=sh, line=sh.line, mo=sh.mo.number, item=sh.mo.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
-                             end_time=end)
+                             end_time=min(end, cut) if cut else end)
     if sh.state != "changeover":
         close_stop(sh, end)
     co_piece(sh, end, CO_ENDED.get(why, why), note)   # (a stop during a changeover is Changeover downtime)
@@ -555,11 +558,14 @@ def tick(machine, sample, t):
         per = pleats_for(sh)
         units = int(sh.acc // per) if per > 0 else 0
         sh.acc = sh.acc - units * per if per > 0 else 0.0
+    held = recipe_watch(sh, recipe, t, units)
     if units > 0:
         reading.units = units
         reading.save(update_fields=["units"])
         sh.count += units
-        if sh.mo:
+        if sh.mo and held:
+            pass   # made on another recipe than the MO's: kept in sh.rx for the MO it turns out to be
+        elif sh.mo:
             MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + units)
             sh.mo_count += units
         elif sh.co and sh.co.get("ranAt"):
@@ -622,7 +628,61 @@ def tick(machine, sample, t):
             sh.state = "running"
             if sh.qc_after_co and not sh.qc_due_at:   # first running minute after a changeover: QC is due now
                 sh.qc_due_at = t - timedelta(minutes=1)
-    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at", "qc_after_co", "stop_what", "co"])
+    sh.save(update_fields=["count", "mo_count", "acc", "last_count", "stop_start", "state", "qc_due_at", "qc_after_co", "stop_what", "co", "rx"])
+
+
+RECIPE_CONFIRM = 2   # minutes in a row on another recipe before the MO is taken to have ended
+
+
+def recipe_watch(sh, recipe, t, units):
+    """The machine reports the recipe it runs. The MO's recipe is the one the machine ran when the MO began; a change
+    to another recipe (2 minutes in a row, so a glance at another recipe doesn't count) means the old filter isn't
+    being made any more: the MO's time ends at the change, and what is made from then on is held for the next MO
+    (given to it when it's scanned or the changeover finishes). An inkjet-only change keeps the recipe, so it's
+    timed as before. Returns True when this minute's units are held."""
+    if not recipe or not sh.mo_id or sh.co:
+        return False
+    rx = dict(sh.rx or {})
+    if rx.get("mo") != sh.mo_id:
+        sh.rx = {"mo": sh.mo_id, "recipe": recipe}   # the recipe this MO runs with
+        return False
+    if recipe == rx.get("recipe"):
+        if rx.get("off"):   # back on the MO's recipe: what was held is this MO's after all
+            held = int(rx.get("held") or 0)
+            if held:
+                MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") + held)
+                sh.mo_count += held
+        sh.rx = {"mo": sh.mo_id, "recipe": recipe}
+        return False
+    if rx.get("to") != recipe:   # another recipe: start counting the minutes on it (once off, the change time stays)
+        rx.update(to=recipe, n=0, **({} if rx.get("off") else {"changed": ms(t - timedelta(minutes=1))}))
+    rx["n"] = int(rx.get("n") or 0) + 1
+    if not rx.get("off") and rx["n"] >= RECIPE_CONFIRM:
+        # confirmed: the filters counted since the change were the new filter's, not this MO's
+        since = from_ms(rx["changed"])
+        back = PpmReading.objects.filter(shift=sh, t__gt=since, t__lt=t).aggregate(n=Sum("units"))["n"] or 0
+        back = max(0, min(int(back), sh.mo_count))
+        if back:
+            MO.objects.filter(pk=sh.mo_id).update(produced=F("produced") - back)
+            sh.mo_count -= back
+        rx.update(off=True, held=back)
+        notify(f"{sh.line} changed recipe from {rx['recipe']} to {recipe} at {fmt_t(since)}: MO {sh.mo.number} can't still be running, so its "
+               f"time ends there. Scan the next MO (or End order) on the kiosk; what's made from then on goes to it.", "co", lines=[sh.line])
+        event("recipe_change", {"line": sh.line, "mo": sh.mo.number, "from": rx["recipe"], "to": recipe, "at": since})
+    if rx.get("off"):
+        rx["held"] = int(rx.get("held") or 0) + units
+        sh.rx = rx
+        return True
+    sh.rx = rx
+    return False
+
+
+def recipe_cut(sh):
+    """(when the MO's recipe changed, units held since) when the machine changed to another recipe, else (None, 0)."""
+    rx = sh.rx or {}
+    if rx.get("off") and rx.get("mo") == sh.mo_id and rx.get("changed"):
+        return from_ms(rx["changed"]), int(rx.get("held") or 0)
+    return None, 0
 
 
 def close_stop(sh, t):
@@ -719,7 +779,7 @@ def start_shift(p, ctx):
         need(not running_elsewhere(mo, m), f"MO {mo.number} is already running on another machine.")
     picked = None
     co_going = bool(cur and cur.state == "changeover" and cur.co)
-    if cur and mo and cur.mo_id and cur.mo_id != mo.pk and cur.count and not co_going:
+    if cur and mo and cur.mo_id and cur.mo_id != mo.pk and cur.count and not co_going and not recipe_cut(cur)[0]:
         # the line ran another MO while nobody was logged in: when did it change over? (a stop in this shift, or
         # before this shift: then a supervisor sorts out the earlier logs)
         at = str(p.get("coAt") or "")
@@ -738,7 +798,23 @@ def start_shift(p, ctx):
         sh.issues, sh.safety = str(p.get("issues") or "").strip(), safety
         sh.pm = p.get("pm") if isinstance(p.get("pm"), list) else []
         sh.qc_last, sh.offer = ctx.now, ""
-        if mo and sh.mo_id != mo.pk and picked:
+        cut, held = recipe_cut(sh)
+        if cut and mo and sh.mo_id == mo.pk:   # the recipe changed, but it's still this MO: the held filters are its own
+            if held:
+                MO.objects.filter(pk=mo.pk).update(produced=F("produced") + held)
+                sh.mo_count += held
+            sh.rx = None
+        elif cut and mo and not co_going:
+            # the machine reported the change of recipe: the old MO ended then, and the new one began then
+            old = sh.mo
+            MoRun.objects.create(shift=sh, line=sh.line, mo=old.number, item=old.part, qty=sh.mo_count, start_time=sh.mo_start or sh.start,
+                                 end_time=cut)
+            if held:
+                MO.objects.filter(pk=mo.pk).update(produced=F("produced") + held)
+            sh.mo, sh.mo_start, sh.mo_count, sh.rx = mo, cut, held, None
+            audit(ctx, f"{m.name}: MO {old.number} → {mo.number} at {fmt_t(cut)}, when the machine changed recipe "
+                       f"({sh.count - held:,} before, {held:,} after)")
+        elif mo and sh.mo_id != mo.pk and picked:
             # changed over during that stop: what was made before it stays on the old MO (its own MO run), what was
             # made after it goes to the new one, and the stop is the changeover
             old, start = sh.mo, sh.mo_start or sh.start
@@ -933,8 +1009,12 @@ def co_end(p, ctx):
             mo.status = "CLOSE"
             mo.line, mo.seq = None, 0
         mo.save(update_fields=["produced", "scrap", "status", "line", "seq"])
+        cut, held = recipe_cut(sh)
         MoRun.objects.create(shift=sh, line=sh.line, mo=mo.number, item=mo.part, qty=q, scrap=sc, start_time=sh.mo_start or sh.start,
-                             end_time=ctx.now)
+                             end_time=cut or ctx.now)
+        if cut:   # the machine changed recipe before End order: what it made since is the next MO's
+            co["pending"] = int(co.get("pending") or 0) + held
+            co["recipeAt"] = ms(cut)
         event("mo_end", {"mo": mo.number, "qty": q, "scrap": sc, "closed": mo.status == "CLOSE"})
         co["ended"] = {"mo": mo.number, "qty": q, "scrap": sc, "by": ctx.by, "t": ms(ctx.now), "checks": n}
     # a stop under way goes on as part of the changeover: when it ends it's Changeover downtime, from when it began
@@ -1228,7 +1308,9 @@ def co_finish(p, ctx):
     if pending:
         MO.objects.filter(pk=m.pk).update(produced=F("produced") + pending)
     made = int(co.get("made") or 0) + pending   # filters made during an inkjet-only changeover are already this MO's
-    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co = m, ctx.now, made, "running", None
+    # the new MO's time starts when the machine changed to its recipe, if it reported that before Finish
+    began = from_ms(co["recipeAt"]) if co.get("recipeAt") else ctx.now
+    sh.mo, sh.mo_start, sh.mo_count, sh.state, sh.co, sh.rx = m, began, made, "running", None, None
     sh.qc_after_co, sh.qc_due_at = True, None   # a QC check is due as soon as the machine runs on the new MO
     sh.save()
     event("mo_start", {"line": sh.line, "mo": m.number, "item": m.part, "steps_from": co.get("src", "admin")})
