@@ -49,7 +49,7 @@ def _gate(request, need_section=True):
         return me, None
     return None, render(request, "supervisor/login.html", {"mode": "quality", "note": note or (f"{me.name} can't open Quality." if me else None),
                                                            "perm": PERM, "title": "Work instructions",
-                                                           "blurb": "Setup, changeover and operating instructions, revision-controlled."})
+                                                           "blurb": "Changeover and operating instructions, revision-controlled."})
 
 
 def _ctx(me, **kw):

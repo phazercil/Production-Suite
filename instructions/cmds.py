@@ -23,9 +23,9 @@ def _instruction(p, lock=False):
 
 def _meta(x, p):
     title = " ".join(str(p.get("title") or "").split())[:160]
-    need(title, "Give it a title, e.g. Pleater setup for MG filters.")
+    need(title, "Give it a title, e.g. P7 pleaters changeover for MG filters.")
     x.title = title
-    x.kind = p.get("kind") if p.get("kind") in dict(Instruction.KINDS) else "setup"
+    x.kind = p.get("kind") if p.get("kind") in dict(Instruction.KINDS) else "changeover"
     pats = [s.strip().upper() for s in str(p.get("parts") or "").replace("\n", ",").split(",") if s.strip()]
     need(all(len(s) <= 40 for s in pats), "Part numbers: 40 characters each at most.")
     x.parts = ", ".join(dict.fromkeys(pats))[:400]
@@ -257,7 +257,7 @@ def wi_import_saved(p, ctx):
             + ". Check each one and have it approved: until then the kiosks use the standard checklist."}
 
 
-CO_KINDS = {False: ("changeover", "setup"), True: ("inkjet",)}
+CO_KINDS = {False: ("changeover",), True: ("inkjet",)}
 
 
 def _specific(x, part):
@@ -270,7 +270,7 @@ def _specific(x, part):
 
 def changeover_for(machine, part, inkjet=False):
     """The approved changeover instruction for changing this machine over to this part (Inkjet change instructions
-    for an inkjet-only change): the one aimed most closely at them, a Changeover one before a Setup one. None if none."""
+    for an inkjet-only change): the one aimed most closely at them. None if none."""
     kinds = CO_KINDS[bool(inkjet)]
     best = None
     for x in Instruction.objects.filter(active=True, kind__in=kinds).prefetch_related("machines"):

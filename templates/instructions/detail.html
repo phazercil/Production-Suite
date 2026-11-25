@@ -20,7 +20,7 @@
         <div class="wi-actions"><button type="button" class="btn" data-wi-add="step">+ Add step</button></div>
         <template id="wi-tpl-step">{% include "instructions/_edit_step.html" with s=None i=0 %}</template>
         <h3>Approved process parameters</h3>
-        <p class="note">{% if x.kind == "changeover" or x.kind == "setup" or x.kind == "inkjet" %}Shown above the steps as the settings to set during a changeover.{% else %}Shown with the steps.{% endif %}</p>
+        <p class="note">{% if x.kind == "changeover" or x.kind == "inkjet" %}Shown above the steps as the settings to set during a changeover.{% else %}Shown with the steps.{% endif %}</p>
         <div class="wi-vars"><label>Insert variable <small>(into the Target, Min or Max box you were last in)</small><select data-wi-var><option value="">Pick the filter's data…</option>{% regroup fvars by group as groups %}{% for g in groups %}<optgroup label="{{ g.grouper }}">{% for v in g.list %}<option value="{{ v.name }}">{{ v.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></label>
           <span class="note">Target, Min and Max take a number or a formula worked out for the filter being run: <code>[Pleat height (mm)] + 1</code>, <code>round([Length (in)] * 25.4, 1)</code>. + − * / ^, brackets, round, min, max, abs, ceil, floor. 3D viewer values are in mm; Parts &amp; specs values in inches.</span></div>
         <table class="st wi-params"><thead><tr><th>Parameter</th><th>Description</th><th>Target</th><th>Min</th><th>Max</th><th>Unit</th><th></th></tr></thead><tbody data-wi-list="param">

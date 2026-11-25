@@ -3,7 +3,7 @@ process parameters worked out from the filter's own data: [Pleat height (mm)] + 
 import json
 
 from django.core.cache import cache
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 
 from hmi import engine
 from hmi.models import ChangeoverCache, ShiftRun
@@ -139,3 +139,18 @@ class ChangeoverFromInstructions(TestCase):
         self.assertContains(r, "instructions/wi.js")
         r = cl.get(f"/instructions/{x.pk}/?part=NOPE1")
         self.assertContains(r, "Not on file for NOPE1")
+
+
+class SetupFoldedIntoChangeover(TransactionTestCase):
+    def test_migration_turns_setup_into_changeover(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        ex = MigrationExecutor(connection)
+        ex.migrate([("instructions", "0001_work_instructions")])
+        old = ex.loader.project_state([("instructions", "0001_work_instructions")]).apps
+        old.get_model("instructions", "Instruction").objects.create(doc_no="WI-900", title="Old setup", kind="setup", created=engine.now(), created_by="x")
+        ex = MigrationExecutor(connection)
+        ex.loader.build_graph()
+        ex.migrate(ex.loader.graph.leaf_nodes())
+        self.assertEqual(Instruction.objects.get(doc_no="WI-900").kind, "changeover")
+        self.assertNotIn("setup", dict(Instruction.KINDS))

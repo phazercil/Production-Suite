@@ -30,7 +30,7 @@ class WorkInstructions(TestCase):
         return engine.execute(name, p, engine.Ctx(user=user))
 
     def test_lifecycle(self):
-        r = self.ex("wiCreate", self.lead, title="Pleater setup MG", kind="setup", parts="MG40*, AQ12*", machines=[str(self.bar.pk)])
+        r = self.ex("wiCreate", self.lead, title="Pleater changeover MG", kind="changeover", parts="MG40*, AQ12*", machines=[str(self.bar.pk)])
         self.assertTrue(r["ok"], r)
         x = Instruction.objects.get(pk=r["data"]["id"])
         self.assertEqual((x.doc_no, x.parts), ("WI-001", "MG40*, AQ12*"))

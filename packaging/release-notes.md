@@ -2,7 +2,7 @@
 
 **Changeover steps and settings now live in Quality › Work instructions, inside the suite.**
 - **Where they come from:**
-  - A changeover now uses the approved **Changeover** work instruction for the machine and the part being changed to (or a Setup one if there's no Changeover one).
+  - A changeover now uses the approved **Changeover** work instruction for the machine and the part being changed to.
   - An inkjet-only change uses an approved **Inkjet change** instruction.
   - When several apply, the one aimed most closely wins: an exact part over a pattern, and a named machine over every machine.
   - With no approved instruction, the standard checklists in Admin › Checklists are used as before.
@@ -25,6 +25,8 @@
   - A typo in a variable name is caught when the draft is saved.
 - **Checking them:** **Check with a part number** shows what every formula works out to for a part.
 - **When data is missing:** if a part has no value for a variable, the setting shows as missing, with the variable named. No value is guessed.
+
+**One kind for changeovers.** The Setup kind is gone: every Setup instruction is now a Changeover instruction, with nothing else about it changed.
 
 **Editing instructions.** Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
 
