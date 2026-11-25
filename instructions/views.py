@@ -25,7 +25,7 @@ from .models import Ack, Instruction, Media, Revision
 PERM = "section.quality"
 VIDEO_MAX = 300 * 1024 * 1024
 VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/ogg"}
-POSTS = {"wiImportSaved", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
+POSTS = {"wiImportSaved", "wiSaveAll", "wiCreate", "wiMeta", "wiDraft", "wiSave", "wiDiscard", "wiApprove"}
 
 
 def media_dir():
@@ -71,7 +71,12 @@ def index(request):
                      "acks": cur.acks.count() if cur else 0})
     from hmi.models import ChangeoverCache
     saved = ChangeoverCache.objects.count() if perms.can(me, "wi.edit") else 0
-    return render(request, "instructions/index.html", _ctx(me, rows=rows, f=q, msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
+    show = "drafts" if q.get("show") == "drafts" else "effect"
+    in_effect = [r for r in rows if r["cur"]]
+    drafts = [r for r in rows if not r["cur"]]
+    return render(request, "instructions/index.html", _ctx(me, rows=drafts if show == "drafts" else in_effect, show=show,
+                                                           nEffect=len(in_effect), nDrafts=len(drafts), f=q,
+                                                           newMachines=[m for m in str(q.get("m") or "").split(",") if m], fvars=variables() if perms.can(me, "wi.edit") else [], msg=q.get("msg", ""), err=q.get("err", ""), savedCo=saved))
 
 
 def detail(request, pk, rev=None):
@@ -98,7 +103,8 @@ def detail(request, pk, rev=None):
     return render(request, "instructions/detail.html", _ctx(
         me, x=x, revs=revs, r=r, cur=cur, draft=draft, edit=edit, steps=steps, params=params, media=list(media.values()),
         acks=acks, mids=[m.pk for m in x.machines.all()], 
-        fvars=variables() if edit else [], msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
+        fvars=variables() if edit else [], allvars=variables() if perms.can(me, "wi.edit") else [],
+        seeAlso=list(Instruction.objects.filter(doc_no__in=x.see_also_list())), msg=request.GET.get("msg", ""), err=request.GET.get("err", ""),
         mine=bool(draft and me and me.name in [a.strip() for a in draft.author.split(",")])))
 
 
@@ -113,7 +119,7 @@ def do(request, name):
     p = {k: P.get(k) for k in P if k not in ("csrfmiddlewaretoken",)}
     p["machines"] = P.getlist("machines")
     skipped = 0
-    if name == "wiSave":   # the editor: one list per field, in row order
+    if name in ("wiSave", "wiSaveAll"):   # the editor: one list per field, in row order
         p["steps"], p["params"] = editor_fields(P)
         # photos and videos picked on a step (Add photo / video): kept with the instruction and put on that step
         x = Instruction.objects.filter(pk=p.get("id") or 0).first()
@@ -130,11 +136,15 @@ def do(request, name):
             if added:
                 engine.audit(engine.Ctx(user=me), f"Work instructions: {x.doc_no}: {added} photo(s)/video(s) added on steps")
     r = engine.execute(name, p, engine.Ctx(user=me))
-    if name == "wiSave" and r.get("ok") and skipped:
+    if name in ("wiSave", "wiSaveAll") and r.get("ok") and skipped:
         r["msg"] = f"{r.get('msg') or 'Saved.'} {skipped} file{'s' if skipped != 1 else ''} not added: photos (JPEG, PNG…) up to 25 MB, videos (MP4, WebM, MOV) up to 300 MB."
     pk = (r.get("data") or {}).get("id") or p.get("id")
     base = f"/instructions/{pk}/" if pk else "/instructions/"
     from urllib.parse import urlencode
+    if name == "wiCreate" and not r.get("ok"):   # the New + form comes back open with what was typed
+        keep = {k: str(P.get(k) or "")[:400] for k in ("title", "kind", "parts", "condition", "exclude", "except_parts", "see_also")}
+        return HttpResponseRedirect("/instructions/?" + urlencode({"new": "1", "err": r.get("error") or "That didn't save.", **keep}
+                                                                  | {"m": ",".join(P.getlist("machines"))}))
     return HttpResponseRedirect(base + "?" + urlencode({"msg": r.get("msg") or "Saved."} if r.get("ok") else {"err": r.get("error") or "That didn't save."}))
 
 
@@ -187,14 +197,25 @@ def preview(request, pk):
     media = {m.pk: m for m in Media.objects.filter(instruction=x).defer("data", "thumb")}
     filled = [{**s, "m": [media[i] for i in s.get("media", []) if i in media]} for s in filled]
     known = bool(part) and (viewer_has(part))
+    cond = excl = None
+    if part and (x.condition or x.exclude):
+        from .formula import condition, values_for
+        vals = values_for(part)
+        if x.condition:
+            ok, missing, cerr = condition(x.condition, vals)
+            cond = {"ok": ok, "missing": missing, "err": cerr}
+        if x.exclude:
+            ok, missing, cerr = condition(x.exclude, vals)
+            excl = {"ok": ok, "missing": missing, "err": cerr}
+    exceptPart = bool(part) and any(__import__("fnmatch").fnmatchcase(part, p) for p in x.except_patterns())
     return render(request, "instructions/_preview.html", {"x": x, "steps": filled, "params": resolved, "part": part, "err": err,
-                                                          "label": label, "newFiles": new_files, "known": known})
+                                                          "label": label, "newFiles": new_files, "known": known, "cond": cond, "excl": excl,
+                                                          "exceptPart": exceptPart})
 
 
 def viewer_has(part):
-    from plant.models import PartSpec, part_key
     from quality import viewer
-    return bool(viewer.find(part)) or PartSpec.objects.filter(key=part_key(part)).exists()
+    return bool(viewer.find(part))
 
 
 def store_media(x, f, me):

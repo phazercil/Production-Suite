@@ -382,9 +382,35 @@ def changeover_modal(request, s):
         c.update(nmo=nmo, p=p, steps=[step(i, st) for i, st in enumerate(steps)], inkjet=co.get("inkjet"), ovr=co.get("override"),
                  oldMo=s.mo(co.get("oldMo")) if co.get("oldMo") else None,
                  settingsRows=co.get("settings") or [], src=co.get("src"), cacheT=co.get("cacheT"),
-                 wi=co.get("wi"), canReload=True,
+                 wi=co.get("wi"), canReload=True, alsoRead=co.get("alsoRead") or [],
                  override=" · ".join(f"{k} {v}" for k, v in (sh.override or {}).items()))
     return modal_response(request, "hmi/k/m_changeover.html", **ctx_for(s, **c))
+
+
+def wi_modal(request, s, xid, msg=""):
+    """One work instruction over the kiosk's screen (from a changeover's Also read, or a note card): its steps and
+    settings worked out for the part being changed to (else the one running), with Read and understood."""
+    from instructions.formula import fill_steps
+    from instructions.models import Ack, Instruction, Media
+    x = Instruction.objects.filter(pk=xid, active=True).first()
+    r = x.current() if x else None
+    if not r:
+        return thin.refused("That instruction isn't in use any more.")
+    sh = s.shift
+    co = (sh.co or {}) if sh else {}
+    nmo = s.mo(co.get("newMo")) if co.get("newMo") else None
+    part = nmo.part if nmo else (sh.mo.part if sh and sh.mo else "")
+    filled, params = fill_steps(r.steps, r.params, part)
+    media = {m.pk: m for m in Media.objects.filter(instruction=x).defer("data", "thumb")}
+    steps = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in filled]
+    read = bool(s.me) and Ack.objects.filter(revision=r, who=s.me.name).exists()
+    return modal_response(request, "hmi/k/m_wi.html", **ctx_for(s, x=x, r=r, steps=steps, params=params, part=part, read=read,
+                                                                back=bool(co.get("step")), msg=msg))
+
+
+@modal("wi")
+def m_wi(request, s):
+    return wi_modal(request, s, request.GET.get("id") or 0)
 
 
 @modal("copass", login=True)
@@ -1057,6 +1083,15 @@ def a_person_save(request, s, p):
     if not r["ok"]:
         return login_needed(request, s, r) if r.get("admin") or r.get("login") else err_in_modal(r["error"])
     return thin.done(toast=r.get("msg"), close=True)
+
+
+@action("wiReadCo")
+def a_wi_read_co(request, s, p):
+    """Read and understood, from the instruction opened over the screen: it stays open, marked read."""
+    r = run(request, s, "wiAck", {"rev": p.get("rev")})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("login") else err_in_modal(r["error"])
+    return wi_modal(request, screen(request), p.get("id") or 0, msg=r.get("msg") or "")
 
 
 @action("wiAck")

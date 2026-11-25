@@ -3,6 +3,7 @@
 {% for d in wi %}<details class="panel wi-k" {% if not d.read %}open{% endif %}>
   <summary class="row" style="gap:8px"><b class="grow">{{ d.x.doc_no }} · {{ d.x.title }}</b><span class="note">{{ d.x.get_kind_display }} · rev {{ d.r.rev }}</span>
     {% if d.read %}<span class="pill ok">READ</span>{% else %}<span class="pill warn">NEW</span>{% endif %}</summary>
+  {% if d.unchecked %}<p class="note" style="color:var(--warn-ink)">Shown because it couldn't be checked for {{ wiPart }}: {{ d.unchecked|join:", " }} not on file.</p>{% endif %}
   {% if d.r.change_note and not d.read %}<p class="note">What changed: {{ d.r.change_note }}</p>{% endif %}
   <ol class="wi-ksteps">{% for s in d.steps %}<li>{% if s.caution %}<div class="wi-kcaution">⚠ {{ s.caution }}</div>{% endif %}<div>{{ s.text|linebreaksbr }}</div>
     {% if s.m %}<div class="wi-kmedia">{% for m in s.m %}{% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}" alt="{{ m.name }}" loading="lazy">{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}</ol>

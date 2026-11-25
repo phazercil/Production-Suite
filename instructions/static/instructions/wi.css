@@ -42,9 +42,17 @@ form[data-wi-form] .wi-params th:nth-child(6){width:80px}form[data-wi-form] .wi-
 .wi-picked{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .wi-new{display:inline-flex;align-items:center;border:1px dashed var(--s-rule);border-radius:6px;padding:3px;font-size:12px}
 .wi-new img{height:44px;border-radius:4px}
-.wi-savebar{position:sticky;bottom:0;z-index:3;display:flex;gap:10px;align-items:center;margin-top:12px;padding:10px 12px;border:1px solid var(--s-rule);border-radius:10px;background:var(--s-surface)}
-.wi-savebar .grow{flex:1}
-.wi-savebar.on{border-color:var(--s-warn);box-shadow:0 -6px 18px rgba(0,0,0,.35)}
+/* the editor's one Save: always in view, bottom right */
+.wi-savebar{position:fixed;right:max(20px,env(safe-area-inset-right,0px));bottom:20px;z-index:40;display:flex;gap:10px;align-items:center;
+  padding:10px 12px 10px 16px;border:1px solid var(--s-rule);border-radius:12px;background:var(--s-surface);box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:calc(100vw - 40px)}
+.wi-savebar .grow{display:none}
+.wi-savebar .btn{min-height:44px}
+.wi-savebar .btn.go{min-width:120px}
+.wi-savebar.on{border-color:var(--s-warn)}
+form[data-wi-form]{padding-bottom:84px}   /* room under the last field for the Save bar */
+.wi-details{border:1px solid var(--s-rule);border-radius:10px;padding:10px 12px;margin:10px 0 4px;background:var(--s-ground)}
+.wi-details>summary{cursor:pointer;min-height:32px;display:flex;align-items:center;gap:6px}
+.wi-details[open]>summary{margin-bottom:10px}
 .wi-dirty{color:var(--s-warn-ink);font-weight:600}
 .wi-modal{position:fixed;inset:0;z-index:50;background:rgba(8,10,12,.72);display:flex;align-items:flex-start;justify-content:center;padding:4vh 16px;overflow:auto}
 .wi-pv{background:var(--s-ground);border:1px solid var(--s-rule);border-radius:14px;padding:18px 20px;width:min(980px,100%);display:flex;flex-direction:column;gap:12px}
@@ -55,3 +63,12 @@ form[data-wi-form] .wi-params th:nth-child(6){width:80px}form[data-wi-form] .wi-
 .wi-pv-steps li{border:1px solid var(--s-rule);border-radius:10px;padding:14px 16px;background:var(--s-surface)}
 .wi-pv-n{font:600 13px var(--s-body);color:var(--s-ink-2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
 .wi-pv-steps .wi-media img{height:auto;max-height:340px;max-width:100%}
+.wi-listhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}.wi-listhead .grow{flex:1}
+.wi-listhead .btn{min-height:44px;padding-inline:18px}
+.wi-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.wi-tabs a{padding:8px 14px;border-radius:8px;color:var(--s-ink-2);text-decoration:none;font-weight:600;min-height:40px;display:inline-flex;align-items:center;gap:6px}
+.wi-tabs a:hover{background:var(--s-surface);color:var(--s-ink)}
+.wi-tabs a[aria-current="page"]{background:var(--s-sel);color:var(--s-sel-ink)}
+.wi-dialog{width:min(760px,94vw);max-height:90vh;overflow:auto;background:var(--s-ground);color:var(--s-ink);border:1px solid var(--s-rule);border-radius:14px;padding:18px 20px}
+.wi-dialog::backdrop{background:rgba(8,10,12,.72)}
+.wi-dialog-h{display:flex;align-items:center;gap:12px}.wi-dialog-h h2{margin:0;flex:1}

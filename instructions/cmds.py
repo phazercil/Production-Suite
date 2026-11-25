@@ -29,6 +29,36 @@ def _meta(x, p):
     pats = [s.strip().upper() for s in str(p.get("parts") or "").replace("\n", ",").split(",") if s.strip()]
     need(all(len(s) <= 40 for s in pats), "Part numbers: 40 characters each at most.")
     x.parts = ", ".join(dict.fromkeys(pats))[:400]
+    if "condition" in p:   # Show when: a condition on the filter's data (checked here, worked out per part)
+        from .formula import FormulaError, check
+        cond = " ".join(str(p.get("condition") or "").split())[:400]
+        if cond:
+            try:
+                check(cond)
+            except FormulaError as e:
+                need(False, f"Show when: {e}")
+        x.condition = cond
+    if "exclude" in p:   # Not for filters where: the same kind of condition, the other way
+        from .formula import FormulaError, check
+        exc = " ".join(str(p.get("exclude") or "").split())[:400]
+        if exc:
+            try:
+                check(exc)
+            except FormulaError as e:
+                need(False, f"Not for filters where: {e}")
+        x.exclude = exc
+    if "except_parts" in p:
+        ex = [s.strip().upper() for s in str(p.get("except_parts") or "").replace("\n", ",").split(",") if s.strip()]
+        need(all(len(s) <= 40 for s in ex), "Except parts: 40 characters each at most.")
+        x.except_parts = ", ".join(dict.fromkeys(ex))[:400]
+    if "see_also" in p:
+        docs = [d.strip().upper() for d in str(p.get("see_also") or "").replace(";", ",").replace("\n", ",").split(",") if d.strip()]
+        docs = list(dict.fromkeys(d for d in docs if d != x.doc_no))
+        unknown = [d for d in docs if not Instruction.objects.filter(doc_no=d).exists()]
+        need(not unknown, f"Also read: there's no {', '.join(unknown)} (use the WI numbers on the list, e.g. WI-004).")
+        x.see_also = ", ".join(docs)[:200]
+    need(x.kind != "note" or x.condition or x.parts, "A special note card needs a Show when condition (or the parts it's for), "
+         "or it would show on every changeover.")
 
 
 def _machines(x, p):
@@ -57,13 +87,17 @@ def wi_create(p, ctx):
 def wi_meta(p, ctx):
     """Title, kind, machines and parts it's for, and whether it's in use. Kept in the audit log."""
     x = _instruction(p, lock=True)
-    before = f"{x.title} · {x.kind} · {x.parts or 'every part'} · {', '.join(m.name for m in x.machines.all()) or 'every machine'}"
+    before = (f"{x.title} · {x.kind} · {x.parts or 'every part'} · {', '.join(m.name for m in x.machines.all()) or 'every machine'}"
+              f"{' · when ' + x.condition if x.condition else ''}{' · not when ' + x.exclude if x.exclude else ''}"
+              f"{' · except ' + x.except_parts if x.except_parts else ''}{' · also read ' + x.see_also if x.see_also else ''}")
     _meta(x, p)
     if "active" in p:
         x.active = str(p.get("active")) in ("1", "true", "on")
     x.save()
     ms = _machines(x, p)
-    after = f"{x.title} · {x.kind} · {x.parts or 'every part'} · {', '.join(m.name for m in ms) or 'every machine'}"
+    after = (f"{x.title} · {x.kind} · {x.parts or 'every part'} · {', '.join(m.name for m in ms) or 'every machine'}"
+             f"{' · when ' + x.condition if x.condition else ''}{' · not when ' + x.exclude if x.exclude else ''}"
+             f"{' · except ' + x.except_parts if x.except_parts else ''}{' · also read ' + x.see_also if x.see_also else ''}")
     audit(ctx, f"Work instructions: {x.doc_no} details changed: {before} → {after}" + ("" if x.active else " (withdrawn)"))
     return {"msg": "Saved."}
 
@@ -148,6 +182,15 @@ def wi_save(p, ctx):
     return {"msg": f"Draft rev {r.rev} saved."}
 
 
+@cmd("wiSaveAll", "wi.edit")
+def wi_save_all(p, ctx):
+    """The editor's one Save: its details (title, kind, machines, parts, conditions) and the draft together, both or
+    neither (one command: an error in either changes nothing)."""
+    wi_meta(p, ctx)
+    r = wi_save(p, ctx)
+    return {"msg": r.get("msg") or "Saved."}
+
+
 @cmd("wiDiscard", "wi.edit")
 def wi_discard(p, ctx):
     x = _instruction(p, lock=True)
@@ -198,24 +241,63 @@ def matches(x, machine_id, part):
     ms = {m.pk for m in x.machines.all()}
     if ms and machine_id not in ms:
         return False
+    p = (part or "").upper()
+    if p and any(fnmatch.fnmatchcase(p, pat) for pat in x.except_patterns()):
+        return False
     pats = x.part_patterns()
     if not pats:
         return True
-    p = (part or "").upper()
     return bool(p) and any(fnmatch.fnmatchcase(p, pat) for pat in pats)
 
 
+class _Vals:
+    """The filter's data for conditions, read once per part and only when an instruction has a condition."""
+    def __init__(self, part):
+        self.part, self._v = part, None
+
+    def get(self):
+        if self._v is None:
+            from .formula import values_for
+            self._v = values_for(self.part) if self.part else {}
+        return self._v
+
+
+def applies(x, part, vals):
+    """Its Show when and Not for filters where conditions for this filter: (True / False / None when it can't be
+    checked, what's missing). An exclusion that can't be checked doesn't hide it: it shows, marked unchecked."""
+    if not (x.condition or x.exclude):
+        return True, []
+    from .formula import condition
+    ok, missing, err = condition(x.condition, vals.get()) if x.condition else (True, [], "")
+    if ok is False:
+        return False, []
+    missing = list(missing or ([err] if err else []))
+    if x.exclude:
+        ex, exmiss, exerr = condition(x.exclude, vals.get())
+        if ex is True:
+            return False, []
+        if ex is None:
+            missing += [m for m in (exmiss or [exerr]) if m and m not in missing]
+            return None, missing
+    return ok, missing
+
+
 def for_station(machine, part, who=None):
-    """The approved instructions for a machine and part, each with whether this person has read its revision."""
+    """The approved instructions for a machine and part, each with whether this person has read its revision. One
+    whose Show when condition can't be checked for the filter (its data isn't on file) is listed, marked unchecked."""
     out = []
+    vals = _Vals(part)
     for x in Instruction.objects.filter(active=True).prefetch_related("machines"):
         if not matches(x, machine.pk if machine else None, part):
+            continue
+        ok, missing = applies(x, part, vals)
+        if ok is False:
             continue
         r = x.current()
         if not r:
             continue
         read = bool(who) and Ack.objects.filter(revision=r, who=who).exists()
-        out.append({"x": x, "r": r, "read": read})
+        out.append({"x": x, "r": r, "read": read, "unchecked": missing if ok is None else []})
     order = {k: i for i, (k, _) in enumerate(Instruction.KINDS)}
     return sorted(out, key=lambda d: (d["read"], order.get(d["x"].kind, 9), d["x"].doc_no))
 
@@ -284,9 +366,13 @@ def changeover_for(machine, part, inkjet=False):
     not combined). None if none."""
     kinds = CO_KINDS[bool(inkjet)]
     best = None
+    vals = _Vals(part)
     for x in Instruction.objects.filter(active=True, kind__in=kinds).prefetch_related("machines"):
         if not matches(x, machine.pk if machine else None, part):
             continue
+        ok, missing = applies(x, part, vals)
+        if ok is False or (ok is None and x.condition and not _exclusion_only(missing, x, vals)):
+            continue   # a conditional checklist only when its Show when holds; an unchecked exclusion doesn't hide it
         r = x.current()
         if not r or not r.steps:
             continue
@@ -294,6 +380,64 @@ def changeover_for(machine, part, inkjet=False):
         if best is None or key < best[0]:
             best = (key, x, r)
     return (best[1], best[2]) if best else (None, None)
+
+
+def _exclusion_only(missing, x, vals):
+    """True when only the exclusion couldn't be checked (its Show when held)."""
+    from .formula import condition
+    return condition(x.condition, vals.get())[0] is True
+
+
+def notes_for(machine, part):
+    """Special note cards for a changeover to this part: approved, for this machine, and the filter meets the Show
+    when condition. One whose condition can't be checked (the filter's data isn't on file) is shown too, marked, so a
+    note is never missed for want of data. [(x, r, missing)]."""
+    out = []
+    vals = _Vals(part)
+    for x in Instruction.objects.filter(active=True, kind="note").prefetch_related("machines"):
+        if not matches(x, machine.pk if machine else None, part):
+            continue
+        ok, missing = applies(x, part, vals)
+        r = x.current()
+        if ok is False or not r or not r.steps:
+            continue
+        out.append((x, r, missing if ok is None else []))
+    return sorted(out, key=lambda t: t[0].doc_no)
+
+
+def note_cards(machine, part):
+    """The special note cards for a changeover to this part, as checklist items to tick (kept with the changeover)."""
+    from .formula import fill_steps
+    out = []
+    for x, r, missing in notes_for(machine, part):
+        filled, _ = fill_steps(r.steps, r.params, part)
+        out.append({"text": f"Special note: {x.title}", "media": [m for s in filled for m in s.get("media") or []],
+                    "note": {"id": x.pk, "doc": x.doc_no, "title": x.title, "rev": r.pk, "unchecked": missing,
+                             "lines": [{"text": s.get("text") or "", "caution": s.get("caution") or ""} for s in filled]}})
+    return out
+
+
+ALSO_KINDS = ("safety", "quality", "operation")
+
+
+def also_read(machine, part, chosen=None):
+    """Instructions to read with a changeover to this part: the ones the changeover instruction names (Also read),
+    then the approved Safety, Quality check and Operation instructions for this machine and part.
+    [{"id", "doc", "title", "kind", "rev"}]."""
+    out, seen = [], set()
+    named = chosen.see_also_list() if chosen else []
+    for d in named:
+        x = Instruction.objects.filter(doc_no=d, active=True).first()
+        r = x.current() if x else None
+        if x and r and x.pk not in seen:
+            seen.add(x.pk)
+            out.append({"id": x.pk, "doc": x.doc_no, "title": x.title, "kind": x.get_kind_display(), "rev": r.pk})
+    for d in for_station(machine, part):
+        x = d["x"]
+        if x.kind in ALSO_KINDS and x.pk not in seen:
+            seen.add(x.pk)
+            out.append({"id": x.pk, "doc": x.doc_no, "title": x.title, "kind": x.get_kind_display(), "rev": d["r"].pk})
+    return out
 
 
 def changeover_checklist(x, r, part=""):
@@ -317,12 +461,12 @@ def changeover_checklist(x, r, part=""):
 
 
 def ack_from_changeover(co, person, machine, t):
-    """Finishing a changeover from an instruction counts as reading that revision."""
-    wi = (co or {}).get("wi") or {}
-    if not (wi.get("rev") and person):
+    """Finishing a changeover from an instruction counts as reading that revision, and the special note cards
+    ticked in it."""
+    if not person:
         return
-    r = Revision.objects.filter(pk=wi["rev"], status="approved").first()
-    if r:
+    revs = [((co or {}).get("wi") or {}).get("rev")] + [s["note"]["rev"] for s in (co or {}).get("steps") or [] if s.get("note")]
+    for r in Revision.objects.filter(pk__in=[x for x in revs if x], status="approved"):
         Ack.objects.get_or_create(revision=r, who=person.name, defaults={"person": person, "machine": (machine or "")[:60], "t": t})
 
 

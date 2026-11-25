@@ -16,6 +16,40 @@
   - **Typos:** a misspelled parameter name is caught when the draft is saved.
   - **Where it shows:** the kiosk's changeover checklist and its Instructions page show the values.
 
+- **Special note cards:** a new kind for short call-outs about something particular to some filters.
+  - **When it shows:** give it a **Show when** condition on the filter's 3D-viewer data, e.g. `[Side A thickness (mm)] = 2`.
+  - **On the changeover:** every changeover to a matching filter puts the card (its text and photo) at the top of the checklist. It must be ticked "I've read this note" before Start running, and ticking counts as reading it.
+  - **Missing data:** if the filter's data isn't on file, the card still shows, marked as unchecked, so it's never missed.
+- **Conditions:** any instruction can have **Show when** and **Not for filters where** conditions, plus **Except parts**.
+  - **Comparisons:** conditions use = <> < > <= >=, and / or / not, yes/no settings (`[Side bands] = 1`) and text (`[Media type] = "carbon"`).
+  - **Changeover checklists:** a changeover instruction with a condition is used only for filters that meet it.
+  - **Preview:** it says whether an instruction shows for the part you type.
+- **Also read:** an instruction can name others to read with it (WI numbers).
+  - **On the changeover screen:** the list shows those, plus the Safety, Quality check and Operation instructions for the new part.
+  - **Opening one:** each opens over the changeover, with Read and understood and Back to the changeover.
+- **Variables come only from the 3D filter library.** The drawing is just a picture, so the Parts & specs values are no longer in the variable list.
+- **The list:**
+  - **What it shows:** the instructions in effect; drafts not yet approved are on their own tab.
+  - **Adding one:** **New +** opens the new-instruction form and goes straight to the editor.
+  - **If creating fails:** the form comes back with what you typed.
+
+- **The editor:**
+  - **Details at the top:** title, kind, machines, parts, when it shows and Also read.
+  - **One Save:** it saves the details and the steps together, or neither if something's wrong.
+  - **Always in reach:** the Save button stays in the bottom-right corner as you scroll.
+- **Information sheet fields as variables:**
+  - **Text fields:** glue, screw #, helix #, notes and every row you added to a filter's information sheet are variables, e.g. `[Glue] = "hot melt"` or `[Screw #] = 8.1`.
+  - **Tolerances as numbers:** each tolerance also gives its plus and minus in mm, e.g. `[Tolerance – length minus (mm)]`.
+  - **Values to review:** a setting the viewer still flags for review isn't used.
+
+**Filter catalog** (Quality › Filter catalog, where Parts & specs was):
+- **What it lists:** every filter in the 3D viewer's library, with its size, its information sheet (tolerances, glue, screw #, helix #) and how many values are left to review.
+- **Opening one:** **Open** shows the filter in the 3D viewer.
+- **Adding one:** **Add new model** opens the viewer's New filter form.
+- **QC values:** the Parts & specs table that QC checks use is under "What QC checks use".
+
+**3D viewer:** it fills the screen, so its bottom bar is in view, and the paragraph above it is gone.
+
 **A tidier top bar, grouped by what you're doing.**
 - **The groups:** Production (Operator, Packaging, Stations), Planning (Scheduler, Schedule), Oversight (Supervisor, Reports, Data Kiosk, Labor Budget), Quality, Maintenance and Admin.
 - **Menus:** a group with several pages opens a menu and shows which one you're on.

@@ -69,8 +69,9 @@
   document.addEventListener("change", function (e) {
     var sel = e.target.closest && e.target.closest("[data-wi-var]");
     if (!sel || !sel.value) return;
-    var form = sel.closest("[data-wi-form]");
-    var box = lastFormula && document.body.contains(lastFormula) ? lastFormula : form && form.querySelector("[data-wi-formula]");
+    var form = sel.closest("form");
+    var mine = lastFormula && document.body.contains(lastFormula) && (!form || form.contains(lastFormula)) ? lastFormula : null;
+    var box = mine || (form && form.querySelector("[data-wi-formula]"));
     var token = "[" + sel.value + "]";
     sel.value = "";
     if (!box) return;
@@ -269,4 +270,18 @@
     }
   });
   if (modal) modal.addEventListener("click", function (e) { if (e.target === modal) close(); });
+})();
+
+// Work instructions list: New + opens the new-instruction form over the list
+(function () {
+  "use strict";
+  var dlg = document.querySelector("[data-wi-newdlg]");
+  if (!dlg) return;
+  function open() { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", ""); var t = dlg.querySelector('input[name="title"]'); if (t) t.focus(); }
+  document.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest("[data-wi-new]")) open();
+    if (e.target.closest && e.target.closest("[data-wi-newclose]")) dlg.close();
+    if (e.target === dlg) dlg.close();   // a click on the backdrop
+  });
+  if (dlg.hasAttribute("data-open")) open();
 })();

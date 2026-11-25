@@ -266,3 +266,17 @@ document.addEventListener("htmx:afterSettle", function () {
   tick();
   setInterval(tick, 15000);
 })();
+// a page part that should fill the rest of the screen (Quality › 3D viewer): sized to what's left below it
+(function () {
+  "use strict";
+  function fit() {
+    document.querySelectorAll("[data-fit-height]").forEach(function (el) {
+      var scroller = el.closest(".mode") || document.documentElement;
+      var top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + (scroller.scrollTop || 0);
+      var room = (scroller.clientHeight || window.innerHeight) - top - 16;
+      el.style.height = Math.max(360, room) + "px";
+    });
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fit); else fit();
+  window.addEventListener("resize", fit);
+})();

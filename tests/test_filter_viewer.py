@@ -63,7 +63,8 @@ class FilterViewerTests(TestCase):
         self.assertFalse(FilterModel3D.objects.exists())
         page = c.get("/quality/?tab=viewer").content.decode()
         self.assertIn('src="/quality/viewer/app/"', page)
-        self.assertIn("3D filter data", page)                                   # how to connect a database later
+        self.assertIn("data-fit-height", page)                                  # sized to the screen
+        self.assertNotIn("Each filter is kept in the suite's database", page)  # the note above it is gone (room for the viewer)
 
     def test_kiosk_3d_model_follows_the_line(self):
         k = Client(HTTP_HX_REQUEST="true")
