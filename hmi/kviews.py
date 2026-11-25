@@ -234,7 +234,9 @@ def view_data(s, page, request):
         from .models import AuditLog
         from plant import perms
         tperm = perms.TAB_PERM.get(tab, "permissions.manage")
-        return {"tab": tab, "tabs": kadmin.TABS, "tabPerm": tperm, "tabPermLabel": perms.PERMS[tperm]["label"], "tabCan": s.can(tperm),
+        nav, group = kadmin.admin_nav(tab)
+        return {"tab": tab, "tabs": kadmin.TABS, "nav": nav, "navGroup": group, "tabLabel": dict(kadmin.TABS)[tab], "tabDesc": kadmin.DESC.get(tab, ""),
+                "tabPerm": tperm, "tabPermLabel": perms.PERMS[tperm]["label"], "tabCan": s.can(tperm),
                 "canOpen": s.can("section.admin"), "roleLabel": dict(perms.ROLES).get(s.me.role, "") if s.me else "", "A": kadmin.tab_data(s, tab, request), "audit": list(AuditLog.objects.all()[:12])}
     return {}
 
@@ -400,7 +402,8 @@ def wi_modal(request, s, xid, msg=""):
     co = (sh.co or {}) if sh else {}
     nmo = s.mo(co.get("newMo")) if co.get("newMo") else None
     part = nmo.part if nmo else (sh.mo.part if sh and sh.mo else "")
-    filled, params = fill_steps(r.steps, r.params, part)
+    old = sh.mo.part if (sh and sh.mo and nmo) else ""
+    filled, params = fill_steps(r.steps, r.params, part, old)
     media = {m.pk: m for m in Media.objects.filter(instruction=x).defer("data", "thumb")}
     steps = [{**st, "m": [media[i] for i in st.get("media", []) if i in media]} for st in filled]
     read = bool(s.me) and Ack.objects.filter(revision=r, who=s.me.name).exists()

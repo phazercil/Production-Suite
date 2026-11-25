@@ -1,0 +1,7 @@
+<button type="button" class="btn" data-wi-ins-open aria-expanded="false" aria-controls="wi-ins">{ } Insert variable</button>
+<div class="wi-ins" id="wi-ins" data-wi-ins hidden role="dialog" aria-label="Insert a variable">
+  <div class="wi-ins-h"><input type="search" data-wi-ins-find placeholder="Find: glue, screw, pleat height…" aria-label="Find a variable" autocomplete="off"><span class="note" data-wi-ins-into></span></div>
+  <div class="wi-ins-list" data-wi-ins-list>
+    <div class="wi-ins-g" data-wi-ins-params><b>This instruction's parameters</b></div>
+    {% regroup allvars by group as groups %}{% for g in groups %}<div class="wi-ins-g"><b>{{ g.grouper }}</b>{% for v in g.list %}<button type="button" class="wi-ins-i" data-wi-ins-var="{{ v.name }}">{{ v.name }}{% if v.type and v.type != "number" %} <small>{{ v.type }}</small>{% endif %}</button>{% endfor %}</div>{% endfor %}
+  </div></div>

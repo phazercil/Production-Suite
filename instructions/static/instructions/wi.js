@@ -33,7 +33,7 @@
     e.preventDefault();
     if (btn.hasAttribute("data-wi-add")) {
       var kind = btn.getAttribute("data-wi-add");
-      var list = form.querySelector('[data-wi-list="' + kind + '"]');
+      var list = form.querySelector('[data-wi-list="' + (btn.getAttribute("data-wi-into") || kind) + '"]');
       var row = fresh(kind);
       if (list && row) { list.appendChild(row); renumber(form); focusFirst(row); }
       return;
@@ -236,6 +236,7 @@
       fd.append("new_files", n);
     }
     fd.append("part", (bar.querySelector("[data-wi-part]") || {}).value || "");
+    fd.append("from_part", (bar.querySelector("[data-wi-from]") || {}).value || "");
     opener = b;
     b.disabled = true;
     fetch(bar.getAttribute("data-url"), { method: "POST", body: fd, headers: { "X-CSRFToken": csrf() }, credentials: "same-origin" })
@@ -263,7 +264,7 @@
   });
   // Enter in the part number box previews (and never submits the draft form)
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && e.target.matches && e.target.matches("[data-wi-part]")) {
+    if (e.key === "Enter" && e.target.matches && e.target.matches("[data-wi-part], [data-wi-from]")) {
       e.preventDefault();
       var b = e.target.closest("[data-wi-preview-bar]").querySelector("[data-wi-preview]");
       if (b) b.click();
@@ -284,4 +285,103 @@
     if (e.target === dlg) dlg.close();   // a click on the backdrop
   });
   if (dlg.hasAttribute("data-open")) open();
+})();
+
+// Insert variable (by Save): one picker for every field. It goes into the field you were last in, written the way
+// that field takes it: [Name] in a Target / Min / Max box or a condition; {Parameter} or {[Name]} in a step.
+(function () {
+  "use strict";
+  var FIELDS = 'textarea[name="s_text"], input[name="s_caution"], textarea[name="s_same"], [data-wi-watch], [data-wi-formula]';
+  var last = null;
+  document.addEventListener("focusin", function (e) { if (e.target.matches && e.target.matches(FIELDS)) last = e.target; });
+  function panel(from) { var root = from && from.closest("form, .wi-actions") || document; return root.querySelector("[data-wi-ins]") || document.querySelector("[data-wi-ins]"); }
+  function isStep(el) { return !!el && el.matches('textarea[name="s_text"], input[name="s_caution"], textarea[name="s_same"]'); }
+  function label(el) {
+    if (!el) return "Click into a step, a Target / Min / Max box or a condition first.";
+    if (isStep(el)) return "Into the step you were last in.";
+    if (el.matches("[data-wi-watch]")) return "As what this step compares.";
+    var n = el.getAttribute("name") || "";
+    return "Into " + ({ p_target: "the Target box", p_min: "the Min box", p_max: "the Max box", condition: "Show when", exclude: "Not for filters where" }[n] || "the box you were last in") + ".";
+  }
+  function params(box) {
+    var g = box.querySelector("[data-wi-ins-params]");
+    if (!g) return;
+    g.querySelectorAll("button").forEach(function (b) { b.remove(); });
+    var names = [];
+    document.querySelectorAll('input[name="p_name"]').forEach(function (i) { var v = i.value.trim(); if (v && names.indexOf(v) < 0) names.push(v); });
+    names.forEach(function (n) {
+      [["", n], [":range", n + " (range)"]].forEach(function (x) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "wi-ins-i"; b.setAttribute("data-wi-ins-param", n + x[0]); b.textContent = x[1];
+        g.appendChild(b);
+      });
+    });
+    g.hidden = !names.length || !(isStep(last) || (last && last.matches("[data-wi-watch]")));   // a parameter goes into a step
+  }
+  function filter(box) {
+    var q = (box.querySelector("[data-wi-ins-find]").value || "").trim().toLowerCase();
+    box.querySelectorAll(".wi-ins-g").forEach(function (g) {
+      var any = false;
+      g.querySelectorAll(".wi-ins-i").forEach(function (b) { var ok = !q || b.textContent.toLowerCase().indexOf(q) >= 0; b.hidden = !ok; any = any || ok; });
+      if (!g.hasAttribute("data-wi-ins-params") || !g.hidden) g.style.display = any ? "" : "none";
+    });
+  }
+  function open(btn) {
+    var box = panel(btn);
+    if (!box) return;
+    params(box);
+    box.querySelector("[data-wi-ins-into]").textContent = label(last && document.body.contains(last) ? last : null);
+    box.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    var f = box.querySelector("[data-wi-ins-find]");
+    f.value = ""; filter(box); f.focus();
+  }
+  function close(box) {
+    if (!box) return;
+    box.hidden = true;
+    document.querySelectorAll("[data-wi-ins-open]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+  }
+  function insert(token) {
+    var el = last && document.body.contains(last) ? last : document.querySelector('textarea[name="s_text"]');
+    if (!el) return;
+    var a = el.selectionStart == null ? el.value.length : el.selectionStart, b = el.selectionEnd == null ? el.value.length : el.selectionEnd;
+    el.value = el.value.slice(0, a) + token + el.value.slice(b);
+    el.focus();
+    try { el.setSelectionRange(a + token.length, a + token.length); } catch (err) { /* not a text box */ }
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest && e.target.closest("[data-wi-ins-open], [data-wi-ins-var], [data-wi-ins-param]");
+    if (t && t.hasAttribute("data-wi-ins-open")) {
+      var box = panel(t);
+      if (box && !box.hidden) close(box); else open(t);
+      return;
+    }
+    if (t) {
+      var box2 = t.closest("[data-wi-ins]"), v = t.getAttribute("data-wi-ins-var"), p = t.getAttribute("data-wi-ins-param");
+      var step = isStep(last);
+      var watch = last && last.matches && last.matches("[data-wi-watch]");
+      if (watch) { last.value = (p || v).replace(/:range$/, ""); last.dispatchEvent(new Event("input", { bubbles: true })); close(box2); return; }
+      insert(p ? "{" + p + "}" : step ? "{" + v + "}" : "[" + v + "]");
+      close(box2);
+      return;
+    }
+    document.querySelectorAll("[data-wi-ins]").forEach(function (box) {
+      if (!box.hidden && !(e.target.closest && e.target.closest("[data-wi-ins]"))) close(box);
+    });
+  });
+  document.addEventListener("input", function (e) { if (e.target.matches && e.target.matches("[data-wi-ins-find]")) filter(e.target.closest("[data-wi-ins]")); });
+  document.addEventListener("keydown", function (e) {
+    if (!(e.target.matches && e.target.matches("[data-wi-ins-find]"))) return;
+    var box = e.target.closest("[data-wi-ins]");
+    if (e.key === "Escape") { close(box); if (last) last.focus(); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      var q = e.target.value.trim().toLowerCase();
+      var shown = Array.prototype.filter.call(box.querySelectorAll(".wi-ins-i"), function (b) { return !b.hidden && b.closest(".wi-ins-g").style.display !== "none" && !b.closest(".wi-ins-g").hidden; });
+      var rank = function (b) { var t = b.textContent.trim().toLowerCase(); return t === q ? 0 : t.indexOf(q) === 0 ? 1 : 2; };   // exact, then starts with
+      shown.sort(function (a, b) { return rank(a) - rank(b); });
+      if (shown[0]) shown[0].click();
+    }
+  });
 })();

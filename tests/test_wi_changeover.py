@@ -136,7 +136,7 @@ class ChangeoverFromInstructions(TestCase):
         cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
         r = cl.get(f"/instructions/{x.pk}/")
         self.assertContains(r, "data-wi-add=\"step\"")
-        self.assertContains(r, "data-wi-var")
+        self.assertContains(r, "data-wi-ins-open")                         # Insert variable, by Save
         self.assertContains(r, "Pleat height (mm)")
         self.assertContains(r, "instructions/wi.js")
         r = cl.post(f"/instructions/{x.pk}/preview", {"rev": x.draft().pk, "part": "NOPE1"})
@@ -247,7 +247,7 @@ class ParametersInSteps(TestCase):
         r = engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "Set {Screw hieght}"}], "params": self.params},
                            engine.Ctx(user=self.lead))
         self.assertFalse(r["ok"])
-        self.assertIn("Step 1: {Screw hieght}: there's no parameter called Screw hieght", r["error"])
+        self.assertIn("Step 1: {Screw hieght}: there's no parameter or filter value called Screw hieght", r["error"])
         self.assertFalse(engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "x {[Nope] + 1}"}], "params": self.params},
                                         engine.Ctx(user=self.lead))["ok"])
         self.assertTrue(engine.execute("wiSave", {"id": self.x.pk, "steps": [{"text": "Set the screws to {Screw height}"}],
@@ -286,7 +286,7 @@ class ParametersInSteps(TestCase):
         cl = Client()
         cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
         r = cl.get(f"/instructions/{self.x.pk}/")
-        for bit in ("data-wi-preview", "data-wi-savebar", "data-wi-dirty", "data-wi-param", "data-wi-modal"):
+        for bit in ("data-wi-preview", "data-wi-savebar", "data-wi-dirty", "data-wi-ins-open", "data-wi-modal"):
             self.assertContains(r, bit)
         self.assertNotContains(r, 'method="get" class="wi-try"')              # the old Work out form (it left the page)
 
@@ -536,3 +536,95 @@ class OneSaveAndCatalog(TestCase):
         r = self.cl.get("/quality/?tab=viewer&new=1")
         self.assertContains(r, "/quality/viewer/app/?&amp;new=1")
         self.assertContains(self.cl.get("/quality/viewer/app/?new=1"), '"newModel": true')
+
+
+class CommaLists(TestCase):
+    def test_any_of_and_none_of(self):
+        vals = {"side a thickness (mm)": 2.5, "glue": "PUR"}
+        self.assertTrue(formula.condition("[Side A thickness (mm)] = 2, 2.5, 3", vals)[0])
+        self.assertFalse(formula.condition("[Side A thickness (mm)] <> 2, 2.5", vals)[0])
+        self.assertTrue(formula.condition('[Glue] = "hot melt", "pur"', vals)[0])
+        self.assertTrue(formula.condition('([Glue] = "x", "y") or [Side A thickness (mm)] > 2', vals)[0])
+        self.assertIn("A comma only lists values", formula.condition("[Glue], 2", vals)[2])
+        self.assertEqual(formula.evaluate("round([Side A thickness (mm)] / 3, 2)", vals)[0], 0.83)   # commas in round() as before
+
+
+class StepsForTheChange(NoteCardsAndAlsoRead):
+    """{Screw #:was}, steps only when something changes, special cards placed between steps, text settings."""
+    def lib(self, key, **info):
+        FilterModel3D.objects.update_or_create(pid=key, defaults={"part": key, "data": {"info": info, "config": {
+            "P": {"ph": 30, "pc": 30, "pp": 8}, "ui": {"side_c_on": True}, "groups": {"side": {"bands": [{"sb": 30, "bt": 2}, {"sb": 30, "bt": 2}]}}}}})
+
+    def test_was_unchanged_and_cards_between_steps(self):
+        self.lib(self.key, screw="9.2", helix="24/32")
+        card = self.wi("note", "Wide guide", condition="[Pleat height (mm)] = 30", steps=("Use the wide guide",))
+        self.wi("note", "Never", condition="[Pleat height (mm)] = 99", steps=("Not this one",))
+        r = engine.execute("wiCreate", {"title": "P7", "kind": "changeover"}, engine.Ctx(user=self.lead))
+        x = Instruction.objects.get(pk=r["data"]["id"])
+        res = engine.execute("wiSave", {"id": x.pk, "change_note": "x", "params": [{"name": "Helix size", "target": "[Helix #]"}], "steps": [
+            {"text": "Pull out the {Screw #:was} screws and install the {Screw #} screws", "watch": "Screw #", "same": "Leave the {Screw #} screws in"},
+            {"card": card.doc_no},
+            {"text": "Helix {Helix size}", "watch": "Helix #"},                 # same helix: skipped
+            {"card": "WI-999"}]}, engine.Ctx(user=self.lead))
+        self.assertIn("there's no special note card WI-999", res["error"])
+        res = engine.execute("wiSave", {"id": x.pk, "change_note": "x", "params": [{"name": "Helix size", "target": "[Helix #]"}], "steps": [
+            {"text": "Pull out the {Screw #:was} screws and install the {Screw #} screws", "watch": "Screw #", "same": "Leave the {Screw #} screws in"},
+            {"card": card.doc_no},
+            {"text": "Helix {Helix size}", "watch": "Helix #"}]}, engine.Ctx(user=self.lead))
+        self.assertTrue(res["ok"], res)
+        engine.execute("wiApprove", {"id": x.pk}, engine.Ctx(user=self.admin))
+        from instructions.formula import fill_steps
+        r = x.current()
+        steps, params = fill_steps(r.steps, r.params, self.key, "OLD1")
+        self.assertEqual(steps[0]["text"], "Pull out the (not on file: Screw #) screws and install the 9.2 screws")   # OLD1 not in the library
+        self.lib("OLD1", screw="8.1", helix="24/32")
+        steps, params = fill_steps(r.steps, r.params, self.key, "OLD1")
+        self.assertEqual([s["text"] for s in steps], ["Pull out the 8.1 screws and install the 9.2 screws", "Special note: Wide guide"])
+        self.assertEqual(steps[1]["note"]["lines"][0]["text"], "Use the wide guide")
+        self.assertEqual(params[0]["target"], "24/32")                        # a text setting
+        self.lib("OLD2", screw="9.2", helix="18/24")
+        steps, _ = fill_steps(r.steps, r.params, self.key, "OLD2")
+        self.assertEqual([s["text"] for s in steps], ["Leave the 9.2 screws in", "Special note: Wide guide", "Helix 24/32"])
+        steps, _ = fill_steps(r.steps, r.params, self.key)                    # no filter before: every step as written
+        self.assertEqual(len(steps), 3)
+        # on the kiosk: the card is ticked in place, and not repeated at the top
+        self.assertTrue(self.cmd("coPick", {"mo": "306785"})["ok"])
+        co = self.sh().co
+        self.assertEqual([s.get("note", {}).get("doc") for s in co["steps"]].count(card.doc_no), 1)
+
+    def test_editor_has_the_new_step_kinds(self):
+        r = engine.execute("wiCreate", {"title": "P7", "kind": "changeover"}, engine.Ctx(user=self.lead))
+        self.wi("note", "Wide guide", condition="[Pleat height (mm)] = 30")
+        cl = Client()
+        cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+        html = cl.get(f"/instructions/{r['data']['id']}/").content.decode()
+        for bit in ('data-wi-add="card"', 'id="wi-tpl-card"', 'name="s_watch"', 'name="s_same"', "Wide guide", "data-wi-from"):
+            self.assertIn(bit, html)
+
+
+class AnimatedGifs(TestCase):
+    def test_kept_moving_with_a_still_thumbnail(self):
+        import io
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from PIL import Image
+        seed_demo(reset=True)
+        lead = Person.objects.filter(role="lead").first()
+        x = Instruction.objects.get(pk=engine.execute("wiCreate", {"title": "Gif", "kind": "changeover"}, engine.Ctx(user=lead))["data"]["id"])
+        frames = [Image.new("RGB", (40, 30), c) for c in ("red", "green", "blue")]
+        b = io.BytesIO()
+        frames[0].save(b, "GIF", save_all=True, append_images=frames[1:], duration=200, loop=0)
+        still = io.BytesIO()
+        frames[0].save(still, "GIF")
+        cl = Client()
+        cl.post("/api/hmi/login", json.dumps({"pin": "9999"}), content_type="application/json")
+        cl.post("/instructions/do/wiSave", {"id": x.pk, "s_text": ["Watch this"], "s_caution": [""], "p_name": [""], "change_note": "x",
+                                            "s_files_0": [SimpleUploadedFile("move.gif", b.getvalue(), content_type="image/gif"),
+                                                          SimpleUploadedFile("still.gif", still.getvalue(), content_type="image/gif")]})
+        from instructions.models import Media
+        moving, flat = Media.objects.get(name="move.gif"), Media.objects.get(name="still.gif")
+        self.assertEqual((moving.content_type, flat.content_type), ("image/gif", "image/jpeg"))   # a one-frame GIF is just a picture
+        r = cl.get(f"/instructions/media/{moving.pk}")
+        self.assertEqual((r["Content-Type"], r.content[:6]), ("image/gif", b"GIF89a"))
+        self.assertEqual(cl.get(f"/instructions/media/{moving.pk}?size=thumb")["Content-Type"], "image/jpeg")
+        self.assertEqual(len(x.draft().steps[0]["media"]), 2)

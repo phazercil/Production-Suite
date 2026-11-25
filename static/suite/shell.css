@@ -19,14 +19,14 @@
 .num,.tnum,time{font-variant-numeric:tabular-nums}
 /* one status vocabulary, each with its own icon and word, never colour alone:
    OK · WARNING · STALE · OFFLINE · FAILED · HELD · RUNNING · DISABLED */
-.stat{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;border:1px solid;font:700 11px/1.6 var(--s-body);
+.sbadge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;border:1px solid;font:700 11px/1.6 var(--s-body);
   letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;vertical-align:middle}
-.stat i{font-style:normal;font-size:12px;line-height:1}
-.stat-ok,.stat-running{color:var(--s-ok-ink);background:var(--s-ok-bg);border-color:var(--s-ok)}
-.stat-warning,.stat-stale,.stat-held{color:var(--s-warn-ink);background:var(--s-warn-bg);border-color:var(--s-warn)}
-.stat-failed,.stat-offline{color:var(--s-bad-ink);background:var(--s-bad-bg);border-color:var(--s-bad)}
-.stat-disabled,.stat-na{color:var(--s-idle-ink);background:var(--s-idle-bg);border-color:var(--s-idle)}
-.stat-info{color:var(--s-info-ink);background:var(--s-info-bg);border-color:var(--s-info)}
+.sbadge i{font-style:normal;font-size:12px;line-height:1}
+.sbadge-ok,.sbadge-running{color:var(--s-ok-ink);background:var(--s-ok-bg);border-color:var(--s-ok)}
+.sbadge-warning,.sbadge-stale,.sbadge-held{color:var(--s-warn-ink);background:var(--s-warn-bg);border-color:var(--s-warn)}
+.sbadge-failed,.sbadge-offline{color:var(--s-bad-ink);background:var(--s-bad-bg);border-color:var(--s-bad)}
+.sbadge-disabled,.sbadge-na{color:var(--s-idle-ink);background:var(--s-idle-bg);border-color:var(--s-idle)}
+.sbadge-info{color:var(--s-info-ink);background:var(--s-info-bg);border-color:var(--s-info)}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body.suite{display:flex;flex-direction:column;background:var(--s-ground);color:var(--s-ink);font-family:var(--s-body)}

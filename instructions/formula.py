@@ -3,7 +3,8 @@
 viewer, kept in the suite): its settings (numbers in mm, yes/no as 1 / 0, text) and the filter's size (overall length,
 width, height) as the viewer works it out. The drawing is only a picture: nothing is read from it.
 
-Conditions (Show when / Not for filters where) also compare: = <> < > <= >=, and / or / not, "text".
+Conditions (Show when / Not for filters where) also compare: = <> < > <= >=, and / or / not, "text", and lists:
+[Glue] = "hot melt", "PUR" is any of them; [Side A thickness (mm)] <> 2, 3 is none of them.
 Only that and arithmetic are worked out: numbers, [variables], + - * / ^ (or **), brackets and round(), min(), max(),
 abs(), ceil(), floor(). Nothing else is run. A formula whose variable the part doesn't have gives no value (shown as missing), never a guess."""
 import ast
@@ -63,8 +64,8 @@ def variables():
             out.append({"name": c["h"], "key": f"3d.{c['db']}", "src": "3d", "group": f"3D viewer · {c['group']}", "type": kind,
                         "path": c.get("key", "")})
     for k, lbl in TOL_VARS:
-        out.append({"name": f"{lbl} plus (mm)", "key": f"tol.{k}.plus", "src": "3d", "group": "3D viewer · Info", "type": "number"})
-        out.append({"name": f"{lbl} minus (mm)", "key": f"tol.{k}.minus", "src": "3d", "group": "3D viewer · Info", "type": "number"})
+        out.append({"name": f"{lbl} plus (mm)", "key": f"tol.{k}.plus", "src": "3d", "group": "3D viewer · Tolerances as numbers", "type": "number"})
+        out.append({"name": f"{lbl} minus (mm)", "key": f"tol.{k}.minus", "src": "3d", "group": "3D viewer · Tolerances as numbers", "type": "number"})
     out += [{"name": f"Info sheet · {lbl}", "key": f"extra.{_norm(lbl)}", "src": "3d", "group": "3D viewer · Info sheet rows added",
              "type": "text"} for lbl in _extra_labels()]
     seen, uniq = set(), []
@@ -163,6 +164,33 @@ def values_for(part):
     return vals
 
 
+class _ListCompare(ast.NodeTransformer):
+    """[Glue] = "hot melt", "PUR" means any of them (and <> means none of them): Python reads the commas as a tuple
+    whose first item is the comparison, so it becomes a membership test of the value against the whole list."""
+    def visit_Tuple(self, node):
+        self.generic_visit(node)
+        first, rest = node.elts[0] if node.elts else None, node.elts[1:]
+        if (isinstance(first, ast.Compare) and len(first.ops) == 1 and isinstance(first.ops[0], (ast.Eq, ast.NotEq)) and rest
+                and all(_literal(e) for e in rest)):
+            op = ast.In() if isinstance(first.ops[0], ast.Eq) else ast.NotIn()
+            return ast.copy_location(ast.Compare(left=first.left, ops=[op],
+                                                 comparators=[ast.Tuple(elts=[first.comparators[0], *rest], ctx=ast.Load())]), node)
+        raise FormulaError("A comma only lists values after = or <>, e.g. [Glue] = \"hot melt\", \"PUR\".")
+
+
+def _literal(e):
+    return isinstance(e, ast.Constant) or (isinstance(e, ast.UnaryOp) and isinstance(e.op, ast.USub) and isinstance(e.operand, ast.Constant))
+
+
+def _lists(tree):
+    """Comma lists in a condition (see _ListCompare). Commas inside round(…, 1) or max(…, …) are left alone."""
+    class Skip(_ListCompare):
+        def visit_Call(self, node):
+            node.args = [self.visit(a) if not isinstance(a, ast.Tuple) else a for a in node.args]
+            return node
+    return ast.fix_missing_locations(Skip().visit(tree))
+
+
 def _parse(expr):
     """The formula as a checked expression tree, with [names] replaced by placeholders: (tree, {placeholder: name})."""
     s = str(expr or "").strip()
@@ -192,10 +220,11 @@ def _parse(expr):
         tree = ast.parse(py, mode="eval")
     except SyntaxError:
         raise FormulaError("That isn't a formula the suite can work out (numbers, [variables], + - * / ^ and brackets).") from None
+    tree = _lists(tree)
     for node in ast.walk(tree):
         if isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod,
                              ast.USub, ast.UAdd, ast.Not, ast.BoolOp, ast.And, ast.Or, ast.Compare, ast.Eq, ast.NotEq,
-                             ast.Lt, ast.LtE, ast.Gt, ast.GtE)):
+                             ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Tuple)):
             continue
         if isinstance(node, ast.Constant) and isinstance(node.value, (int, float, str)) and not isinstance(node.value, bool):
             continue
@@ -248,6 +277,9 @@ def _eval(node, env):
         return 1.0 if (all(vals) if isinstance(node.op, ast.And) else any(vals)) else 0.0
     if isinstance(node, ast.Compare):
         left = _eval(node.left, env)
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)) and isinstance(node.comparators[0], ast.Tuple):
+            hit = any(_compare(ast.Eq(), left, _eval(e, env)) for e in node.comparators[0].elts)
+            return 1.0 if hit == isinstance(node.ops[0], ast.In) else 0.0
         for op, right_node in zip(node.ops, node.comparators):
             right = _eval(right_node, env)
             if not _compare(op, left, right):
@@ -326,8 +358,9 @@ def condition(expr, vals):
         return None, [], f"Can't be checked ({e})."
 
 
-def evaluate(expr, vals):
-    """(number or None, [missing variable names], error or ""): a plain number is itself."""
+def evaluate(expr, vals, allow_text=False):
+    """(number or None, [missing variable names], error or ""): a plain number is itself. With allow_text, a formula
+    that comes out as text (a parameter set to [Helix #], "24/32") gives that text."""
     n = _num(str(expr or "").strip())
     if n is not None:
         return n, [], ""
@@ -341,6 +374,8 @@ def evaluate(expr, vals):
         return None, [byname.get(m, m) for m in missing], ""
     try:
         v = _eval(tree, {k: vals[n] for k, n in slots.items()})
+        if isinstance(v, str) and allow_text:
+            return v, [], ""
         if isinstance(v, str):
             raise FormulaError(f"Works out to text (\"{v}\"), not a number.")
     except FormulaError as e:
@@ -371,8 +406,8 @@ def resolve_params(params, part):
             if not raw:
                 row[k], row["f_" + k] = "", ""
                 continue
-            v, miss, err = evaluate(raw, vals)
-            row[k] = fmt(v)
+            v, miss, err = evaluate(raw, vals, allow_text=True)   # a setting can be text: [Helix #] → 24/32
+            row[k] = v if isinstance(v, str) else fmt(v)
             row["f_" + k] = raw if is_formula(raw) else ""
             row["missing"] += [m for m in miss if m not in row["missing"]]
             row["err"] = row["err"] or err
@@ -380,50 +415,63 @@ def resolve_params(params, part):
     return out
 
 
-# Parameters (and formulas) inside a step's text: "Set the screws to {Screw height}" shows "Set the screws to 31.5 mm".
-# {Name} is the parameter's target with its unit; {Name:min}, {Name:max} and {Name:range} its limits;
-# {[Pleat height (mm)] + 1} works a formula out on the spot (a number, no unit).
-PLACE = __import__("re").compile(r"\{([^{}\n]{1,200})\}")
-PARTS = {"": "target", "target": "target", "min": "min", "max": "max", "range": "range"}
+# Parameters, the filter's data and formulas inside a step's text: "Set the screws to {Screw height}" shows
+# "Set the screws to 31.5 mm". {Name} is a parameter's target with its unit, or the filter's own value for one of the
+# variables ({Screw #}); {Name:min}, {Name:max} and {Name:range} a parameter's limits; {Name:was} the value for the
+# filter the machine is changing from; {[Pleat height (mm)] + 1} works a formula out on the spot (a number, no unit).
+PLACE = re.compile(r"\{([^{}\n]{1,200})\}")
+PARTS = {"target": "target", "min": "min", "max": "max", "range": "range"}
 
 
 def _split(ref):
-    name, _, part = ref.rpartition(":") if ":" in ref else (ref, "", "")
-    if ":" in ref and part.strip().lower() in PARTS:
-        return name.strip(), PARTS[part.strip().lower()]
-    return ref.strip(), "target"
+    """{Name:range:was} → ("Name", "range", True). A colon that isn't one of these stays part of the name."""
+    bits = [b.strip() for b in ref.split(":")]
+    flags = [b.lower() for b in bits[1:]]
+    if bits[1:] and all(f in PARTS or f == "was" for f in flags):
+        return bits[0], next((PARTS[f] for f in flags if f in PARTS), "target"), "was" in flags
+    return ref.strip(), "target", False
 
 
 def check_text(text, param_names):
-    """Raise FormulaError for a {…} in a step that isn't one of the parameters or a working formula."""
-    names = {_norm(n) for n in param_names if n}
+    """Raise FormulaError for a {…} in a step that isn't a parameter, one of the filter's variables or a formula."""
+    names = {_norm(n) for n in param_names if n} | {_norm(v["name"]) for v in variables()}
     for m in PLACE.finditer(str(text or "")):
         ref = m.group(1)
         if "[" in ref:
             check(ref)
             continue
-        name, _ = _split(ref)
+        name, _, _ = _split(ref)
         if _norm(name) not in names:
-            raise FormulaError(f"{{{ref}}}: there's no parameter called {name}. Use one of the parameters below, "
-                               "e.g. {" + (sorted(param_names)[0] if param_names else "Screw height") + "}.")
+            raise FormulaError(f"{{{ref}}}: there's no parameter or filter value called {name}. Use Insert variable to pick one, "
+                               "e.g. {" + (sorted(param_names)[0] if param_names else "Screw #") + "}.")
 
 
-def fill_text(text, resolved, vals=None):
-    """A step's text with each {…} replaced by its value for the part (resolved = resolve_params for it). A value the
-    part doesn't have reads "(not on file: …)": the step still shows, never a guessed number."""
-    by = {_norm(p["name"]): p for p in resolved or []}
+class Filled:
+    """A filter's worked-out values for steps: its parameters (resolved) and its own data (vals)."""
+    def __init__(self, params, part):
+        self.part = part or ""
+        self.resolved = resolve_params(params, self.part) if self.part else resolve_params(params, "")
+        self._vals = None
+        self.by = {_norm(p["name"]): p for p in self.resolved}
 
-    def one(m):
-        ref = m.group(1)
-        if "[" in ref:
-            v, missing, err = evaluate(ref, vals if vals is not None else {})
-            if missing:
-                return f"(not on file: {', '.join(missing)})"
-            return fmt(v) if v is not None else f"({err or 'can’t be worked out'})"
-        name, part = _split(ref)
-        p = by.get(_norm(name))
-        if not p:
-            return m.group(0)
+    @property
+    def vals(self):
+        if self._vals is None:
+            self._vals = values_for(self.part) if self.part else {}
+        return self._vals
+
+    def raw(self, name):
+        """The value to compare (a parameter's target, else the filter's value): None when unknown."""
+        p = self.by.get(_norm(name))
+        if p is not None:
+            return None if p.get("missing") or p.get("err") or not p.get("target") else (_num(p["target"]) if _num(p["target"]) is not None else p["target"])
+        return self.vals.get(_norm(name))
+
+
+def _show(name, part, f):
+    """One {Name…} for one filter, as text."""
+    p = f.by.get(_norm(name))
+    if p is not None:
         unit = f" {p['unit']}" if p.get("unit") else ""
         if p.get("missing"):
             return f"(not on file: {', '.join(p['missing'])})"
@@ -433,13 +481,94 @@ def fill_text(text, resolved, vals=None):
         else:
             val = p.get(part) or ""
         return f"{val}{unit}" if val else f"({p['name']}: no {('value' if part == 'target' else part)} set)"
+    byname = {_norm(x["name"]): x["name"] for x in variables()}
+    if not f.part or _norm(name) not in byname:
+        return None   # not a parameter or one of the filter's values: left as written
+    v = f.vals.get(_norm(name))
+    if v is None:
+        return f"(not on file: {byname[_norm(name)]})"
+    return fmt(v) if not isinstance(v, str) else v
+
+
+def fill_text(text, resolved, vals=None, old=None, now=None):
+    """A step's text with each {…} replaced by its value for the part. A value the part doesn't have reads "(not on
+    file: …)": the step still shows, never a guessed number. {Name:was} is the value for the filter changed from (old)."""
+    if now is None:   # called with resolved params and vals directly
+        now = Filled([], "")
+        now.resolved, now.by, now._vals = resolved or [], {_norm(p["name"]): p for p in resolved or []}, vals if vals is not None else {}
+        now.part = "x" if vals else ""
+
+    def one(m):
+        ref = m.group(1)
+        if "[" in ref:
+            v, missing, err = evaluate(ref, now.vals)
+            if missing:
+                return f"(not on file: {', '.join(missing)})"
+            return fmt(v) if v is not None else f"({err or 'can’t be worked out'})"
+        name, part, was = _split(ref)
+        if was:
+            if old is None or not old.part:
+                return "(the filter before isn't known)"
+            got = _show(name, part, old)
+        else:
+            got = _show(name, part, now)
+        return m.group(0) if got is None else got
     return PLACE.sub(one, str(text or ""))
 
 
-def fill_steps(steps, params, part):
-    """Steps with their {…} filled in for a part, and the parameters worked out: (steps, resolved)."""
-    resolved = resolve_params(params, part)
-    need_vals = any("[" in m.group(1) for s in steps for m in PLACE.finditer(str(s.get("text") or "") + str(s.get("caution") or "")))
-    vals = values_for(part) if need_vals else {}
-    return [{**s, "text": fill_text(s.get("text"), resolved, vals), "caution": fill_text(s.get("caution"), resolved, vals)}
-            for s in steps], resolved
+def same_value(name, now, old):
+    """Is this parameter / filter value the same for the new filter and the one before? None when either isn't known."""
+    a, b = now.raw(name), old.raw(name) if old else None
+    if a is None or b is None:
+        return None
+    try:
+        return _compare(ast.Eq(), a, b)
+    except FormulaError:
+        return None
+
+
+def fill_steps(steps, params, part, old_part=None, cards=True):
+    """Steps worked out for a part (and the one before it, when changing over), and the parameters: (steps, resolved).
+    - {…} filled in;
+    - a special card step shows its card here only when the filter meets the card's conditions (or they can't be
+      checked: shown, marked), else it's left out;
+    - a step set to "only if it changes" uses its other wording (or is left out) when the value is the same."""
+    now = Filled(params, part)
+    old = Filled(params, old_part) if old_part else None
+    out = []
+    for s in steps:
+        if s.get("card"):
+            if not cards:
+                continue
+            c = card_step(s["card"], part, old_part) if part else None
+            if c:
+                out.append({**c, "media": c.get("media") or []})
+            continue
+        s = dict(s)
+        if s.get("watch") and old is not None:
+            same = same_value(s["watch"], now, old)
+            if same:
+                if not str(s.get("same") or "").strip():
+                    continue
+                s["text"], s["caution"], s["unchanged"] = s["same"], "", True
+        out.append({**s, "text": fill_text(s.get("text"), None, old=old, now=now),
+                    "caution": fill_text(s.get("caution"), None, old=old, now=now)})
+    return out, now.resolved
+
+
+def card_step(doc, part, old_part=None):
+    """A special note card (by its WI number) as a step for this filter: None when it's not for it (or not approved)."""
+    from .cmds import _Vals, applies
+    from .models import Instruction
+    x = Instruction.objects.filter(doc_no=doc, kind="note", active=True).first()
+    r = x.current() if x else None
+    if not r:
+        return None
+    ok, missing = applies(x, part, _Vals(part))
+    if ok is False:
+        return None
+    lines, _ = fill_steps(r.steps, r.params, part, old_part, cards=False)
+    return {"text": f"Special note: {x.title}", "caption": x.title,
+            "media": [m for ln in lines for m in ln.get("media") or []],
+            "note": {"id": x.pk, "doc": x.doc_no, "title": x.title, "rev": r.pk, "unchecked": missing if ok is None else [],
+                     "lines": [{"text": ln.get("text") or "", "caution": ln.get("caution") or ""} for ln in lines]}}

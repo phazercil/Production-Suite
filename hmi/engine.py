@@ -1045,7 +1045,7 @@ def load_changeover_steps(sh, co):
     co.pop("wi", None)
     x, r = changeover_for(sh.machine, new.part if new else "", co["inkjet"])
     if r:
-        steps, sets, wi = changeover_checklist(x, r, new.part if new else "")
+        steps, sets, wi = changeover_checklist(x, r, new.part if new else "", old.part if old else "")
         co.update({"steps": steps, "settings": sets, "src": "wi", "wi": wi, "err": ""})
     elif co["inkjet"]:   # same base part: only the inkjet branding changes
         co.update({"steps": [{"text": t} for t in machine_list("inkjetSteps", sh.line)], "settings": [], "src": "inkjet", "err": ""})
@@ -1053,7 +1053,8 @@ def load_changeover_steps(sh, co):
         co.update({"steps": [{"text": t} for t in machine_list("coSteps", sh.line)], "settings": [], "src": "admin", "err": ""})
     # special note cards for this filter (e.g. its 2 mm side bands) come first, each ticked like a step
     part = new.part if new else ""
-    co["steps"] = note_cards(sh.machine, part) + co["steps"]
+    inline = {s["card"] for s in (r.steps if r else []) if s.get("card")}
+    co["steps"] = note_cards(sh.machine, part, old.part if old else "", inline) + co["steps"]
     co["alsoRead"] = also_read(sh.machine, part, x if r else None)
 
 

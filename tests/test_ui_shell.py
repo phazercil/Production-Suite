@@ -58,6 +58,6 @@ class Bar(TestCase):
 class Stat(TestCase):
     def test_word_and_icon_not_colour_alone(self):
         out = Template('{% load suite %}{% stat "stale" %}|{% stat "bogus" %}|{% stat "ok" "Connected" %}').render(Context())
-        self.assertIn('class="stat stat-stale"><i aria-hidden="true">◷</i>STALE', out)
-        self.assertIn('stat-na"><i aria-hidden="true">?</i>NOT AVAILABLE', out)
+        self.assertIn('class="sbadge sbadge-stale"><i aria-hidden="true">◷</i>STALE', out)
+        self.assertIn('sbadge-na"><i aria-hidden="true">?</i>NOT AVAILABLE', out)
         self.assertIn("✓</i>Connected", out)

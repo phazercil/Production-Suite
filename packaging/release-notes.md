@@ -1,3 +1,33 @@
+## What's new in 1.9.17
+
+**Admin has a sidebar.**
+- **Grouped pages:** Plant setup, Integrations, People & access, Monitoring, Notifications and System. Each group opens and closes, and the page you're on is marked.
+- **More room:** **Pages** hides the sidebar on a desktop. On a tablet it slides in as a drawer. This screen remembers your choice.
+- **Find a setting:** type in the box at the top of the sidebar (or press **Ctrl+K**, or **/**). It searches page names, what each page is for and common words like "timeout", "PIN" or "rollback". Arrow keys and Enter go straight to the page.
+- **Where you are:** each page shows a "you are here" line (Admin › Plant setup › Rules), its name and a line on what it's for.
+- **People & PINs:** under People & access, it goes to the Team page, where people and their PINs are set.
+- **Same as before:** every address works (/admin/backup/ and the rest), and every page is still there with the same permissions.
+
+**Work instructions.**
+- **Insert variable:** a button beside Save replaces the separate dropdowns. It opens one searchable list with this instruction's parameters and the filter's data, and puts your pick into the field you were last in, written the way that field takes it:
+  - `[Pleat height (mm)]` in a Target, Min or Max box or a condition;
+  - `{Screw height}` or `{[Pleat height (mm)]}` in a step.
+- **Lists in conditions:** Show when and Not for filters where take comma lists.
+  - `[Side A thickness (mm)] = 2, 2.5, 3` means any of them.
+  - `[Glue] <> "PUR", "hot melt"` means none of them.
+  - Parts, Except parts and Also read already took commas.
+- **Special cards between steps:** **⚑ + Add special card** places one of your Special note cards at a point in the steps.
+  - **When it shows:** only for filters that meet the card's own Show when; otherwise that step is skipped.
+  - **On the kiosk:** it's ticked in place and not repeated at the top of the checklist.
+- **What was on the machine before:**
+  - **The old value:** in a step, `{Screw #:was}` is the value for the filter the machine is changing from, so "Pull out the {Screw #:was} screws and install the {Screw #} screws" reads "Pull out the 8.1 screws and install the 9.2 screws".
+  - **Only if it changes:** each step has this option. Pick what to compare (e.g. Screw # or Side A height (mm)) and what to say when it's the same ("Leave the {Side A height (mm)} side bands on the machine"). Leave that blank and the step is skipped when nothing changes.
+  - **Preview:** it has a **Changing from** box to check all this.
+- **Filter values by name:** `{Screw #}`, `{Helix #}` and the filter's other values can go straight into a step.
+- **Animated GIFs:** they stay animated on steps, the kiosk and the preview. Their thumbnail in the editor is the first frame.
+- **Preview layout:** the step comes first and bigger (larger text and pictures), with the settings below it.
+- **Text settings:** a parameter can be text from the filter (Helix Size = `[Helix #]` → 24/32), which used to show an error.
+
 ## What's new in 1.9.16
 
 **Work instructions.**

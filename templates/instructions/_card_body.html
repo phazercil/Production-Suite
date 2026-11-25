@@ -1,0 +1,3 @@
+<div class="wicard"><div class="wicard-h">⚑ Special note · {{ s.note.title }} <span class="wicard-doc">{{ s.note.doc }}</span></div>
+  {% if s.note.unchecked %}<div class="wicard-u">Shown because it couldn't be checked for this filter: {{ s.note.unchecked|join:", " }} not on file.</div>{% endif %}
+  {% for l in s.note.lines %}{% if l.caution %}<div class="wi-kcaution wi-caution">⚠ {{ l.caution }}</div>{% endif %}<div>{{ l.text|linebreaksbr }}</div>{% endfor %}</div>

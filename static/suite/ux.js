@@ -280,3 +280,110 @@ document.addEventListener("htmx:afterSettle", function () {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fit); else fit();
   window.addEventListener("resize", fit);
 })();
+// Admin: the sidebar (groups open or closed, the sidebar shown or hidden; a drawer on narrow screens, remembered on
+// this screen), and finding a page by name or what it's for (Ctrl+K or / to search, arrows and Enter to go)
+(function () {
+  "use strict";
+  function get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function put(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window: not remembered */ } }
+  function narrow() { return window.matchMedia("(max-width:1000px)").matches; }
+  function apply() {
+    var adm = document.querySelector("[data-adm]");
+    if (!adm) return;
+    var closed = get("adm.closed").split(",");
+    adm.querySelectorAll("[data-adm-g]").forEach(function (g) {
+      var here = g.querySelector(".adm-i.on");
+      g.open = !!here || closed.indexOf(g.getAttribute("data-adm-g")) < 0;
+    });
+    adm.classList.toggle("adm-collapsed", !narrow() && get("adm.side") === "off");
+    var t = adm.querySelector("[data-adm-toggle]");
+    if (t) t.setAttribute("aria-expanded", String(narrow() ? adm.classList.contains("adm-drawer") : !adm.classList.contains("adm-collapsed")));
+  }
+  document.addEventListener("toggle", function (e) {
+    var g = e.target;
+    if (!g.matches || !g.matches("[data-adm-g]")) return;
+    var key = g.getAttribute("data-adm-g"), closed = get("adm.closed").split(",").filter(function (k) { return k && k !== key; });
+    if (!g.open) closed.push(key);
+    put("adm.closed", closed.join(","));
+  }, true);
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest && e.target.closest("[data-adm-toggle]");
+    var adm = document.querySelector("[data-adm]");
+    if (!adm) return;
+    if (t) {
+      if (narrow()) adm.classList.toggle("adm-drawer");
+      else { adm.classList.toggle("adm-collapsed"); put("adm.side", adm.classList.contains("adm-collapsed") ? "off" : "on"); }
+      apply();
+      if (adm.classList.contains("adm-drawer")) { var f = adm.querySelector("[data-adm-find]"); if (f) f.focus(); }
+      return;
+    }
+    if (adm.classList.contains("adm-drawer") && (e.target.closest(".adm-i") || !e.target.closest(".adm-side"))) adm.classList.remove("adm-drawer");
+  });
+
+  // ---- search
+  var at = 0;
+  function score(el, q) {
+    var name = el.textContent.trim().toLowerCase(), rest = ((el.getAttribute("data-adm-desc") || "") + " " + (el.getAttribute("data-adm-words") || "") + " " +
+      (el.getAttribute("data-adm-group") || "") + " " + (el.getAttribute("title") || "")).toLowerCase();
+    var words = q.split(/\s+/).filter(Boolean);
+    if (!words.every(function (w) { return name.indexOf(w) >= 0 || rest.indexOf(w) >= 0; })) return 0;
+    return name.indexOf(q) === 0 ? 3 : name.indexOf(q) >= 0 ? 2 : 1;
+  }
+  function hits(input) {
+    var box = document.querySelector("[data-adm-hits]"), q = input.value.trim().toLowerCase();
+    if (!box) return [];
+    box.textContent = "";
+    if (!q) { box.hidden = true; input.setAttribute("aria-expanded", "false"); return []; }
+    var found = Array.prototype.slice.call(document.querySelectorAll(".adm-side .adm-i"))
+      .map(function (el) { return { el: el, s: score(el, q) }; }).filter(function (x) { return x.s; })
+      .sort(function (a, b) { return b.s - a.s; }).slice(0, 8);
+    if (at >= found.length) at = 0;
+    found.forEach(function (x, i) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "adm-hit"; b.setAttribute("role", "option"); b.setAttribute("aria-selected", String(i === at));
+      var g = document.createElement("span"); g.className = "g"; g.textContent = x.el.getAttribute("data-adm-group") || "Admin";
+      var n = document.createElement("b"); n.textContent = x.el.textContent.replace("↗", "").trim();
+      var d = document.createElement("small"); d.textContent = x.el.getAttribute("data-adm-desc") || x.el.getAttribute("title") || "";
+      b.appendChild(g); b.appendChild(n); b.appendChild(d);
+      b.addEventListener("click", function () { go(x.el, input); });
+      box.appendChild(b);
+    });
+    if (!found.length) { var none = document.createElement("div"); none.className = "none"; none.textContent = "No Admin page matches “" + input.value.trim() + "”."; box.appendChild(none); }
+    box.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    return found;
+  }
+  function go(el, input) {
+    input.value = "";
+    hits(input);
+    if (el.tagName === "A") { location.href = el.href; return; }
+    el.click();
+  }
+  document.addEventListener("input", function (e) { if (e.target.matches && e.target.matches("[data-adm-find]")) { at = 0; hits(e.target); } });
+  document.addEventListener("keydown", function (e) {
+    var input = e.target.matches && e.target.matches("[data-adm-find]") ? e.target : null;
+    if (input) {
+      var found = hits(input);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); at = (at + (e.key === "ArrowDown" ? 1 : -1) + Math.max(found.length, 1)) % Math.max(found.length, 1); hits(input); }
+      else if (e.key === "Enter") { e.preventDefault(); if (found[at]) go(found[at].el, input); }
+      else if (e.key === "Escape") { input.value = ""; hits(input); input.blur(); }
+      return;
+    }
+    // Ctrl+K (⌘K on a Mac) finds an Admin page, only while Admin is open
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "k" || e.key === "K")) {
+      var adm = document.querySelector("[data-adm]"), f = adm && adm.querySelector("[data-adm-find]");
+      if (!f) return;
+      e.preventDefault();
+      if (narrow()) adm.classList.add("adm-drawer");
+      f.focus(); f.select();
+    }
+    if (e.key === "Escape") { var d = document.querySelector(".adm.adm-drawer"); if (d) d.classList.remove("adm-drawer"); }
+  });
+  document.addEventListener("click", function (e) {
+    var box = document.querySelector("[data-adm-hits]");
+    if (box && !box.hidden && !(e.target.closest && e.target.closest(".adm-find"))) box.hidden = true;
+  });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
+  document.addEventListener("htmx:afterSettle", apply);
+  window.addEventListener("resize", apply);
+})();
