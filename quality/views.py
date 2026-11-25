@@ -241,12 +241,16 @@ def page(request):
         if q:
             parts = parts.filter(key__icontains=q)
         n = parts.count()
+        from hmi.engine import specs_from_library
+        lib = specs_from_library()
         fields = PART_FIELDS + [(x["key"], x["label"], ".001") for x in qc.features(cfg)]   # measurements added in Tolerances
-        ctx.update(parts=[{"p": x, "vals": [(f, lbl, st, getattr(x, f) if not f.startswith("x") else (x.extra or {}).get(f)) for f, lbl, st in fields]}
+        from hmi.qc import fmt_tol
+        sheet_lbl = {"len": "Length", "wid": "Width", "ph": "Pleat ht"}
+        ctx.update(parts=[{"p": x, "sheet": [(sheet_lbl[k], fmt_tol(k, {"sheetTol": x.sheet_tol})) for k in sheet_lbl if k in (x.sheet_tol or {})], "vals": [(f, lbl, st, getattr(x, f) if not f.startswith("x") else (x.extra or {}).get(f)) for f, lbl, st in fields]}
                           for x in parts[:500]], nParts=n, q=q,
                    fields=fields, units=cfg.get("assetUnits") or {}, unitSpecs=[(k, lbl) for k, lbl in qc.tol_specs(cfg)] + [("tol", "Tolerance")],
-                   unwired=unwired_features(cfg), assetsReady=integrations.assets_ready(),
-                   canImport=integrations.query_ready("part_spec", "part_drawing"),
+                   unwired=[] if lib else unwired_features(cfg), assetsReady=integrations.assets_ready(), fromLib=lib,
+                   canImport=lib or integrations.query_ready("part_spec", "part_drawing"),
                    uomWired="AS uom" in (getattr(SavedQuery.objects.filter(name="part_spec").first(), "sql", "") or ""),
                    pasted=request.POST.get("parts", "") if err else "")
         return render(request, "quality/page.html", ctx)

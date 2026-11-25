@@ -506,7 +506,8 @@ def codata_data(s, request, states=None):
     from .snapshot import qdef
     QDEF = qdef()
     srv_assets = integrations.assets_ready()
-    out = {"assets": srv_assets, "useDb": s.settings.get("useDb")}
+    out = {"assets": srv_assets, "useDb": s.settings.get("useDb"), "specsFrom": s.settings.get("specsFrom") or "3d",
+           "specsChoices": [("3d", "3D filter library (in the suite)"), ("db", "Asset database (Part specs in the Connector builder)")]}
     if not srv_assets or not s.can("connections.edit"):
         return out
     T = tables("assets")

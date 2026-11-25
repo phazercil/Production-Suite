@@ -65,7 +65,12 @@ def plant_tols(cfg=None):
 
 
 def tol_for(spec, part, tols=None):
-    """(under, over): how far below and above the drawing a measurement of this spec may be."""
+    """(under, over): how far below and above the drawing a measurement of this spec may be. The filter's own
+    tolerance from its information sheet (3D viewer library) first; else Quality › Tolerances, for every filter; else
+    the part's Tol ±."""
+    st = (part.get("sheetTol") or {}).get(spec) if isinstance(part, dict) else None
+    if isinstance(st, dict) and st.get("minus") is not None and st.get("plus") is not None:
+        return abs(float(st["minus"])), abs(float(st["plus"]))
     t = (plant_tols() if tols is None else tols).get(spec)
     if t:
         return t["minus"], t["plus"]

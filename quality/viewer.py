@@ -191,6 +191,115 @@ def refresh_from_db(x, ctx=None, force=False):
     return f"{x.part}: {n} setting{'s' if n != 1 else ''} from the asset database."
 
 
+def _n(v):
+    if v is None or isinstance(v, bool) or v == "":
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def dims(x):
+    """A library filter's size in mm, worked out as the viewer works it out (dimsOf in fv_app.html): pack length
+    (pleats × pitch), overall length (plus end bands and foam), width (media width plus side bands and foam),
+    height, pleat height, pleats and side band height. A value is None when anything it's built from wasn't
+    entered: missing from the filter, or still flagged in the viewer's "needs review" list (a default, not a
+    real value). Only the filter as saved in the library is used, nothing from outside the suite."""
+    data = x.data or {}
+    cfg = data.get("config") or {}
+    P = cfg.get("P") or {}
+    ui = cfg.get("ui") or {}
+    needs = set(data.get("needs") or [])
+    side_on, end_on = ui.get("side_c_on") is not False, bool(ui.get("end_c_on"))
+
+    def bands(g):
+        bb = list(((cfg.get("groups") or {}).get(g) or {}).get("bands") or [])[:2]
+        return bb + [{}] * (2 - len(bb))
+    SB, EB = bands("side"), bands("end")
+    foams = [f for f in (cfg.get("foams") or []) if isinstance(f, dict)]
+    foam_ok = not any(k.startswith("foam.") and k.endswith(".t") for k in needs)
+
+    def fT(w):
+        ts = [(_n(f.get("t")) or 0) for f in foams if f.get("where") in ("all", w)]
+        return max([0] + ts)
+
+    def ok(*keys):
+        return not (needs & set(keys))
+
+    def val(d, k, key):
+        return _n(d.get(k)) if ok(key) else None
+
+    pc, pp, mw, ph = val(P, "pc", "P.pc"), val(P, "pp", "P.pp"), val(P, "mw", "P.mw"), val(P, "ph", "P.ph")
+    out = {"pleats": pc, "ph": ph, "len": None, "olen": None, "wid": None, "hgt": None,
+           "sb": val(SB[0], "sb", "band.side.0.sb") if side_on else None, "side_on": side_on, "end_on": end_on}
+    if pc is not None and pp is not None:
+        L = pc * pp
+        out["len"] = L
+        ebt = [val(EB[i], "bt", f"band.end.{i}.bt") for i in (0, 1)] if end_on else [0, 0]
+        if None not in ebt and foam_ok:
+            out["olen"] = L + sum(ebt) + fT("end0") + fT("end1")
+    if mw is not None:
+        sbt = [val(SB[i], "bt", f"band.side.{i}.bt") for i in (0, 1)] if side_on else [0, 0]
+        if None not in sbt and foam_ok:
+            out["wid"] = mw + sum(sbt) + fT("side0") + fT("side1")
+    if ph is not None:
+        act = [(g, i, b) for g, bb, on in (("side", SB, side_on), ("end", EB, end_on)) if on for i, b in enumerate(bb)]
+        offs = [(val(b, "ot", f"band.{g}.{i}.ot"), val(b, "ob", f"band.{g}.{i}.ob")) for g, i, b in act]
+        if all(o is not None for pair in offs for o in pair):
+            out["hgt"] = max([ph] + [ph + ot for ot, _ in offs]) - min([0] + [-ob for _, ob in offs])
+    return out
+
+
+_TOL_NUM = r"(\d+(?:\.\d+)?|\.\d+)"
+
+
+def parse_tol(text):
+    """A tolerance as typed on the filter information sheet, as (under, over) in mm, or None if it can't be read:
+    "+1 / -2 mm" → (2, 1), "±0.5 mm" (or "+/-0.5", "+-0.5") → (0.5, 0.5), "1 mm" → (1, 1), "+0.04 / -0.06 in"
+    → in mm. A number with no unit is mm, as everything on the sheet is."""
+    import re
+    s = str(text or "").strip().lower().replace("−", "-").replace("–", "-").replace(",", ".")
+    if not s:
+        return None
+    units = set(re.findall(r'mm|cm|inches|inch|in\b|"', s))
+    units = {"in" if u in ("inches", "inch", '"') else u for u in units}
+    if len(units) > 1:   # mm and inches in one tolerance: can't tell which is meant
+        return None
+    unit = {"in": 25.4, "cm": 10.0}.get(next(iter(units), "mm"), 1.0)
+    body = re.sub(r'mm|cm|inches|inch|in\b|"', "", s).strip()
+    m = re.fullmatch(rf"(?:±|\+\s*/\s*-|\+-|-\s*/\s*\+)\s*{_TOL_NUM}", body)
+    if m:
+        v = float(m.group(1)) * unit
+        return v, v
+    m = re.fullmatch(_TOL_NUM, body)
+    if m:
+        v = float(m.group(1)) * unit
+        return v, v
+    plus = re.search(rf"\+\s*{_TOL_NUM}", body)
+    minus = re.search(rf"-\s*{_TOL_NUM}", body)
+    rest = re.sub(rf"[+-]\s*{_TOL_NUM}|/|\s", "", body)
+    if plus and minus and not rest:
+        return float(minus.group(1)) * unit, float(plus.group(1)) * unit
+    return None
+
+
+SHEET_TOLS = {"len": "tol_len", "wid": "tol_wid", "ph": "tol_ph"}
+
+
+def sheet_tols(x):
+    """The filter's tolerances from its information sheet: {spec: {"minus", "plus"}} in inches, for each one that's
+    filled in and readable (the others fall back to Quality › Tolerances)."""
+    info = (x.data or {}).get("info") or {}
+    out = {}
+    for spec, k in SHEET_TOLS.items():
+        t = parse_tol(info.get(k))
+        if t:
+            out[spec] = {"minus": round(t[0] / 25.4, 5), "plus": round(t[1] / 25.4, 5)}
+    return out
+
+
 def find(part):
     """The stored filter for a part number: its own, or the one listing it as a customer / OE number."""
     from plant.models import part_key

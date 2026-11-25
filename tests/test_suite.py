@@ -16,6 +16,14 @@ from scheduler.engine import compute, load_world, refresh_floor_queue
 from scheduler.models import Job
 
 
+def specs_from_asset_db(test):
+    """These checks are about reading Part specs from the asset database: Admin › Part data set to the asset
+    database (the 3D filter library is the default)."""
+    p = mock.patch("hmi.engine.specs_from_library", return_value=False)
+    p.start()
+    test.addCleanup(p.stop)
+
+
 def no_planned_time(test):
     """These checks are about counting and stops, not breaks: run them as if the shift had no planned breaks,
     whatever time of day the tests run (planned time has its own tests in test_platform.py)."""

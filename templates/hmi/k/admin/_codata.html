@@ -1,4 +1,6 @@
 {% load suite %}<div id="codata" {% if C.hold %}data-hold{% endif %} style="display:flex;flex-direction:column;gap:14px">
+<div class="panel"><h2 class="h2">Filter dimensions</h2><p class="sub" style="margin-top:4px">Where Parts &amp; specs gets each filter's pleats, length, width, pleat height and side band height (QC checks, drawings and unit counts use them).</p>
+  <div class="row" style="margin-top:8px;gap:16px;flex-wrap:wrap">{% for v, l in C.specsChoices %}<label class="chk"><input type="radio" name="v" value="{{ v }}" {% if C.specsFrom == v %}checked{% endif %} {% if not S.perms.connections_edit %}disabled{% endif %} hx-post="/kiosk/do/run" hx-trigger="change" hx-vals='{"c": "settingSet", "k": "specsFrom"}' hx-params="c,k,v"> {{ l }}</label>{% endfor %}</div></div>
 {% if not C.assets %}<div class="panel" style="border-color:var(--warn)"><h2 class="h2">Asset database not set up</h2><p class="sub" style="margin-top:6px">Set up the asset database (a read-only login) under Admin › Connections › Databases and accounts to look up part specs, drawings, tooling and 3D filter data. Changeover steps and machine settings don't need it: they're written on <a href="/instructions/">Quality › Work instructions</a>.</p></div>
 {% else %}
 <div class="panel"><h2 class="h2">Part data from MariaDB</h2>

@@ -10,6 +10,8 @@ from hmi.models import SavedQuery, SourceCard
 from plant.demo import seed_demo
 from plant.models import Machine, Person
 
+from .test_suite import specs_from_asset_db
+
 SCHEMA = {"database": "dashboard", "tables": [
     {"name": "pleater_log", "columns": [{"name": n, "type": "int"} for n in ("id", "logged_at", "machine", "ppm", "cut_count", "run_bit")]},
     {"name": "open_orders", "columns": [{"name": n, "type": "varchar"} for n in ("mo_number", "item_number", "qty_open", "status")]},
@@ -428,6 +430,7 @@ class DrawingFileTests(Base):
 
     def setUp(self):
         super().setUp()
+        specs_from_asset_db(self)
         sch = {**SCHEMA, "tables": SCHEMA["tables"] + [
             {"name": "part_attribute", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "PAID", "value")]},
             {"name": "part_drawing", "columns": [{"name": n, "type": "varchar"} for n in ("partnumber", "revision", "s3_url", "updated")]}]}

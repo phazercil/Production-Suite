@@ -1,7 +1,8 @@
 """Formulas in a work instruction's process parameters: Target, Min and Max can use the filter being run, e.g.
 [Pleat height (mm)] + 1. Each [name] is a variable from the filter's data kept in the suite:
 
-- the 3D viewer's part library (Quality › 3D viewer): its numeric settings, in mm as the viewer keeps them;
+- the 3D viewer's part library (Quality › 3D viewer): its numeric settings and the filter's size (overall length,
+  width, height) as the viewer works it out, in mm;
 - Parts & specs (the drawing): pleats, length, width, pleat height, side band height, tolerance and the
   measurements added in Quality › Tolerances, in inches.
 
@@ -28,6 +29,9 @@ SPEC_VARS = [("pleats", "Pleats", ""), ("len", "Length (in)", "in"), ("wid", "Wi
              ("sb", "Side band height (in)", "in"), ("tol", "Tolerance (in)", "in")]
 
 
+SIZE_VARS = [("olen", "Overall length (mm)"), ("len", "Pack length (mm)"), ("wid", "Filter width (mm)"), ("hgt", "Filter height (mm)")]
+
+
 def variables():
     """Every variable a formula can use: [{name, key, src}] (src "3d" or "spec"), in the order they're listed."""
     from hmi import qc
@@ -38,6 +42,7 @@ def variables():
     except Exception:  # noqa: BLE001 - no settings yet
         feats = []
     out += [{"name": f"{f['label']} (in)", "key": f"spec.{f['key']}", "src": "spec", "group": "Parts & specs (drawing)"} for f in feats]
+    out += [{"name": n, "key": f"size.{k}", "src": "3d", "group": "3D viewer · Filter size"} for k, n in SIZE_VARS]
     for c in fv_columns():
         if c.get("type") in ("num", "int"):
             out.append({"name": c["h"], "key": f"3d.{c['db']}", "src": "3d", "group": f"3D viewer · {c['group']}"})
@@ -77,6 +82,10 @@ def values_for(part):
                 vals[names[f"spec.{k}"]] = n
     x = viewer.find(part) if part else None
     if x:
+        for k, v in viewer.dims(x).items():   # worked out as the viewer does; None when not entered
+            n = _num(v)
+            if n is not None and f"size.{k}" in names:
+                vals[names[f"size.{k}"]] = n
         for k, v in (x.flat or {}).items():
             n = _num(v)
             if n is not None and f"3d.{k}" in names:

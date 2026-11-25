@@ -28,6 +28,23 @@
 
 **One kind for changeovers.** The Setup kind is gone: every Setup instruction is now a Changeover instruction, with nothing else about it changed.
 
+**Filter dimensions come from the 3D filter library.**
+- **What's read:** Parts & specs reads each filter's numbers from its filter in Quality › 3D viewer, worked out as the viewer works them out and converted to inches:
+  - pleats;
+  - overall length (pleats × pitch, plus end bands and foam);
+  - width (media width, plus side bands and foam);
+  - pleat height;
+  - side band height.
+- **Values never entered:** a value the viewer still flags for review, or one that was never entered, isn't used. What was typed in Parts & specs stays; otherwise it's left blank.
+- **The switch:** Admin › Part data › Filter dimensions switches between the 3D filter library (the new default) and the asset database.
+- **Still from the asset database:** the drawing file link and rev, when Drawing file is wired.
+- **Formulas:** they can use the filter's size too: [Overall length (mm)], [Filter width (mm)], [Filter height (mm)], [Pack length (mm)].
+
+**Each filter's own tolerances.**
+- **Read from the sheet:** the tolerances on a filter's information sheet (Tolerance – length, width, pleat height, e.g. "+1 / -2 mm" or "±0.5 mm") are read with its dimensions and used for its QC checks.
+- **Fallbacks:** filters without one use Quality › Tolerances, then the part's Tol ±.
+- **Where to see them:** Parts & specs shows each filter's sheet tolerances.
+
 **Editing instructions.**
 - Steps can be added, removed, inserted below another step and moved up or down. Parameters can be added and removed.
 - **📷 Add photo / video** on each step: pick photos or videos (or take them on a tablet). They're shown on the step right away and saved with the draft.
