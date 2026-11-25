@@ -1,0 +1,49 @@
+{% load suite %}{# A request's work order: assignment, due, hours, asset, failure / cause / remedy, checklist, labor, reservations, cost #}
+<div class="mt-wo">
+  <div class="mt-wo-sum">
+    {% if x.t.assigned %}<span class="pill idle">{{ x.t.assigned }}</span>{% else %}<span class="pill warn">UNASSIGNED</span>{% endif %}
+    {% if x.t.due %}<span class="pill {% if x.late %}bad{% else %}idle{% endif %}">due {{ x.t.due|date:"M j" }}{% if x.late %} · LATE{% endif %}</span>{% endif %}
+    {% if x.t.asset %}<a class="pill idle" href="?tab=assets&amp;a={{ x.t.asset_id }}">{{ x.t.asset.name }}</a>{% endif %}
+    {% if x.t.failure %}<span class="pill bad" title="Failure code">{{ x.t.failure }}</span>{% endif %}{% if x.t.cause %}<span class="note">cause: {{ x.t.cause }}</span>{% endif %}{% if x.t.remedy %}<span class="note">· fix: {{ x.t.remedy }}</span>{% endif %}
+    <span class="grow"></span>
+    {% if x.down %}<span class="note" title="Stops on {{ x.t.machine }} while this was open">{{ x.down|dur }} down</span>{% endif %}
+    <span class="note">{{ x.cost.hours|floatformat:"-2" }} h{% if x.t.est_hours %} of {{ x.t.est_hours|floatformat:"-1" }} est.{% endif %}{% if x.cost.total %} · ${{ x.cost.total|floatformat:2 }}{% endif %}</span>
+  </div>
+  {% if x.t.ca_id %}<p class="note">Happened again while <a href="?tab=requests#r{{ x.t.ca_id }}">corrective action #{{ x.t.ca_id }}</a> is open: the fix is tracked there.</p>{% endif %}
+  {% if x.occ %}<p class="note"><b>{{ x.occ|length }} time{{ x.occ|length|pluralize }} so far:</b> {% for o in x.occ %}<a href="?tab={% if o.status == 'Closed' %}done{% else %}requests{% endif %}#r{{ o.id }}">#{{ o.id }}</a> {{ o.t|day }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  {% if x.t.checklist %}<div class="mt-check"><span class="eyebrow">Checklist</span>
+    {% for c in x.t.checklist %}<form method="post" action="/maintenance/do/woCheck" class="mt-ck">{% csrf_token %}<input type="hidden" name="id" value="{{ x.t.id }}"><input type="hidden" name="i" value="{{ forloop.counter0 }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}">
+      <input type="hidden" name="done" value="{% if c.done %}0{% else %}1{% endif %}"><button class="ckbox {% if c.done %}on{% endif %}" {% if not canWork or x.t.status == "Closed" %}disabled{% endif %} aria-pressed="{% if c.done %}true{% else %}false{% endif %}" aria-label="{{ c.text }}">{% if c.done %}✓{% endif %}</button>
+      <span class="{% if c.done %}muted{% endif %}">{{ c.text }}</span>{% if c.done and c.by %}<span class="note">{{ c.by }}</span>{% endif %}</form>{% endfor %}</div>{% endif %}
+  <details class="mt-hist"><summary>Work order · hours · reserved parts</summary>
+    {% if canPlan or canWork %}<form method="post" action="/maintenance/do/woSet" class="mt-grid">{% csrf_token %}<input type="hidden" name="id" value="{{ x.t.id }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}">
+      {% if canPlan %}<label>Assigned to<select name="assigned"><option value="">Nobody yet</option>{% for n in techs %}<option {% if n == x.t.assigned %}selected{% endif %}>{{ n }}</option>{% endfor %}{% if x.t.assigned and x.t.assigned not in techs %}<option selected>{{ x.t.assigned }}</option>{% endif %}</select></label>
+      <label>Due<input type="date" name="due" value="{{ x.t.due|date:'Y-m-d' }}"></label>
+      <label>Estimated hours<input type="number" name="est_hours" min="0" step="0.25" value="{{ x.t.est_hours|default_if_none:'' }}"></label>{% endif %}
+      <label>Asset<select name="asset"><option value="">The machine ({{ x.t.machine }})</option>{% for id, name, m in assetList %}{% if m == x.t.machine %}<option value="{{ id }}" {% if id == x.t.asset_id %}selected{% endif %}>{{ name }}</option>{% endif %}{% endfor %}</select></label>
+      <label>Failure<select name="failure"><option value="">—</option>{% for f in failures %}<option {% if f == x.t.failure %}selected{% endif %}>{{ f }}</option>{% endfor %}{% if x.t.failure and x.t.failure not in failures %}<option selected>{{ x.t.failure }}</option>{% endif %}</select></label>
+      <label>Cause<select name="cause"><option value="">—</option>{% for f in causes %}<option {% if f == x.t.cause %}selected{% endif %}>{{ f }}</option>{% endfor %}</select></label>
+      <label>Remedy<select name="remedy"><option value="">—</option>{% for f in remedies %}<option {% if f == x.t.remedy %}selected{% endif %}>{{ f }}</option>{% endfor %}</select></label>
+      <label>Outside cost ($)<input type="number" name="outside_cost" min="0" step="0.01" value="{{ x.t.outside_cost|default_if_none:'' }}"></label>
+      <button class="btn">Save work order</button></form>{% endif %}
+    <div class="mt-sub"><span class="eyebrow">Hours</span>
+      {% for l in x.labor %}<div class="mt-urow"><span><b>{{ l.hours|floatformat:"-2" }} h</b> {{ l.who }} · {{ l.day|date:"M j" }}{% if l.note %} <span class="muted">· {{ l.note }}</span>{% endif %}</span>
+        {% if canWork %}<form method="post" action="/maintenance/do/laborDelete">{% csrf_token %}<input type="hidden" name="id" value="{{ l.pk }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}"><button class="linkbtn">Remove</button></form>{% endif %}</div>
+      {% empty %}<p class="note">None logged.</p>{% endfor %}
+      {% if canWork %}<form method="post" action="/maintenance/do/laborAdd" class="mt-inline">{% csrf_token %}<input type="hidden" name="id" value="{{ x.t.id }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}">
+        <select name="who" aria-label="Who">{% for n in techs %}<option {% if n == me.name %}selected{% endif %}>{{ n }}</option>{% endfor %}</select>
+        <input type="number" name="hours" min="0.05" max="24" step="0.05" required placeholder="Hours" class="qty" aria-label="Hours">
+        <input type="date" name="day" value="{{ today|date:'Y-m-d' }}" aria-label="Day"><input type="text" name="note" maxlength="200" placeholder="What (optional)" aria-label="Note">
+        <button class="btn">Log hours</button></form>{% endif %}
+      {% if x.cost.total %}<p class="note">Cost: parts ${{ x.cost.parts|floatformat:2 }}{% if x.cost.rate %} · labor ${{ x.cost.labor|floatformat:2 }} ({{ x.cost.hours|floatformat:"-2" }} h × ${{ x.cost.rate|floatformat:2 }}){% endif %}{% if x.cost.outside %} · outside ${{ x.cost.outside|floatformat:2 }}{% endif %}</p>{% endif %}
+    </div>
+    <div class="mt-sub"><span class="eyebrow">Reserved parts</span>
+      {% for r in x.resv %}<div class="mt-urow"><span><b>{{ r.qty|floatformat:"-3" }}</b> × {{ r.item }} <span class="muted">· {{ r.by }}</span></span>
+        {% if canWork %}<form method="post" action="/maintenance/do/reserveRelease">{% csrf_token %}<input type="hidden" name="id" value="{{ r.pk }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}"><button class="linkbtn">Release</button></form>{% endif %}</div>
+      {% empty %}<p class="note">Nothing reserved.</p>{% endfor %}
+      {% if canWork and items and x.t.status != "Closed" %}<form method="post" action="/maintenance/do/reserve" class="mt-inline">{% csrf_token %}<input type="hidden" name="ticket" value="{{ x.t.id }}"><input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="anchor" value="r{{ x.t.id }}">
+        <select name="item" required aria-label="Item to reserve"><option value="">Reserve an item…</option>{% for i in items %}<option value="{{ i.pk }}">{{ i }} ({{ i.free|floatformat:"-3" }} free)</option>{% endfor %}</select>
+        <input type="number" name="qty" min="0.001" step="any" value="1" required class="qty" aria-label="How many"><button class="btn">Reserve</button></form>{% endif %}
+    </div>
+  </details>
+</div>

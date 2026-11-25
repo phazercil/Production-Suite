@@ -13,6 +13,8 @@
     <label>Machine<select name="machine"><option value="">All machines</option>{% for m in reqMachines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
     {% if tab == "requests" %}<label>Status<select name="status"><option value="">All pending</option>{% for v, l in statuses %}{% if v != "Closed" %}<option value="{{ v }}" {% if v == fstatus %}selected{% endif %}>{{ l }}</option>{% endif %}{% endfor %}</select></label>{% endif %}
     <button class="btn go" type="submit">Show</button>{% if not canWork %}<span class="note">Changing a status or recording parts needs <b>Work maintenance requests</b> (Admin › Permissions).</span>{% endif %}</form>
+  {% if tab == "requests" %}{% include "maintenance/_suggest.html" %}{% endif %}
+  {% if fwho %}<p class="note">Assigned to <b>{% if fwho == "-" %}nobody yet{% else %}{{ fwho }}{% endif %}</b> · <a href="?tab={{ tab }}">show all</a></p>{% endif %}
   <div class="mt-reqs">{% for x in rows %}{% include "maintenance/_ticket.html" %}
   {% empty %}<div class="card"><p class="muted">{% if tab == "requests" %}No pending maintenance requests{% if fmachine or fstatus %} for these filters{% endif %}.{% else %}Nothing completed in the last 30 days{% if fmachine %} on {{ fmachine }}{% endif %}.{% endif %}</p></div>{% endfor %}</div>
 
@@ -53,6 +55,7 @@
     <td>{{ r.note }}</td></tr>
   {% empty %}<tr><td colspan="6" class="empty">No planned maintenance done yet{% if fmachine %} on {{ fmachine }}{% endif %}.</td></tr>{% endfor %}</tbody></table></div></div>
   {% endif %}
+  {% elif tab == "workload" or tab == "windows" or tab == "assets" or tab == "calibration" %}{% include "maintenance/_cmms_tabs.html" %}
   {% elif tab == "inventory" %}
   <div class="sv-kpis"><div class="kpi"><span>Items</span><b>{{ items|length }}</b></div><div class="kpi"><span>Low or out</span><b class="{% if low %}bad{% endif %}">{{ low }}</b></div>
     <a class="btn ghost" href="/maintenance/reorder.csv" style="align-self:center">Download reorder list</a></div>
@@ -72,6 +75,7 @@
       <label class="fld"><span>Unit</span><input name="unit" maxlength="20" value="each"></label>
       <label class="fld"><span>On hand now</span><input name="qty" type="number" min="0" step="any" value="0"></label>
       <label class="fld"><span>Reorder at</span><input name="min_qty" type="number" min="0" step="any" placeholder="blank = no reminder"></label>
+      <label class="fld"><span>Cost each ($)</span><input name="unit_cost" type="number" min="0" step="0.01"></label>
       <label class="fld" style="grid-column:1/-1"><span>Notes</span><input name="notes" maxlength="2000" placeholder="Vendor, size, which machines take it…"></label>
       <div class="row"><button class="btn go">Add the item</button></div></form></details>{% endif %}
   <div class="card"><div class="tblwrap mt-invwrap"><table class="st mt-inv"><thead><tr><th>Item</th><th>Location</th><th class="n">On hand</th><th class="n">Reorder at</th><th class="n">Used (30 days)</th><th>Used on</th><th></th></tr></thead><tbody>
@@ -79,7 +83,7 @@
     <td><b>{{ i.name }}</b>{% if i.part_no %}<div class="note">#{{ i.part_no }}</div>{% endif %}{% if i.notes %}<div class="note">{{ i.notes|truncatechars:90 }}</div>{% endif %}{% if not i.active %}<div class="note">Off the list</div>{% endif %}</td>
     <td>{{ i.location|default:"—" }}</td>
     <td class="n">{% if i.qty < 0 %}<span class="pill bad" title="More was used than was counted: count it">{{ i.qty|floatformat:"-3" }}</span>{% elif i.low %}<span class="pill warn">{{ i.qty|floatformat:"-3" }}</span>{% else %}<b>{{ i.qty|floatformat:"-3" }}</b>{% endif %} <span class="note">{{ i.unit }}</span></td>
-    <td class="n">{% if i.min_qty is not None %}{{ i.min_qty|floatformat:"-3" }}{% else %}—{% endif %}</td>
+    <td class="n">{% if i.min_qty is not None %}{{ i.min_qty|floatformat:"-3" }}{% else %}—{% endif %}{% if i.reserved %}<div class="note">{{ i.reserved|floatformat:"-3" }} reserved · {{ i.free|floatformat:"-3" }} free</div>{% endif %}{% if i.unit_cost is not None %}<div class="note">${{ i.unit_cost|floatformat:2 }} each</div>{% endif %}</td>
     <td class="n">{{ r.i.used30|default:0|floatformat:"-3" }}</td>
     <td>{% for m, n in r.on %}<a class="chip" href="?tab=machines&machine={{ m|urlencode }}">{{ m }} · {{ n|floatformat:"-3" }}</a>{% empty %}<span class="muted">—</span>{% endfor %}</td>
     <td class="mt-acts">{% if i.active %}
@@ -101,6 +105,7 @@
       <label class="fld"><span>Location</span><input name="location" maxlength="80" value="{{ i.location }}"></label>
       <label class="fld"><span>Unit</span><input name="unit" maxlength="20" value="{{ i.unit }}"></label>
       <label class="fld"><span>Reorder at</span><input name="min_qty" type="number" min="0" step="any" value="{% if i.min_qty is not None %}{{ i.min_qty|floatformat:'-3' }}{% endif %}"></label>
+      <label class="fld"><span>Cost each ($)</span><input name="unit_cost" type="number" min="0" step="0.01" value="{% if i.unit_cost is not None %}{{ i.unit_cost|floatformat:'-2' }}{% endif %}"></label>
       <label class="fld" style="grid-column:1/-1"><span>Notes</span><input name="notes" maxlength="2000" value="{{ i.notes }}"></label>
       <div class="row"><button class="btn go">Save</button><a class="btn ghost" href="?tab=inventory#i{{ i.pk }}">Cancel</a><span class="grow"></span></div></form>
       <form method="post" action="/maintenance/do/itemArchive" class="row" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="id" value="{{ i.pk }}"><input type="hidden" name="active" value="0"><input type="hidden" name="back" value="/maintenance/?tab=inventory"><button class="btn sm bad">Take it off the list</button><span class="note">Its history stays.</span></form></td></tr>{% endif %}
@@ -123,6 +128,12 @@
     {% for r in R.rows %}<tr><td><b>{{ r.machine }}</b></td><td class="n">{{ r.failures }}</td><td class="n">{{ r.open }}</td><td class="n">{{ r.high }}</td><td class="n">{{ r.locked }}</td><td class="n">{% if r.runH is not None %}{{ r.runH }} h{% else %}—{% endif %}</td><td class="n">{% if r.mtbf is not None %}{{ r.mtbf }} h{% else %}—{% endif %}</td><td class="n">{% if r.mttr is not None %}{{ r.mttr }} h{% else %}—{% endif %}</td></tr>
     {% empty %}<tr><td colspan="8" class="empty">No repair requests in this period.</td></tr>{% endfor %}</tbody></table></div>
     <p class="note">MTBF: running time ÷ repair requests (the PM schedule's own requests aren't failures). MTTR: from a request being raised to it being completed. Running time comes from each machine's readings, so equipment without readings shows none.</p></div>
+  {% include "maintenance/_suggest.html" %}
+  <div class="card"><h2>By machine and asset: downtime, hours and cost</h2><div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th>Asset</th><th class="n">Requests</th><th class="n">Repairs</th><th class="n">Down while open</th><th class="n">Hours</th><th class="n">Cost</th><th>Top failures</th></tr></thead><tbody>
+    {% for r in byAsset %}<tr><td><b>{{ r.machine }}</b></td><td>{% if r.asset %}{{ r.asset }}{% else %}<span class="muted">the machine</span>{% endif %}</td><td class="n">{{ r.n }}</td><td class="n">{{ r.repairs }}</td><td class="n">{{ r.down|dur }}</td><td class="n">{{ r.hours|floatformat:"-1" }}</td><td class="n">{% if r.cost %}${{ r.cost|floatformat:0 }}{% else %}—{% endif %}</td>
+      <td class="note">{% for k, n in r.top %}{{ k }} ×{{ n }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+    {% empty %}<tr><td colspan="8" class="empty">No requests in this period.</td></tr>{% endfor %}</tbody></table></div>
+    <p class="note">Down while open: the machine's stops while each request was open. Cost: parts at their cost when used, hours at the maintenance labor rate (Admin › Rules), and outside costs.</p></div>
   <div class="grid2">
   <div class="card"><h2>Repeat failures</h2>{% if R.repeats %}<table class="st"><tbody>{% for x in R.repeats %}<tr><td><b>{{ x.machine }}</b></td><td>{{ x.type }}</td><td class="n">{{ x.n }}×</td><td class="nw">last {{ x.last|day }}</td></tr>{% endfor %}</tbody></table><p class="note">The same kind of request on one machine {{ R.repeatAt }} or more times: worth a root-cause look or a PM task.</p>{% else %}<p class="muted">None.</p>{% endif %}</div>
   <div class="card"><h2>Planned maintenance coming up</h2>{% for d, xs in R.coming.items %}{% if xs %}<h3>Within {{ d }} days</h3><table class="st"><tbody>{% for x in xs %}<tr><td><b>{{ x.task.machine }}</b></td><td>{{ x.task.title }}</td><td class="nw">{% if x.state == "due" or x.state == "open" %}<span class="pill bad">DUE NOW</span>{% else %}{{ x.when|day }}{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}{% empty %}{% endfor %}{% if not R.comingN %}<p class="muted">Nothing falls due in the next 30 days.</p>{% endif %}</div>

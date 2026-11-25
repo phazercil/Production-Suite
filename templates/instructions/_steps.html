@@ -1,0 +1,5 @@
+{% load suite %}<ol class="wi-steps">{% for s in steps %}<li>{% if s.caution %}<div class="wi-caution">⚠ {{ s.caution }}</div>{% endif %}<div class="wi-text">{{ s.text|linebreaksbr }}</div>
+  {% if s.m %}<div class="wi-media">{% for m in s.m %}{% if m.kind == "image" %}<a href="/instructions/media/{{ m.pk }}" target="_blank" rel="noopener"><img src="/instructions/media/{{ m.pk }}?size=thumb" alt="{{ m.name }}" loading="lazy"></a>{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>
+{% endfor %}</ol>
+{% if params %}<table class="st wi-params"><thead><tr><th>Approved process parameter</th><th class="n">Target</th><th class="n">Min</th><th class="n">Max</th><th>Unit</th></tr></thead><tbody>
+  {% for p in params %}{% if p.name %}<tr><td><b>{{ p.name }}</b></td><td class="n">{{ p.target|default:"—" }}</td><td class="n">{{ p.min|default:"—" }}</td><td class="n">{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td></tr>{% endif %}{% endfor %}</tbody></table>{% endif %}

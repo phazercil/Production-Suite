@@ -21,7 +21,7 @@ from . import integrations
 from .engine import shift_stats
 from .models import Downtime, LineState, MachineError, Notice, PpmReading, ShiftRun, Ticket
 
-PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("part-info", "Part Info"), ("model", "3D Model"), ("cameras", "Cameras"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
+PAGES = [("controls", "Run screen"), ("schedule", "Schedule"), ("part-info", "Part Info"), ("instructions", "Instructions"), ("model", "3D Model"), ("cameras", "Cameras"), ("qc-log", "QC Log"), ("downtime", "Downtime"), ("maintenance", "Maintenance"),
          ("status", "Status"), ("end-of-shift", "End of Shift"), None, ("team", "Team")]
 LOCKED_OUT = {"team", "admin"}           # not on a machine's own screen (/station/<machine>/)
 ADMIN_PAGES = {"admin"}
@@ -348,6 +348,15 @@ class Screen:
             parts.append({"modal": "downPrompt", "text": f"{n} downtime {'entries need' if n > 1 else 'entry needs'} a reason"})
         if self.qc_due():
             parts.append({"modal": "qc", "text": "QC check", "post": " due"})
+        try:
+            from instructions.views import unread
+            new = unread(self)
+        except Exception:  # noqa: BLE001 - the banner never fails over this
+            new = []
+        if new:
+            parts.append({"page": "instructions", "pre": "Work instruction" + ("s" if len(new) > 1 else "") + " to read · ",
+                          "text": ", ".join(f"{d['x'].doc_no} rev {d['r'].rev}" for d in new[:3]) + ("…" if len(new) > 3 else ""),
+                          "post": ": open Instructions and tap Read and understood."})
         sh = self.shift
         if sh and (sh.rx or {}).get("off") and sh.mo_id and not sh.co:
             cut = from_ms(sh.rx["changed"])

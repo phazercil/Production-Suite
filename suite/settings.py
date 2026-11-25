@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     "supervisor",
     "quality",
     "maintenance",
+    "instructions",
     "cameras",
     "packkiosk",
     "sensors",     # Sensors & custom alarms   # the Packaging Kiosk (pallet tags); the packaging/ folder is the Windows installer

@@ -1,0 +1,12 @@
+{% load suite %}<div class="row"><h1 class="h1 grow">Instructions{% if wiPart %} · {{ wiPart }}{% endif %}</h1></div>
+{% if wiNext %}<p class="note">Changing over to {{ wiPart }}: these are its instructions.</p>{% endif %}
+{% for d in wi %}<details class="panel wi-k" {% if not d.read %}open{% endif %}>
+  <summary class="row" style="gap:8px"><b class="grow">{{ d.x.doc_no }} · {{ d.x.title }}</b><span class="note">{{ d.x.get_kind_display }} · rev {{ d.r.rev }}</span>
+    {% if d.read %}<span class="pill ok">READ</span>{% else %}<span class="pill warn">NEW</span>{% endif %}</summary>
+  {% if d.r.change_note and not d.read %}<p class="note">What changed: {{ d.r.change_note }}</p>{% endif %}
+  <ol class="wi-ksteps">{% for s in d.steps %}<li>{% if s.caution %}<div class="wi-kcaution">⚠ {{ s.caution }}</div>{% endif %}<div>{{ s.text|linebreaksbr }}</div>
+    {% if s.m %}<div class="wi-kmedia">{% for m in s.m %}{% if m.kind == "image" %}<img src="/instructions/media/{{ m.pk }}" alt="{{ m.name }}" loading="lazy">{% else %}<video src="/instructions/media/{{ m.pk }}" controls preload="metadata" playsinline></video>{% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}</ol>
+  {% if d.r.params %}<table class="tbl"><thead><tr><th>Approved setting</th><th>Target</th><th>Min</th><th>Max</th><th></th></tr></thead><tbody>{% for p in d.r.params %}<tr><td><b>{{ p.name }}</b></td><td>{{ p.target|default:"—" }}</td><td>{{ p.min|default:"—" }}</td><td>{{ p.max|default:"—" }}</td><td>{{ p.unit }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+  {% if not d.read %}{% if S.me %}<button type="button" class="btn primary" style="margin-top:10px" hx-post="/kiosk/do/wiAck" hx-vals='{"rev": "{{ d.r.pk }}"}' hx-params="rev" hx-target="#view" hx-swap="innerHTML">Read and understood</button>{% else %}<p class="note">Log in to mark it read.</p>{% endif %}{% endif %}
+</details>
+{% empty %}<div class="panel empty">No work instructions for {{ station|default:"this line" }}{% if wiPart %} and {{ wiPart }}{% endif %}.</div>{% endfor %}

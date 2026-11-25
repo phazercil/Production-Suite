@@ -23,7 +23,7 @@ from plant.util import local, part_spec
 PERM = "section.quality"
 TOL_PERM = "quality.tolerances"
 TABS = [("report", "Quality report"), ("spc", "SPC"), ("trace", "Traceability"), ("checks", "QC checks"), ("parts", "Parts & specs"), ("tol", "Tolerances"),
-        ("viewer", "3D viewer")]
+        ("viewer", "3D viewer"), ("wi", "Work instructions")]
 ACTIONS = {"qcTolSet": "tol", "qcItemAdd": "checks", "qcItemDel": "checks", "qcItemMove": "checks", "qualityIssuesSet": "checks",
            "partsSave": "parts", "partsImport": "parts", "partAdd": "parts", "partDel": "parts", "assetUnitsSet": "parts", "partsRefresh": "parts",
            "specFeatureAdd": "tol", "specFeatureDel": "tol", "rollTagSet": "trace", "rollTagReset": "trace"}
@@ -196,6 +196,8 @@ def page(request):
     me, denied = _gate(request)
     if denied:
         return denied
+    if request.GET.get("tab") == "wi":   # Work instructions are their own pages
+        return HttpResponseRedirect("/instructions/")
     f = filters(request.GET if request.method == "GET" else request.POST)
     can_tol = perms.can(me, TOL_PERM)
     err = ""

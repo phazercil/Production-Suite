@@ -640,3 +640,14 @@ tr.hl td{background:rgba(242,182,109,.22)!important;outline:2px solid var(--warn
 .rollpic-ph svg{width:40px;height:40px}
 .rollpic.taken .rollpic-ph{z-index:1;color:#fff}
 .rollpic.taken .rollpic-ph svg{display:none}
+
+/* work instructions */
+.wi-k summary{cursor:pointer;list-style:none}
+.wi-ksteps{padding-left:1.4em;display:flex;flex-direction:column;gap:14px;font-size:17px;line-height:1.45;margin-top:10px}
+.wi-kcaution{color:var(--bad);font-weight:700}
+.wi-kmedia{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.wi-kmedia img{max-height:260px;max-width:100%;border-radius:8px}
+.wi-kmedia video{max-height:320px;max-width:100%;border-radius:8px;background:#000}
+.wi-k table{border-collapse:collapse;margin-top:12px;min-width:420px}
+.wi-k th,.wi-k td{padding:6px 14px 6px 0;text-align:left;border-bottom:1px solid var(--rule-2,#333)}
+.wi-k th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute,#aaa)}

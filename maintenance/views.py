@@ -28,13 +28,15 @@ from .actions import machines
 from .models import InventoryItem, InventoryMove
 
 PERM = "section.maintenance"
-TABS = [("requests", "Pending requests"), ("done", "Completed"), ("pm", "PM schedule"), ("history", "PM history"), ("inventory", "Inventory"),
+TABS = [("requests", "Pending requests"), ("workload", "Workload"), ("done", "Completed"), ("pm", "PM schedule"), ("history", "PM history"),
+        ("windows", "Windows"), ("assets", "Assets"), ("calibration", "Calibration"), ("inventory", "Inventory"),
         ("machines", "Parts by machine"), ("reliability", "Reliability")]
 PM_ACTIONS = {"pmSave", "pmDelete", "pmDone", "pmOpenNow"}   # posted to the page itself, so a refused PM task form keeps what was typed
 STATE = {"due": ("bad", "DUE"), "open": ("warn", "REQUEST OPEN"), "soon": ("warn", "DUE SOON"), "ok": ("ok", "OK"), "off": ("idle", "PAUSED")}
 ORDER = {"due": 0, "open": 1, "soon": 2, "ok": 3, "off": 4}
 POSTS = {"ticketSet", "itemSave", "itemArchive", "itemStock", "itemUse", "itemUseUndo", "itemPolicy", "itemUseBom", "pmPartSet", "lockout",
-         "returnService"}
+         "returnService", "woSet", "woCheck", "laborAdd", "laborDelete", "reserve", "reserveRelease", "assetSave", "assetEvent", "calRecord",
+         "meterSave", "meterRead", "windowSave", "windowCancel", "caOpen"}
 PRIORITY = {"High": 0, "Medium": 1, "Low": 2}
 
 
@@ -63,11 +65,38 @@ def _tickets(qs, now):
     for b in PMPart.objects.filter(task_id__in={t.pm_id for t in tickets if t.pm_id}).select_related("item"):
         bom.setdefault(b.task_id, []).append(b)
     mnames = set(Machine.objects.values_list("name", flat=True))
+    from .cmms import ticket_cost, ticket_down
+    from .models import Reservation, TicketLabor
+    labor, resv, occ = {}, {}, {}
+    for x in TicketLabor.objects.filter(ticket__in=tickets):
+        labor.setdefault(x.ticket_id, []).append(x)
+    for r in Reservation.objects.filter(ticket__in=tickets, status="reserved").select_related("item"):
+        resv.setdefault(r.ticket_id, []).append(r)
+    for o in Ticket.objects.filter(ca__in=tickets).order_by("t"):
+        occ.setdefault(o.ca_id, []).append(o)
     return [{"t": t, "notes": notes.get(t.id, []), "photos": pics.get(t.id, []), "used": used.get(t.id, []),
+             "labor": labor.get(t.id, []), "resv": resv.get(t.id, []), "occ": occ.get(t.id, []),
+             "cost": ticket_cost(t, labor.get(t.id, []), used.get(t.id, [])), "down": round(ticket_down(t, now)),
+             "late": bool(t.due and t.status != "Closed" and t.due < timezone.localdate()),
              "bom": bom.get(t.pm_id, []), "bomUsed": any(u.note.startswith("PM parts list") for u in used.get(t.id, [])),
              "isMachine": t.machine in mnames,
              "age": round((now - t.t).total_seconds() / 60),
              "took": round((done(t) - t.t).total_seconds() / 60) if t.status == "Closed" and done(t) else None} for t in tickets]
+
+
+def techs():
+    """Who requests can be assigned to: maintenance people, then shift leads and admins."""
+    from plant.models import Person
+    return list(Person.objects.filter(active=True, role__in=("maintenance", "lead", "admin")).order_by("role", "name").values_list("name", flat=True))
+
+
+def _asset_choices():
+    from .cmms import asset_tree
+    return [(r["a"].pk, ("· " * r["depth"]) + r["a"].name, r["a"].machine) for r in asset_tree() if r["a"].active]
+
+
+def _list(key):
+    return [str(x) for x in (engine.config().get(key) or []) if str(x).strip()]
 
 
 def schedule(t, machine=""):
@@ -86,10 +115,10 @@ def schedule(t, machine=""):
     for task in tasks:
         st = pm.status(task, t, opened.get(task.id))
         parts = bom.get(task.id, [])
-        rows.append({"task": task, **st, "pill": STATE[st["state"]], "usedTxt": pm.fmt_amount(st["used"], task.unit),
+        rows.append({"task": task, **st, "pill": STATE[st["state"]], "usedTxt": pm.fmt_amount(st["used"], task.unit, task.meter),
                      "parts": parts, "short": [b for b in parts if b.item.qty < b.qty],
-                     "everyTxt": pm.fmt_amount(task.every, task.unit),
-                     "leftTxt": pm.fmt_amount(abs(st["left"]), task.unit) + (" over" if st["left"] < 0 else " left")})
+                     "everyTxt": pm.fmt_amount(task.every, task.unit, task.meter),
+                     "leftTxt": pm.fmt_amount(abs(st["left"]), task.unit, task.meter) + (" over" if st["left"] < 0 else " left")})
     rows.sort(key=lambda r: (ORDER[r["state"]], -r["pct"], r["task"].machine, r["task"].title))
     return rows
 
@@ -147,6 +176,9 @@ def page(request):
            "canWork": perms.can(me, "tickets.work"), "canStock": perms.can(me, "inventory.edit"),
            "here": request.get_full_path(),
            "items": list(InventoryItem.objects.filter(active=True)),
+           "canPlan": perms.can(me, "maint.plan"), "canAssets": perms.can(me, "assets.edit"),
+           "techs": techs(), "assetList": _asset_choices(), "today": timezone.localdate(),
+           "failures": _list("failureCodes"), "causes": _list("causeCodes"), "remedies": _list("remedyCodes"),
            "counts": {"open": Ticket.objects.filter(status="Open").count(),
                       "work": Ticket.objects.filter(status__in=("Reviewed", "In progress")).count(),
                       "parts": Ticket.objects.filter(status="Waiting on parts").count(),
@@ -157,10 +189,15 @@ def page(request):
             qs = qs.filter(machine=mach)
         if st and tab == "requests":
             qs = qs.filter(status=st)
+        who = str(q.get("who") or "")[:120]
+        if who:
+            qs = qs.filter(assigned="" if who == "-" else who)
         rows = _tickets(qs.order_by("-closed_at" if tab == "done" else "t")[:300], now)
         if tab == "requests":
             rows.sort(key=lambda r: (PRIORITY.get(r["t"].priority, 1), r["t"].t))
-        ctx["rows"] = rows
+            from .cmms import suggestions
+            ctx["suggest"] = suggestions(now, mach)
+        ctx["rows"], ctx["fwho"] = rows, who
         ctx["reqMachines"] = sorted(set(Ticket.objects.values_list("machine", flat=True)) | set(ctx["machines"]))
     elif tab == "inventory":
         month = now - timedelta(days=30)
@@ -181,15 +218,37 @@ def page(request):
                    pending=list(Ticket.objects.exclude(status="Closed").order_by("machine", "t")))
     elif tab == "pm":
         rows = schedule(now, mach)
-        ctx.update(rows=rows, edit=_int(q.get("edit")), canEdit=perms.can(me, "pm.edit"), units=PMTask.UNITS,
+        from .models import Meter
+        ctx.update(rows=rows, edit=_int(q.get("edit")), canEdit=perms.can(me, "pm.edit"), units=PMTask.UNITS, meterList=list(Meter.objects.filter(active=True)),
                    pmcounts={k: sum(1 for r in rows if r["state"] == k) for k in ("due", "open", "soon")},
                    form={**{k: "" for k in ("machine", "title", "every", "unit", "priority", "steps")}, **(form or {})})
     elif tab == "history":
         ctx["hist"] = pm_history(now, mach)
     elif tab == "reliability":
-        from . import reliability
+        from . import cmms, reliability
         days = _int(q.get("days")) if _int(q.get("days")) in (30, 90, 180, 365) else 90
-        ctx.update(R=reliability.build(now, days, mach), days=days)
+        ctx.update(R=reliability.build(now, days, mach), days=days, byAsset=cmms.by_asset(now, days, mach), suggest=cmms.suggestions(now, mach))
+    elif tab == "workload":
+        from .cmms import workload
+        ctx["load"] = workload(now)
+    elif tab == "assets":
+        from . import cmms
+        from .models import Asset, Meter
+        sel = Asset.objects.filter(pk=_int(q.get("a")) or 0).first()
+        ctx.update(tree=cmms.asset_tree(mach), kinds=Asset.KINDS, sel=sel, hist=cmms.history(sel) if sel else [],
+                   meters=list(Meter.objects.filter(**({"machine": mach} if mach else {})).select_related("asset")),
+                   sources=Meter.SOURCES, events=__import__("maintenance.models", fromlist=["AssetEvent"]).AssetEvent.KINDS,
+                   editA=_int(q.get("edit")))
+    elif tab == "calibration":
+        from .cmms import calibration_rows
+        from .models import Calibration
+        ctx.update(cal=calibration_rows(timezone.localdate()), results=Calibration.RESULTS,
+                   recent=list(Calibration.objects.select_related("asset")[:50]))
+    elif tab == "windows":
+        from .models import MaintWindow
+        ctx.update(wins=list(MaintWindow.objects.filter(end__gte=now - timedelta(days=7)).select_related("machine", "ticket").order_by("start")),
+                   lines=list(Machine.objects.filter(active=True).order_by("sort", "id")),
+                   openReq=list(Ticket.objects.exclude(status="Closed").order_by("machine", "t")))
     else:   # parts by machine
         names = list(dict.fromkeys(ctx["machines"] + list(InventoryMove.objects.exclude(machine="").values_list("machine", flat=True).distinct())))
         sel = mach if mach in names else ""

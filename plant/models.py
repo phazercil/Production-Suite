@@ -403,9 +403,14 @@ DEFAULT_CONFIG = {
     "issueTypes": ["Pleater jam", "Blade / cutter", "Glue system", "Side band applicator", "Electrical / sensor", "Air / pneumatics",
                    "Guarding / safety", "Other"],
     "equipment": ["Glue system", "Conveyor", "Compressor", "Other"],
+    "failureCodes": ["Jam", "Broken / worn part", "Electrical fault", "Sensor fault", "Air leak / low pressure", "Glue system fault",
+                     "Out of adjustment", "Software / PLC", "Other"],
+    "causeCodes": ["Wear", "Lack of lubrication", "Misadjustment", "Operator error", "Material problem", "Design weakness", "Contamination",
+                   "Unknown"],
+    "remedyCodes": ["Replaced part", "Repaired", "Adjusted", "Cleaned", "Lubricated", "Reset / restarted", "Retrained operator", "Other"],
     "qualityIssues": ["Out of dimension", "Glue skip / poor bond", "Torn or damaged media", "Bad cut", "Side band defect", "Wrong pleat count",
                       "Pleats uneven or collapsed", "Contamination / dirt", "Wrong media or material", "Other"],
-    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "coRunMin": 3, "rollPhotos": 2, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
+    "rules": {"stopPpm": 5, "minDown": 2, "coMins": 45, "coRunMin": 3, "rollPhotos": 2, "maintRate": 0, "caCount": 3, "caDays": 90, "failRequired": 0, "eff": 85, "adminTimeout": 10, "reasonAfter": 10, "startGrace": 15,
               "photoDays": 365, "qcLate": 10},
 }
 DEFAULT_SETTINGS = {

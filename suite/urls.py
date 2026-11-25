@@ -10,6 +10,7 @@ from scheduler import stations
 from reports import views as reports
 from hmi import kviews as kv
 from hmi import views as hmi
+from instructions import views as wi
 from scheduler import s2kview
 from scheduler import views as sch
 from quality import viewer as fviewer
@@ -69,6 +70,13 @@ urlpatterns = [
     # Scheduler
     path("scheduler/", sch.board, name="scheduler"),
     path("scheduler/s2k/", s2kview.page, name="s2k-posting"),
+    path("instructions/", wi.index),
+    path("instructions/<int:pk>/", wi.detail),
+    path("instructions/<int:pk>/rev/<int:rev>/", wi.detail),
+    path("instructions/<int:pk>/upload", wi.upload),
+    path("instructions/<int:pk>/read-by.csv", wi.acks_csv),
+    path("instructions/media/<int:mid>", wi.media),
+    path("instructions/do/<str:name>", wi.do),
     path("scheduler/s2k/mark", s2kview.mark),
     path("scheduler/<slug:route>/", sch.board_route),
     path("api/scheduler/state", sch.state),

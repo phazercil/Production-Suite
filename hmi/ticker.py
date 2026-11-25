@@ -161,6 +161,9 @@ def _tick_one_minute(m, t, owner=None):
         cur.save(update_fields=["feed", "demo_idx"])
         _sensors_from_feed(m, s, minute)
         engine.tick(m, s, minute)
+        if s:
+            from maintenance.cmms import meters_from_sample
+            meters_from_sample(m, s, minute)   # meters read from the machine's data (Maintenance › Assets)
         LineState.objects.filter(pk=cur.pk).update(next_tick=minute + timedelta(minutes=1))
         return True
 

@@ -1,0 +1,80 @@
+{% load suite %}
+{% if tab == "workload" %}
+  <p class="muted">Open requests by who they're assigned to, with their estimated hours and what's late; and the hours each person logged in the last 30 days.{% if not canPlan %} Assigning needs <b>Plan maintenance</b>.{% endif %}</p>
+  <div class="mt-load">{% for w in load %}<div class="card">
+    <h2>{{ w.who|default:"Not assigned" }}</h2>
+    <div class="sv-kpis"><div class="kpi"><span>Open</span><b>{{ w.open }}</b></div><div class="kpi"><span>Estimated</span><b>{{ w.est|floatformat:"-1" }} h</b></div>
+      <div class="kpi"><span>Late</span><b class="{% if w.overdue %}bad{% endif %}">{{ w.overdue }}</b></div>{% if w.who %}<div class="kpi"><span>Logged (30 days)</span><b>{{ w.logged|floatformat:"-1" }} h</b></div>{% endif %}</div>
+    {% for t in w.tickets %}<div class="mt-urow"><span><a href="?tab=requests#r{{ t.id }}">#{{ t.id }}</a> <b>{{ t.machine }}</b> · {{ t.type }}{% if t.priority == "High" %} <span class="pill bad">HIGH</span>{% endif %}</span>
+      <span class="note">{% if t.due %}{% if t.due < today %}<b class="bad">due {{ t.due|date:"M j" }}</b>{% else %}due {{ t.due|date:"M j" }}{% endif %}{% else %}no due date{% endif %}{% if t.est_hours %} · {{ t.est_hours|floatformat:"-1" }} h{% endif %} · {{ t.status_label }}</span></div>
+    {% empty %}<p class="note">Nothing open.</p>{% endfor %}
+    <a class="btn ghost po" href="?tab=requests&amp;who={% if w.who %}{{ w.who|urlencode }}{% else %}-{% endif %}">Show these requests</a>
+  </div>{% empty %}<div class="card"><p class="muted">No open requests.</p></div>{% endfor %}</div>
+
+{% elif tab == "windows" %}
+  <p class="muted">Planned maintenance time on a machine. The Scheduler plans no production in it (the board re-plans when one is added), and the kiosk counts it as planned time, not downtime.</p>
+  {% if canPlan %}<div class="card"><h2>Plan a window</h2><form method="post" action="/maintenance/do/windowSave" class="mt-grid">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
+    <label>Machine<select name="machine" required>{% for m in lines %}<option>{{ m.name }}</option>{% endfor %}</select></label>
+    <label>Starts<input type="datetime-local" name="start" required></label><label>Ends<input type="datetime-local" name="end" required></label>
+    <label>For request<select name="ticket"><option value="">—</option>{% for t in openReq %}<option value="{{ t.id }}">#{{ t.id }} {{ t.machine }} · {{ t.type }}</option>{% endfor %}</select></label>
+    <label>Note<input type="text" name="note" maxlength="160" placeholder="e.g. Rebuild the glue pot"></label>
+    <button class="btn go">Plan it</button></form></div>{% endif %}
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th>From</th><th>To</th><th>For</th><th>By</th><th></th></tr></thead><tbody>
+  {% for w in wins %}<tr class="{% if w.cancelled or w.end < now %}muted{% endif %}"><td><b>{{ w.machine.name }}</b></td><td class="nw">{{ w.start|day }} {{ w.start|clock }}</td><td class="nw">{{ w.end|day }} {{ w.end|clock }}</td>
+    <td>{% if w.ticket %}<a href="?tab=requests#r{{ w.ticket_id }}">#{{ w.ticket_id }} {{ w.ticket.type }}</a>{% endif %}{% if w.note %} {{ w.note }}{% endif %}{% if w.cancelled %} <span class="pill idle">CANCELLED</span>{% endif %}</td><td>{{ w.by }}</td>
+    <td>{% if canPlan and not w.cancelled and w.end > now %}<form method="post" action="/maintenance/do/windowCancel">{% csrf_token %}<input type="hidden" name="id" value="{{ w.pk }}"><input type="hidden" name="back" value="{{ here }}"><button class="linkbtn" data-confirm="Cancel this window? The Scheduler plans production in it again.">Cancel</button></form>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="6" class="empty">No windows planned.</td></tr>{% endfor %}</tbody></table></div></div>
+
+{% elif tab == "assets" %}
+  <form class="sv-filter" method="get"><input type="hidden" name="tab" value="assets">
+    <label>Machine<select name="machine"><option value="">All</option>{% for m in machines %}<option {% if m == fmachine %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></label>
+    <button class="btn go" type="submit">Show</button></form>
+  <div class="mt-assets">
+    <div class="card"><h2>Assets</h2>
+      {% for r in tree %}<a class="mt-anode {% if sel and sel.pk == r.a.pk %}on{% endif %} {% if not r.a.active %}muted{% endif %}" style="padding-left:{{ r.depth|add:1 }}em" href="?tab=assets&amp;a={{ r.a.pk }}{% if fmachine %}&amp;machine={{ fmachine|urlencode }}{% endif %}">
+        <b>{{ r.a.name }}</b> <span class="note">{{ r.a.get_kind_display }}{% if r.depth == 0 %} · {{ r.a.machine }}{% endif %}{% if r.a.tag %} · {{ r.a.tag }}{% endif %}</span></a>
+      {% empty %}<p class="muted">No assets yet.{% if canAssets %} Add a machine below, then its assemblies and components under it.{% endif %}</p>{% endfor %}
+      {% if canAssets %}<details class="mt-hist" {% if not tree %}open{% endif %}><summary>Add an asset</summary>{% include "maintenance/_asset_form.html" with a=None %}</details>{% endif %}
+    </div>
+    <div>{% if sel %}<div class="card"><h2>{{ sel.path }}</h2>
+        <p class="note">{{ sel.get_kind_display }} · {{ sel.machine }}{% if sel.tag %} · tag {{ sel.tag }}{% endif %}{% if sel.make or sel.model %} · {{ sel.make }} {{ sel.model }}{% endif %}{% if sel.serial %} · s/n {{ sel.serial }}{% endif %}{% if sel.installed %} · installed {{ sel.installed|date:"M j, Y" }}{% endif %}{% if not sel.active %} · <b>out of use</b>{% endif %}</p>
+        {% if sel.notes %}<p>{{ sel.notes|linebreaksbr }}</p>{% endif %}
+        {% if sel.cal_every %}<p class="note">Calibrated every {{ sel.cal_every }} days{% if sel.cal_spec %} · {{ sel.cal_spec }}{% endif %} · last {% if sel.cal_last %}{{ sel.cal_last|date:"M j, Y" }} ({{ sel.cal_status }}){% else %}never{% endif %}{% if sel.cal_due %} · next due {{ sel.cal_due|date:"M j, Y" }}{% endif %}</p>{% endif %}
+        {% if canAssets %}<details class="mt-hist"><summary>Change</summary>{% include "maintenance/_asset_form.html" with a=sel %}</details>{% endif %}
+        {% if canWork %}<form method="post" action="/maintenance/do/assetEvent" class="mt-inline">{% csrf_token %}<input type="hidden" name="asset" value="{{ sel.pk }}"><input type="hidden" name="back" value="{{ here }}">
+          <select name="kind" aria-label="What happened">{% for k, l in events %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select>
+          <input type="text" name="text" maxlength="2000" placeholder="What (e.g. new bearing, serial 1234)" aria-label="What"><button class="btn">Record</button></form>{% endif %}</div>
+      <div class="card"><h2>History</h2><div class="tblwrap"><table class="st"><tbody>
+        {% for h in hist %}<tr><td class="nw">{{ h.t|day }}</td><td><span class="pill idle">{{ h.kind|upper }}</span></td><td>{{ h.text }}{% if h.ticket and h.kind != "request" %} <a class="note" href="?tab={% if h.ticket.status == 'Closed' %}done{% else %}requests{% endif %}#r{{ h.ticket_id|default:h.ticket.id }}">#{{ h.ticket.id }}</a>{% endif %}</td><td class="note">{{ h.by }}</td></tr>
+        {% empty %}<tr><td class="empty">Nothing recorded on it yet. Requests, parts and PMs that name this asset show here.</td></tr>{% endfor %}</tbody></table></div></div>
+    {% else %}<div class="card"><p class="muted">Pick an asset for its history: the requests on it, parts used, replacements and calibrations.</p></div>{% endif %}
+      <div class="card"><h2>Meters</h2><p class="note">A PM can come due on a meter (PM schedule › Every … on a meter). Read by hand here, or read each minute from a machine's data field.</p>
+        <div class="tblwrap"><table class="st"><thead><tr><th>Machine</th><th>Meter</th><th class="n">Reading</th><th>Read</th><th></th></tr></thead><tbody>
+        {% for m in meters %}<tr class="{% if not m.active %}muted{% endif %}"><td>{{ m.machine }}</td><td><b>{{ m.name }}</b>{% if m.asset %} <span class="note">{{ m.asset.name }}</span>{% endif %}{% if m.source == "field" %} <span class="note">· from {{ m.field }}</span>{% endif %}</td>
+          <td class="n">{{ m.value|floatformat:"-1" }} {{ m.unit }}</td><td class="note">{% if m.read_at %}{{ m.read_at|day }} {{ m.read_at|clock }} · {{ m.read_by }}{% endif %}</td>
+          <td>{% if canWork and m.source == "manual" and m.active %}<form method="post" action="/maintenance/do/meterRead" class="mt-inline">{% csrf_token %}<input type="hidden" name="id" value="{{ m.pk }}"><input type="hidden" name="back" value="{{ here }}">
+            <input type="number" name="value" step="any" min="0" required class="qty" aria-label="New reading"><label class="chk"><input type="checkbox" name="reset" value="1"> reset</label><button class="btn">Read</button></form>{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="5" class="empty">No meters.</td></tr>{% endfor %}</tbody></table></div>
+        {% if canAssets %}<details class="mt-hist"><summary>Add a meter</summary><form method="post" action="/maintenance/do/meterSave" class="mt-grid">{% csrf_token %}<input type="hidden" name="back" value="{{ here }}">
+          <label>Machine<select name="machine" required>{% for m in machines %}<option>{{ m }}</option>{% endfor %}</select></label><label>Name<input name="name" required maxlength="80" placeholder="Knife cycles"></label>
+          <label>Unit<input name="unit" maxlength="20" value="cycles"></label><label>Asset<select name="asset"><option value="">—</option>{% for id, name, m in assetList %}<option value="{{ id }}">{{ m }} · {{ name }}</option>{% endfor %}</select></label>
+          <label>Read<select name="source">{% for k, l in sources %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label><label>Data field<input name="field" maxlength="80" placeholder="only when from the machine's data"></label>
+          <button class="btn go">Add meter</button></form></details>{% endif %}
+      </div></div>
+  </div>
+
+{% elif tab == "calibration" %}
+  <p class="muted">Gauges and instruments with a calibration interval (Assets › an instrument › Calibrated every … days). A failed one is taken out of use until it passes again.</p>
+  <div class="card"><div class="tblwrap"><table class="st"><thead><tr><th>Instrument</th><th>Spec</th><th>Last</th><th>Next due</th><th></th></tr></thead><tbody>
+  {% for r in cal %}<tr><td><a href="?tab=assets&amp;a={{ r.a.pk }}"><b>{{ r.a.name }}</b></a><div class="note">{{ r.a.machine }}{% if r.a.tag %} · {{ r.a.tag }}{% endif %}</div></td><td class="note">{{ r.a.cal_spec }}</td>
+    <td class="nw">{% if r.a.cal_last %}{{ r.a.cal_last|date:"M j, Y" }} · {{ r.a.cal_status }}{% if r.last and r.last.cert %}<div class="note">cert {{ r.last.cert }}</div>{% endif %}{% else %}<span class="muted">never</span>{% endif %}</td>
+    <td class="nw">{% if r.state == "fail" %}<span class="pill bad">FAILED · OUT OF USE</span>{% elif r.state == "due" %}<span class="pill bad">DUE {{ r.due|date:"M j" }}</span>{% elif r.state == "never" %}<span class="pill warn">NOT YET</span>{% elif r.state == "soon" %}<span class="pill warn">{{ r.due|date:"M j" }}</span>{% else %}{{ r.due|date:"M j, Y" }}{% endif %}</td>
+    <td>{% if canAssets %}<details class="inl"><summary class="btn po">Record</summary><form method="post" action="/maintenance/do/calRecord" class="mt-grid" style="margin-top:6px">{% csrf_token %}<input type="hidden" name="asset" value="{{ r.a.pk }}"><input type="hidden" name="back" value="{{ here }}">
+      <label>Date<input type="date" name="day" value="{{ today|date:'Y-m-d' }}"></label><label>Result<select name="result" required>{% for k, l in results %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+      <label>As found<input name="as_found" maxlength="200"></label><label>As left<input name="as_left" maxlength="200"></label>
+      <label>Standard used<input name="standard" maxlength="120"></label><label>Certificate #<input name="cert" maxlength="80"></label>
+      <label class="wide">Notes<input name="notes" maxlength="2000"></label><button class="btn go">Save</button></form></details>{% endif %}</td></tr>
+  {% empty %}<tr><td colspan="5" class="empty">No instruments with a calibration interval yet. Add them in Assets (kind: Instrument / gauge).</td></tr>{% endfor %}</tbody></table></div></div>
+  {% if recent %}<div class="card"><h2>Calibrations recorded</h2><div class="tblwrap"><table class="st"><thead><tr><th>Date</th><th>Instrument</th><th>Result</th><th>As found → as left</th><th>Standard · cert</th><th>By</th></tr></thead><tbody>
+    {% for c in recent %}<tr><td class="nw">{{ c.day|date:"M j, Y" }}</td><td>{{ c.asset.name }}</td><td>{{ c.get_result_display }}</td><td>{{ c.as_found }}{% if c.as_left %} → {{ c.as_left }}{% endif %}</td><td class="note">{{ c.standard }}{% if c.cert %} · {{ c.cert }}{% endif %}</td><td>{{ c.by }}</td></tr>{% endfor %}</tbody></table></div></div>{% endif %}
+{% endif %}

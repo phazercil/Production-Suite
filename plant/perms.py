@@ -25,12 +25,16 @@ PERMS = OrderedDict((k, {"key": k, "group": g, "label": l, "help": h, "roles": r
         ("tickets.work", "Work maintenance requests", "Add repair notes, change a request's status (Maintenance › Requests), log planned maintenance done and record the parts used on a machine.", SUP),
         ("pm.edit", "PM schedule", "Add, change and remove planned maintenance tasks (Maintenance › PM schedule).", SUP),
         ("inventory.edit", "Maintenance inventory", "Maintenance › Inventory: add and change items, add stock and count it.", SUP),
+        ("assets.edit", "Assets, meters and calibration", "Maintenance › Assets: the equipment tree, meters and their readings, and Calibration: record a calibration.", SUP),
+        ("maint.plan", "Plan maintenance", "Assign requests to technicians, set due dates and hours, plan maintenance windows (the Scheduler plans around them) and open corrective actions.", SUP),
     ]),
     ("Packaging", [
         ("pallets.verify", "Verify pallet tags", "Sign a pallet tag as the person who checked the pallet (with their PIN; not their own pallets).", ["operator", "maintenance", "lead", "admin"]),
         ("pallets.supervise", "Supervisor sign-off on pallet tags", "Sign a pallet tag as supervisor, and void anyone's tag.", LEAD),
     ]),
     ("Quality", [
+        ("wi.edit", "Write work instructions", "Quality › Work instructions: write and change drafts (steps, photos, videos, process parameters).", LEAD),
+        ("wi.approve", "Approve work instructions", "Approve a work instruction's revision so it's the one the kiosks show (the one before it becomes obsolete).", LEAD),
         ("quality.tolerances", "Quality settings", "Quality › QC checks, Parts & specs and Tolerances: what each stage's QC check asks, each part's drawing specs (and importing them from the asset database), how far each measurement may be under or over for every filter, and the Process Out issue list.", LEAD),
     ]),
     ("People", [

@@ -87,7 +87,7 @@ class MaintenanceTests(TestCase):
         self.assertTrue(sup_login(c, "3333", "section.maintenance", "/maintenance/")["ok"])
         r = c.get("/maintenance/").content.decode()
         self.assertIn("Belt slipping", r)
-        self.assertNotIn("Electrical", r.split("class=\"mt-reqs\"")[1])   # completed isn't pending
+        self.assertNotIn("· Electrical<", r.split("class=\"mt-reqs\"")[1])   # completed isn't pending
         for v in ("Open", "Reviewed", "In progress", "Waiting on parts", "Completed"):
             self.assertIn(f">{v}</option>", r)
         self.assertIn("Electrical", c.get("/maintenance/?tab=done").content.decode())

@@ -29,7 +29,7 @@ from .views import current_person, pin_login, touch
 
 PAGES = {p[0] for p in kscreen.PAGES if p}
 VIEWS = PAGES | {"admin"}   # Admin is its own section (/admin/) but its view is built the same way
-BUILT = {"controls", "schedule", "part-info", "model", "cameras", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
+BUILT = {"controls", "schedule", "part-info", "instructions", "model", "cameras", "qc-log", "downtime", "maintenance", "status", "end-of-shift", "team", "admin"}
 
 
 # ------------------------------------------------------------------ helpers
@@ -210,6 +210,9 @@ def view_data(s, page, request):
         cams = list(Camera.objects.filter(enabled=True, machines__name=s.station).distinct()) if s.station else []
         return {"line": s.station, "cams": [{"pk": c.pk, "name": c.name, "ms": round(every(c) * 1000), "live": c.kind == "rtsp" and c.live}
                                             for c in cams]}
+    if page == "instructions":   # work instructions for this machine and part (Quality › Work instructions)
+        from instructions.views import kiosk_data
+        return kiosk_data(s)
     if page == "part-info":
         P = kscreen.part_info(s, page_option(request, "part", None, ""))   # another part picked here stays until "Running now"
         return {"P": P, "p": P.get("p"), "tolTxt": P.get("tolTxt"), "pleat_xs": P.get("pleat_xs")}
@@ -1050,6 +1053,16 @@ def a_person_save(request, s, p):
     if not r["ok"]:
         return login_needed(request, s, r) if r.get("admin") or r.get("login") else err_in_modal(r["error"])
     return thin.done(toast=r.get("msg"), close=True)
+
+
+@action("wiAck")
+def a_wi_ack(request, s, p):
+    """Read and understood: the Instructions page comes back with it ticked."""
+    r = run(request, s, "wiAck", {"rev": p.get("rev")})
+    if not r["ok"]:
+        return login_needed(request, s, r) if r.get("login") else thin.refused(r["error"])
+    s = screen(request)
+    return render(request, "hmi/k/v_instructions.html", ctx_for(s, page="instructions", **view_data(s, "instructions", request)))
 
 
 @action("train")
